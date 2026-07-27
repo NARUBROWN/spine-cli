@@ -1,0 +1,67 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// projectConfig is deliberately small. It is the single project-level contract
+// used by Spine CLI; application-specific configuration remains in the app.
+type projectConfig struct {
+	Module     string
+	Entrypoint string
+	Port       int
+}
+
+func defaultProjectConfig(module string) projectConfig {
+	return projectConfig{Module: module, Entrypoint: ".", Port: 8080}
+}
+
+func projectConfigTemplate(config projectConfig) string {
+	return fmt.Sprintf("module = %q\nentrypoint = %q\nport = %d\n", config.Module, config.Entrypoint, config.Port)
+}
+
+func loadProjectConfig() (projectConfig, error) {
+	contents, err := os.ReadFile("spine.toml")
+	if err != nil {
+		return projectConfig{}, fmt.Errorf("spine.toml is required: %w", err)
+	}
+	config := projectConfig{Entrypoint: ".", Port: 8080}
+	for lineNumber, line := range strings.Split(string(contents), "\n") {
+		line = strings.TrimSpace(strings.SplitN(line, "#", 2)[0])
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			return projectConfig{}, fmt.Errorf("spine.toml:%d: expected key = value", lineNumber+1)
+		}
+		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		switch key {
+		case "module", "entrypoint":
+			unquoted, err := strconv.Unquote(value)
+			if err != nil || unquoted == "" {
+				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
+			}
+			if key == "module" {
+				config.Module = unquoted
+			} else {
+				config.Entrypoint = unquoted
+			}
+		case "port":
+			port, err := strconv.Atoi(value)
+			if err != nil || port < 1 || port > 65535 {
+				return projectConfig{}, fmt.Errorf("spine.toml:%d: port must be between 1 and 65535", lineNumber+1)
+			}
+			config.Port = port
+		default:
+			return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported setting %q", lineNumber+1, key)
+		}
+	}
+	if config.Module == "" {
+		return projectConfig{}, fmt.Errorf("spine.toml: module is required")
+	}
+	return config, nil
+}

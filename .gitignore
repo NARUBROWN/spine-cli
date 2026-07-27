@@ -1,0 +1,16 @@
+# Go build and test artifacts
+bin/
+.gocache/
+coverage.out
+
+# Local environment files
+.env
+.env.*
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
