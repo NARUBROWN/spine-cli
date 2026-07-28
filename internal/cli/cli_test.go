@@ -22,6 +22,16 @@ func TestRunHelp(t *testing.T) {
 	}
 }
 
+func TestRunVersionUsesProgramName(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"version"}, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errOut.String())
+	}
+	if out.String() != "spine-cli 0.1.1\n" {
+		t.Fatalf("unexpected version output: %q", out.String())
+	}
+}
+
 func TestCapabilitiesExposeImplementedAndBlockedBoundaries(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := runCapabilities([]string{"--json"}, &out, &errOut); code != 0 {

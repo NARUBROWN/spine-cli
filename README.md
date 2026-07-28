@@ -8,7 +8,8 @@ Spine 애플리케이션의 기술적인 골격을 생성하는 Go CLI입니다.
 ## 설치와 실행
 
 ```sh
-go install .
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.1.1
+spine version # spine-cli 0.1.1
 spine new todo-api --module github.com/acme/todo-api
 cd todo-api
 go mod tidy

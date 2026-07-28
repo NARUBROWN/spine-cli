@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 // Run executes the spine project generator command line interface.
 func Run(args []string, out, errOut io.Writer) int {
@@ -19,7 +19,7 @@ func Run(args []string, out, errOut io.Writer) int {
 		printHelp(out)
 		return 0
 	case "version", "--version", "-v":
-		fmt.Fprintln(out, "spine", version)
+		fmt.Fprintln(out, "spine-cli", version)
 		return 0
 	case "new":
 		return runNew(args[1:], out, errOut)
