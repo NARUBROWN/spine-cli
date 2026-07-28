@@ -33,6 +33,18 @@ func Run(args []string, out, errOut io.Writer) int {
 		return runGo([]string{"test", "./..."}, false, out, errOut)
 	case "check":
 		return runCheck(out, errOut)
+	case "inspect":
+		return runInspect(args[1:], out, errOut)
+	case "explain":
+		return runExplain(args[1:], out, errOut)
+	case "verify":
+		return runVerify(args[1:], out, errOut)
+	case "contract":
+		return runContract(args[1:], out, errOut)
+	case "doctor":
+		return runDoctor(args[1:], out, errOut)
+	case "capabilities":
+		return runCapabilities(args[1:], out, errOut)
 	case "build":
 		return runBuild(out, errOut)
 	case "completion":
@@ -50,6 +62,9 @@ func printHelp(w io.Writer) {
 Usage:
   spine new <project> [--module <module-path>]
   spine generate resource <name> [--no-register]
+  spine generate slice <name> --storage memory --field name:string
+  spine generate consumer <name> --topic <topic> --field name:string
+  spine generate websocket <name> --path </path> --field message:string
   spine generate controller <name>
   spine generate service <name>
   spine generate repository <name>
@@ -61,7 +76,18 @@ Examples:
   spine new todo-api --module github.com/acme/todo-api
   cd todo-api
   spine g resource users
+  spine g consumer orders --topic order.created --field order_id:int64
+  spine g websocket chat --path /ws/chat --field message:string
   spine dev
+  spine inspect
+  spine explain http GET /users/:id
+  spine verify
+  spine contract check --json
+  spine contract snapshot
+  spine contract diff
+  spine contract probe
+  spine doctor
+  spine capabilities --json
   spine check
   go run .`)
 }

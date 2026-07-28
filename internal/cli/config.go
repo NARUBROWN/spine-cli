@@ -10,17 +10,18 @@ import (
 // projectConfig is deliberately small. It is the single project-level contract
 // used by Spine CLI; application-specific configuration remains in the app.
 type projectConfig struct {
-	Module     string
-	Entrypoint string
-	Port       int
+	Module      string
+	Entrypoint  string
+	Composition string
+	Port        int
 }
 
 func defaultProjectConfig(module string) projectConfig {
-	return projectConfig{Module: module, Entrypoint: ".", Port: 8080}
+	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080}
 }
 
 func projectConfigTemplate(config projectConfig) string {
-	return fmt.Sprintf("module = %q\nentrypoint = %q\nport = %d\n", config.Module, config.Entrypoint, config.Port)
+	return fmt.Sprintf("module = %q\nentrypoint = %q\ncomposition = %q\nport = %d\n", config.Module, config.Entrypoint, config.Composition, config.Port)
 }
 
 func loadProjectConfig() (projectConfig, error) {
@@ -28,7 +29,7 @@ func loadProjectConfig() (projectConfig, error) {
 	if err != nil {
 		return projectConfig{}, fmt.Errorf("spine.toml is required: %w", err)
 	}
-	config := projectConfig{Entrypoint: ".", Port: 8080}
+	config := projectConfig{Entrypoint: ".", Composition: ".", Port: 8080}
 	for lineNumber, line := range strings.Split(string(contents), "\n") {
 		line = strings.TrimSpace(strings.SplitN(line, "#", 2)[0])
 		if line == "" {
@@ -40,15 +41,17 @@ func loadProjectConfig() (projectConfig, error) {
 		}
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		switch key {
-		case "module", "entrypoint":
+		case "module", "entrypoint", "composition":
 			unquoted, err := strconv.Unquote(value)
 			if err != nil || unquoted == "" {
 				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
 			}
 			if key == "module" {
 				config.Module = unquoted
-			} else {
+			} else if key == "entrypoint" {
 				config.Entrypoint = unquoted
+			} else {
+				config.Composition = unquoted
 			}
 		case "port":
 			port, err := strconv.Atoi(value)

@@ -52,25 +52,37 @@ func runNew(args []string, out, errOut io.Writer) int {
 	}
 
 	files := map[string]string{
-		"go.mod":     fmt.Sprintf("module %s\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine v0.5.1\n", module),
-		"main.go":    projectMain,
+		"go.mod":  fmt.Sprintf("module %s\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine v0.5.1\n", module),
+		"main.go": strings.ReplaceAll(projectMain, "{{MODULE}}", module),
+		filepath.Join("internal", "application", "application.go"):      projectApplication,
+		filepath.Join("internal", "application", "application_test.go"): projectApplicationTest,
 		"README.md":  strings.ReplaceAll(projectReadme, "{{MODULE}}", module),
 		"spine.toml": projectConfigTemplate(defaultProjectConfig(module)),
 		".gitignore": ".env\nbin/\ncoverage.out\n",
 	}
-	paths := []string{"go.mod", "main.go", "README.md", "spine.toml", ".gitignore"}
+	paths := []string{"go.mod", "main.go", filepath.Join("internal", "application", "application.go"), filepath.Join("internal", "application", "application_test.go"), "README.md", "spine.toml", ".gitignore"}
+	changes := make([]fileChange, 0, len(paths))
 	for _, path := range paths {
-		if err := writeFile(filepath.Join(dir, path), files[path], options); err != nil {
+		changes = append(changes, fileChange{Path: filepath.Join(dir, path), Contents: files[path], AllowOverwrite: options.Force})
+	}
+	diff := ""
+	if options.DryRun {
+		diff, err = renderFileChanges(changes)
+		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
 		}
 	}
+	if err := applyFileChanges(changes, options.DryRun); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
 	if jsonOutput {
-		_ = json.NewEncoder(out).Encode(map[string]any{"project": name.Route, "module": module, "directory": dir, "files": paths, "dry_run": options.DryRun})
+		_ = json.NewEncoder(out).Encode(map[string]any{"project": name.Route, "module": module, "directory": dir, "files": paths, "dry_run": options.DryRun, "diff": diff})
 		return 0
 	}
 	if options.DryRun {
-		fmt.Fprintf(out, "Would create Spine application in %s\n", dir)
+		fmt.Fprintf(out, "Would create Spine application in %s\n%s", dir, diff)
 		return 0
 	}
 	fmt.Fprintf(out, "Created Spine application in %s\n\nNext steps:\n  cd %s\n  go mod tidy\n  go run .\n", dir, name.Route)
@@ -81,6 +93,27 @@ const projectMain = `package main
 
 import (
 	"log"
+
+	"{{MODULE}}/internal/application"
+)
+
+func main() {
+	app, options, err := application.BuildApplication()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := app.Validate(options); err != nil {
+		log.Fatal(err)
+	}
+	if err := app.Run(options); err != nil {
+		log.Fatal(err)
+	}
+}
+`
+
+const projectApplication = `package application
+
+import (
 	"os"
 
 	"github.com/NARUBROWN/spine"
@@ -96,7 +129,8 @@ func (c *HealthController) Get() httpx.Response[map[string]string] {
 	return httpx.Response[map[string]string]{Body: map[string]string{"status": "ok"}}
 }
 
-func main() {
+// BuildApplication은 서버 실행, 계약 검사와 오프라인 검증이 함께 사용하는 composition root입니다.
+func BuildApplication() (spine.App, boot.Options, error) {
 	app := spine.New()
 	app.Constructor(NewHealthController)
 	app.Route("GET", "/health", (*HealthController).Get)
@@ -105,12 +139,21 @@ func main() {
 	if port := os.Getenv("SPINE_PORT"); port != "" {
 		address = ":" + port
 	}
-	options := boot.Options{Address: address, HTTP: &boot.HTTPOptions{}}
-	if err := app.Validate(options); err != nil {
-		log.Fatal(err)
+	return app, boot.Options{Address: address, HTTP: &boot.HTTPOptions{}}, nil
+}
+`
+
+const projectApplicationTest = `package application
+
+import "testing"
+
+func TestBuildApplicationIsValid(t *testing.T) {
+	app, options, err := BuildApplication()
+	if err != nil {
+		t.Fatalf("generated application registration is invalid: %v", err)
 	}
-	if err := app.Run(options); err != nil {
-		log.Fatal(err)
+	if err := app.Validate(options); err != nil {
+		t.Fatalf("generated application is invalid: %v", err)
 	}
 }
 `

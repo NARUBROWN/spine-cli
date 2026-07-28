@@ -67,6 +67,40 @@ func runCheck(out, errOut io.Writer) int {
 	return runGo([]string{"test", "./..."}, false, out, errOut)
 }
 
+func runVerify(args []string, out, errOut io.Writer) int {
+	warningsAsErrors := false
+	for _, argument := range args {
+		if argument == "--warnings-as-errors" {
+			warningsAsErrors = true
+		} else {
+			fmt.Fprintln(errOut, "usage: spine verify [--warnings-as-errors]")
+			return 1
+		}
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		fmt.Fprintf(errOut, "contract inspection failed: %v\n", err)
+		return 1
+	}
+	report := buildContractCheckReport(contract, warningsAsErrors)
+	for _, diagnostic := range report.Diagnostics {
+		writer := out
+		if diagnostic.Severity == "error" || (warningsAsErrors && diagnostic.Severity == "warning") {
+			writer = errOut
+		}
+		fmt.Fprintf(writer, "[%s] %s: %s (%s)\n", diagnostic.Severity, diagnostic.Code, diagnostic.Message, diagnostic.Source)
+	}
+	if !report.Valid {
+		return 1
+	}
+	if code := runCheck(out, errOut); code != 0 {
+		return code
+	}
+	fmt.Fprintln(out, "Local Spine contract verification passed (source contract, gofmt, go vet, go test).")
+	fmt.Fprintln(out, "External databases, brokers, listeners, and deployed runtime behavior were not checked.")
+	return 0
+}
+
 func unformattedFiles(root string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
@@ -96,12 +130,21 @@ func unformattedFiles(root string) ([]string, error) {
 }
 
 func runBuild(out, errOut io.Writer) int {
+	config, err := loadProjectConfig()
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
 	name, err := projectName()
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	return runGo([]string{"build", "-o", filepath.Join("bin", name), "."}, false, out, errOut)
+	if err := os.MkdirAll("bin", 0o755); err != nil {
+		fmt.Fprintf(errOut, "could not create build output directory: %v\n", err)
+		return 1
+	}
+	return runGo([]string{"build", "-o", filepath.Join("bin", name), config.Entrypoint}, false, out, errOut)
 }
 
 func projectName() (string, error) {
@@ -124,7 +167,7 @@ func runCompletion(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "usage: spine completion <powershell|bash|zsh>")
 		return 1
 	}
-	commands := "new generate g dev run test check build completion help version"
+	commands := "new generate g dev run test check inspect explain verify contract doctor capabilities build completion help version"
 	switch args[0] {
 	case "powershell":
 		fmt.Fprintf(out, "Register-ArgumentCompleter -Native -CommandName spine -ScriptBlock { param($wordToComplete) '%s'.Split(' ') | Where-Object { $_ -like \"$wordToComplete*\" } }\n", commands)

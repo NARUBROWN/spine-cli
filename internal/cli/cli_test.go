@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"go/format"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunHelp(t *testing.T) {
@@ -16,6 +19,194 @@ func TestRunHelp(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "spine new") {
 		t.Fatal("help did not include new command")
+	}
+}
+
+func TestCapabilitiesExposeImplementedAndBlockedBoundaries(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runCapabilities([]string{"--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d: %s", code, errOut.String())
+	}
+	var report capabilityReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]bool{}
+	for _, capability := range report.Capabilities {
+		states[capability.Name] = capability.Implemented
+	}
+	if !states["contract.static-inspection"] || !states["generation.project"] {
+		t.Fatalf("implemented capabilities missing: %#v", states)
+	}
+	if !states["generation.vertical-slice"] {
+		t.Fatalf("vertical slice capability missing: %#v", states)
+	}
+	if !states["generation.consumer"] || !states["generation.websocket"] {
+		t.Fatalf("message generation capabilities missing: %#v", states)
+	}
+	if !states["contract.openapi-export"] {
+		t.Fatalf("OpenAPI capability missing: %#v", states)
+	}
+	if !states["contract.asyncapi-export"] {
+		t.Fatalf("AsyncAPI capability missing: %#v", states)
+	}
+	if !states["contract.runtime-probe-partial"] {
+		t.Fatalf("partial runtime probe capability missing: %#v", states)
+	}
+	if !states["contract.structured-check"] {
+		t.Fatalf("structured contract check capability missing: %#v", states)
+	}
+	if states["contract.runtime-manifest"] || states["doctor.infrastructure-connect"] {
+		t.Fatalf("unimplemented capabilities were advertised as available: %#v", states)
+	}
+}
+
+func TestRuntimeProbeSourceAndComparison(t *testing.T) {
+	source := runtimeProbeSource("example.com/demo/internal/application")
+	if _, err := format.Source([]byte(source)); err != nil {
+		t.Fatalf("invalid runtime probe source: %v\n%s", err, source)
+	}
+	if !strings.Contains(source, `"%s\n"`) || strings.Contains(source, `"%s\\n"`) {
+		t.Fatalf("runtime probe marker must end with a real newline escape:\n%s", source)
+	}
+	static := applicationContract{
+		Complete:   true,
+		Consumers:  []namedRegistration{{Name: "order.created", Handler: "(*OrderConsumer).Handle"}},
+		WebSockets: []namedRegistration{{Name: "/ws/chat", Handler: "(*ChatSocket).Handle"}},
+	}
+	matching := compareRuntimeProbe(static, runtimeProbePayload{
+		Consumers:  []runtimeProbeRegistration{{Name: "order.created", Handler: "(*OrderConsumer).Handle"}},
+		WebSockets: []runtimeProbeRegistration{{Name: "/ws/chat", Handler: "(*ChatSocket).Handle"}},
+	})
+	if !matching.Validated || !matching.MatchesStatic || len(matching.Diagnostics) != 0 {
+		t.Fatalf("matching runtime evidence was rejected: %#v", matching)
+	}
+	matchingJSON, err := json.Marshal(matching)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(matchingJSON), `"diagnostics":[]`) {
+		t.Fatalf("empty runtime diagnostics must remain an array: %s", matchingJSON)
+	}
+	static.Diagnostics = []contractDiagnostic{{Severity: "error", Code: "TEST_STATIC_ERROR", Message: "invalid static contract"}}
+	invalidStatic := compareRuntimeProbe(static, runtimeProbePayload{
+		Consumers:  []runtimeProbeRegistration{{Name: "order.created", Handler: "(*OrderConsumer).Handle"}},
+		WebSockets: []runtimeProbeRegistration{{Name: "/ws/chat", Handler: "(*ChatSocket).Handle"}},
+	})
+	if invalidStatic.StaticValid || !invalidStatic.MatchesStatic {
+		t.Fatalf("static validity and runtime parity were conflated: %#v", invalidStatic)
+	}
+	static.Diagnostics = nil
+	mismatch := compareRuntimeProbe(static, runtimeProbePayload{
+		Consumers: []runtimeProbeRegistration{{Name: "order.changed", Handler: "(*OrderConsumer).Handle"}},
+	})
+	if mismatch.MatchesStatic || len(mismatch.Diagnostics) != 3 {
+		t.Fatalf("runtime drift was not diagnosed: %#v", mismatch)
+	}
+	codes := map[string]bool{}
+	for _, diagnostic := range mismatch.Diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	if !codes["CONSUMER_RUNTIME_REGISTRATION_MISSING"] || !codes["CONSUMER_STATIC_REGISTRATION_MISSING"] || !codes["WEBSOCKET_RUNTIME_REGISTRATION_MISSING"] {
+		t.Fatalf("unexpected runtime drift diagnostics: %#v", mismatch.Diagnostics)
+	}
+}
+
+func TestRuntimeProbeKeepsEmptyRegistriesAsArrays(t *testing.T) {
+	report := compareRuntimeProbe(applicationContract{Complete: true, Diagnostics: []contractDiagnostic{}}, runtimeProbePayload{})
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"consumers":[]`, `"websockets":[]`, `"diagnostics":[]`} {
+		if !strings.Contains(string(encoded), field) {
+			t.Fatalf("runtime probe collection is not a stable array (%s): %s", field, encoded)
+		}
+	}
+}
+
+func TestCompositionImportPathRequiresPackageBelowModuleRoot(t *testing.T) {
+	inTempDir(t)
+	if err := os.MkdirAll(filepath.Join("internal", "application"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("go.mod", []byte("module example.com/demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("spine.toml", []byte("module = \"example.com/demo\"\nentrypoint = \".\"\ncomposition = \"./internal/application\"\nport = 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, err := compositionImportPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "example.com/demo/internal/application" {
+		t.Fatalf("unexpected composition import path: %s", path)
+	}
+}
+
+func TestGenerateTypedConsumerAndWebSocketContracts(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"events", "--module", "example.com/events"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("events"); err != nil {
+		t.Fatal(err)
+	}
+	for _, arguments := range [][]string{
+		{"consumer", "order", "--topic", "order.created", "--field", "order_id:int64"},
+		{"websocket", "chat", "--path", "/ws/chat", "--field", "message:string"},
+	} {
+		out.Reset()
+		errOut.Reset()
+		if code := runGenerate(arguments, &out, &errOut); code != 0 {
+			t.Fatalf("generate %s code=%d: %s", arguments[0], code, errOut.String())
+		}
+	}
+	for _, path := range []string{
+		filepath.Join("src", "consumer", "order", "module.go"),
+		filepath.Join("src", "consumer", "order", "order_handler.go"),
+		filepath.Join("src", "consumer", "order", "order_message.go"),
+		filepath.Join("src", "websocket", "chat", "module.go"),
+		filepath.Join("src", "websocket", "chat", "chat_handler.go"),
+		filepath.Join("src", "websocket", "chat", "chat_message.go"),
+	} {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("missing generated file %s: %v", path, err)
+		}
+		if _, err := format.Source(contents); err != nil {
+			t.Fatalf("invalid generated Go source %s: %v\n%s", path, err, contents)
+		}
+	}
+	if unformatted, err := unformattedFiles("."); err != nil || len(unformatted) != 0 {
+		t.Fatalf("message generators emitted unformatted Go files: %v, %v", unformatted, err)
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contract.Consumers) != 1 || contract.Consumers[0].Name != "order.created" || messagePayloadType(contract.Consumers[0].Parameters) != "OrderEvent" {
+		t.Fatalf("unexpected consumer contract: %#v", contract.Consumers)
+	}
+	if len(contract.WebSockets) != 1 || contract.WebSockets[0].Name != "/ws/chat" || messagePayloadType(contract.WebSockets[0].Parameters) != "ChatMessage" {
+		t.Fatalf("unexpected WebSocket contract: %#v", contract.WebSockets)
+	}
+	diagnosticCodes := map[string]bool{}
+	for _, diagnostic := range contract.Diagnostics {
+		diagnosticCodes[diagnostic.Code] = true
+	}
+	if !diagnosticCodes["CONSUMER_HANDLER_NOT_IMPLEMENTED"] || !diagnosticCodes["WEBSOCKET_HANDLER_NOT_IMPLEMENTED"] {
+		t.Fatalf("generated fail-closed handlers were not diagnosed: %#v", contract.Diagnostics)
+	}
+	document, err := buildAsyncAPIDocument(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels, ok := document["channels"].(map[string]any)
+	if !ok || len(channels) != 2 {
+		t.Fatalf("generated registrations did not reach AsyncAPI: %#v", document["channels"])
 	}
 }
 
@@ -43,6 +234,9 @@ func TestGenerateResource(t *testing.T) {
 			t.Fatalf("expected generated file %s: %v", path, err)
 		}
 	}
+	if unformatted, err := unformattedFiles("."); err != nil || len(unformatted) != 0 {
+		t.Fatalf("resource generator emitted unformatted Go files: %v, %v", unformatted, err)
+	}
 }
 
 func TestGenerateLayeredComponents(t *testing.T) {
@@ -64,6 +258,121 @@ func TestGenerateLayeredComponents(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected generated file %s: %v", path, err)
 		}
+	}
+}
+
+func TestGenerateTypedVerticalSlice(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"slice", "order", "--storage", "memory", "--field", "name:string", "--field", "quantity:int"}, &out, &errOut); code != 0 {
+		t.Fatalf("slice code=%d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "development-only") {
+		t.Fatalf("slice did not disclose memory persistence limit: %s", out.String())
+	}
+	paths := []string{
+		filepath.Join("src", "order", "module.go"),
+		filepath.Join("src", "order", "order_model.go"),
+		filepath.Join("src", "order", "order_repository.go"),
+		filepath.Join("src", "order", "order_service.go"),
+		filepath.Join("src", "order", "order_controller.go"),
+		filepath.Join("src", "order", "order_service_test.go"),
+	}
+	for _, path := range paths {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("missing generated slice file %s: %v", path, err)
+		}
+		if _, err := format.Source(contents); err != nil {
+			t.Fatalf("invalid generated Go source %s: %v\n%s", path, err, contents)
+		}
+	}
+	if unformatted, err := unformattedFiles("."); err != nil || len(unformatted) != 0 {
+		t.Fatalf("vertical slice generator emitted unformatted Go files: %v, %v", unformatted, err)
+	}
+	model, err := os.ReadFile(filepath.Join("src", "order", "order_model.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`Name\s+string\s+`+"`json:\"name\"`").Match(model) || !regexp.MustCompile(`Quantity\s+int\s+`+"`json:\"quantity\"`").Match(model) {
+		t.Fatalf("typed fields missing from generated model:\n%s", model)
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contract.HTTP) != 3 || len(contract.Resources) != 1 || contractHasErrors(contract) {
+		t.Fatalf("generated slice contract is invalid: %#v", contract)
+	}
+	bindings := map[string][]handlerParameter{}
+	for _, route := range contract.HTTP {
+		bindings[route.Method+" "+route.Path] = route.Parameters
+	}
+	post := bindings["POST /order"]
+	if len(post) != 1 || post[0].Binding != "body" || post[0].Type != "*CreateOrderRequest" {
+		t.Fatalf("POST body signature missing from contract: %#v", post)
+	}
+	get := bindings["GET /order/:id"]
+	if len(get) != 1 || get[0].Binding != "path" || get[0].Key != "id" || get[0].Type != "path.Int" {
+		t.Fatalf("GET path signature missing from contract: %#v", get)
+	}
+	openAPI, err := buildOpenAPIDocument(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiPaths, ok := openAPI["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("OpenAPI paths missing: %#v", openAPI)
+	}
+	orderPath, ok := apiPaths["/order/{id}"].(map[string]any)
+	if !ok {
+		t.Fatalf("converted path missing: %#v", apiPaths)
+	}
+	getOperation, ok := orderPath["get"].(map[string]any)
+	if !ok || len(getOperation["parameters"].([]any)) != 1 {
+		t.Fatalf("OpenAPI path parameter missing: %#v", orderPath)
+	}
+	createPath := apiPaths["/order"].(map[string]any)
+	postOperation := createPath["post"].(map[string]any)
+	if _, ok := postOperation["requestBody"]; !ok {
+		t.Fatalf("OpenAPI request body missing: %#v", postOperation)
+	}
+	components := openAPI["components"].(map[string]any)
+	schemas := components["schemas"].(map[string]any)
+	requestSchema, ok := schemas["CreateOrderRequest"].(map[string]any)
+	if !ok {
+		t.Fatalf("request schema missing: %#v", schemas)
+	}
+	properties := requestSchema["properties"].(map[string]any)
+	if _, ok := properties["name"]; !ok {
+		t.Fatalf("name property missing: %#v", properties)
+	}
+	if _, ok := properties["quantity"]; !ok {
+		t.Fatalf("quantity property missing: %#v", properties)
+	}
+}
+
+func TestSliceRequiresExplicitStorageAndFields(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runGenerate([]string{"slice", "order", "--field", "name:string", "--no-register"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "--storage memory") {
+		t.Fatalf("missing storage should fail explicitly: code=%d, stderr=%s", code, errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join("src", "order")); !os.IsNotExist(err) {
+		t.Fatalf("failed slice generation wrote partial files: %v", err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"slice", "order", "--storage", "memory", "--no-register"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "at least one --field") {
+		t.Fatalf("missing fields should fail explicitly: code=%d, stderr=%s", code, errOut.String())
 	}
 }
 
@@ -92,7 +401,7 @@ func TestParseResourceName(t *testing.T) {
 	}
 }
 
-func TestGenerateResourceRegistersInMain(t *testing.T) {
+func TestGenerateResourceRegistersInCheckedCompositionRoot(t *testing.T) {
 	inTempDir(t)
 	if err := os.WriteFile("go.mod", []byte("module example.com/demo\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -103,12 +412,13 @@ func TestGenerateResourceRegistersInMain(t *testing.T) {
 	main := `package main
 
 import (
-    "github.com/NARUBROWN/spine"
+    framework "github.com/NARUBROWN/spine"
+    config "github.com/NARUBROWN/spine/pkg/boot"
 )
 
-func main() {
-    app := spine.New()
-    _ = app
+func BuildApplication() (framework.App, config.Options, error) {
+    app := framework.New()
+    return app, config.Options{}, nil
 }
 
 `
@@ -123,7 +433,7 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), `receipt "example.com/demo/src/receipt"`) || !strings.Contains(string(got), "receipt.Register(app)") {
+	if !strings.Contains(string(got), `receipt "example.com/demo/src/receipt"`) || !strings.Contains(string(got), "if err := receipt.Register(app); err != nil") || !strings.Contains(string(got), "return nil, config.Options{}, err") {
 		t.Fatalf("resource was not registered:\n%s", got)
 	}
 	if code := runGenerate([]string{"resource", "receipt", "--register", "--force"}, &out, &errOut); code != 0 {
@@ -132,6 +442,38 @@ func main() {
 	got, _ = os.ReadFile("main.go")
 	if strings.Count(string(got), "receipt.Register(app)") != 1 {
 		t.Fatal("resource registration was duplicated")
+	}
+}
+
+func TestGenerateResourceRejectsUncheckedCompositionRootAtomically(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("go.mod", []byte("module example.com/demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("spine.toml", []byte("module = \"example.com/demo\"\nentrypoint = \".\"\nport = 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	main := `package main
+
+import "github.com/NARUBROWN/spine"
+
+func main() {
+	app := spine.New()
+	_ = app
+}
+`
+	if err := os.WriteFile("main.go", []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runGenerate([]string{"resource", "receipt", "--register"}, &out, &errOut); code == 0 {
+		t.Fatal("unchecked composition root was accepted")
+	}
+	if !strings.Contains(errOut.String(), "must return (spine.App, boot.Options, error)") {
+		t.Fatalf("unexpected error: %s", errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join("src", "receipt")); !os.IsNotExist(err) {
+		t.Fatalf("failed registration left generated files behind: %v", err)
 	}
 }
 
@@ -147,6 +489,9 @@ func TestGenerateDryRunDoesNotWrite(t *testing.T) {
 	if !strings.Contains(out.String(), `"dry_run":true`) {
 		t.Fatalf("expected JSON dry_run output: %s", out.String())
 	}
+	if !strings.Contains(out.String(), `"diff":"--- /dev/null\n+++ src/service/billing_service.go`) {
+		t.Fatalf("expected exact dry-run diff in JSON output: %s", out.String())
+	}
 }
 
 func TestNewCreatesSpineTomlAndCurrentSpineVersion(t *testing.T) {
@@ -159,7 +504,7 @@ func TestNewCreatesSpineTomlAndCurrentSpineVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(config), `module = "example.com/todo"`) || !strings.Contains(string(config), "port = 8080") {
+	if !strings.Contains(string(config), `module = "example.com/todo"`) || !strings.Contains(string(config), `composition = "./internal/application"`) || !strings.Contains(string(config), "port = 8080") {
 		t.Fatalf("unexpected config: %s", config)
 	}
 	mod, err := os.ReadFile(filepath.Join("todo", "go.mod"))
@@ -168,6 +513,597 @@ func TestNewCreatesSpineTomlAndCurrentSpineVersion(t *testing.T) {
 	}
 	if !strings.Contains(string(mod), "github.com/NARUBROWN/spine v0.5.1") {
 		t.Fatalf("unexpected go.mod: %s", mod)
+	}
+}
+
+func TestNewCreatesReusableCompositionRoot(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d: %s", code, errOut.String())
+	}
+	mainSource, err := os.ReadFile(filepath.Join("todo", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	applicationSource, err := os.ReadFile(filepath.Join("todo", "internal", "application", "application.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	applicationTest, err := os.ReadFile(filepath.Join("todo", "internal", "application", "application_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainSource), `"example.com/todo/internal/application"`) || !strings.Contains(string(mainSource), "application.BuildApplication()") {
+		t.Fatalf("main.go does not use the reusable composition root:\n%s", mainSource)
+	}
+	if !strings.Contains(string(applicationSource), "func BuildApplication() (spine.App, boot.Options, error)") {
+		t.Fatalf("application.go does not expose BuildApplication:\n%s", applicationSource)
+	}
+	if !strings.Contains(string(applicationTest), "app.Validate(options)") {
+		t.Fatalf("generated application test does not validate the offline contract:\n%s", applicationTest)
+	}
+}
+
+func TestGeneratedResourceAndApplicationInspection(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"resource", "orders"}, &out, &errOut); code != 0 {
+		t.Fatalf("generate code=%d: %s", code, errOut.String())
+	}
+	applicationSource, err := os.ReadFile(filepath.Join("internal", "application", "application.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(applicationSource), `orders "example.com/todo/src/orders"`) || !strings.Contains(string(applicationSource), "orders.Register(app)") {
+		t.Fatalf("resource was not registered through the composition root:\n%s", applicationSource)
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.AnalysisMode != "static-source" || !contract.Complete || len(contract.Resources) != 1 || len(contract.HTTP) != 2 || len(contract.Constructors) != 4 {
+		t.Fatalf("unexpected contract: %#v", contract)
+	}
+	dependencies := map[string][]string{}
+	for _, constructor := range contract.Constructors {
+		dependencies[constructor.Target] = constructor.Dependencies
+	}
+	if got := dependencies["NewOrdersService"]; len(got) != 1 || got[0] != "*OrdersRepository" {
+		t.Fatalf("constructor dependency graph was not resolved: %#v", dependencies)
+	}
+	if contractHasErrors(contract) {
+		t.Fatalf("generated application contract has errors: %#v", contract.Diagnostics)
+	}
+}
+
+func TestInspectionScopesCompositionAndRejectsUncertainRegistrations(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("go.mod", []byte("module example.com/app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("spine.toml", []byte("module = \"example.com/app\"\nentrypoint = \".\"\ncomposition = \".\"\nport = 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `package main
+
+import "github.com/NARUBROWN/spine"
+
+func BuildApplication() spine.App {
+	app := spine.New()
+	app.Route("GET", "/active", (*Controller).Active)
+	if enabled {
+		app.Route("GET", "/conditional", (*Controller).Conditional)
+	}
+	registerHelpers(app)
+	deferred := func() {
+		app.Route("GET", "/deferred", (*Controller).Deferred)
+	}
+	_ = deferred
+	return app
+}
+
+func unrelated() {
+	app := spine.New()
+	app.Route("GET", "/unrelated", (*Controller).Unrelated)
+}
+
+func registerHelpers(app spine.App) {}
+
+var enabled bool
+type Controller struct{}
+func (*Controller) Active() {}
+func (*Controller) Conditional() {}
+func (*Controller) Deferred() {}
+func (*Controller) Unrelated() {}
+`
+	if err := os.WriteFile("application.go", []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.Complete {
+		t.Fatalf("uncertain composition was marked complete: %#v", contract.Diagnostics)
+	}
+	paths := map[string]bool{}
+	for _, route := range contract.HTTP {
+		paths[route.Path] = true
+	}
+	if !paths["/active"] || !paths["/conditional"] || paths["/deferred"] || paths["/unrelated"] {
+		t.Fatalf("inspection escaped the executed composition scope: %#v", contract.HTTP)
+	}
+	codes := map[string]bool{}
+	for _, diagnostic := range contract.Diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	for _, code := range []string{"REGISTRATION_CONDITIONAL", "REGISTRATION_HELPER_UNRESOLVED", "DEFERRED_REGISTRATION_UNRESOLVED"} {
+		if !codes[code] {
+			t.Fatalf("missing %s diagnostic: %#v", code, contract.Diagnostics)
+		}
+	}
+}
+
+func TestDynamicRegistrationsFailStaticCompleteness(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("go.mod", []byte("module example.com/app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("spine.toml", []byte("module = \"example.com/app\"\nentrypoint = \".\"\ncomposition = \".\"\nport = 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `package main
+import "github.com/NARUBROWN/spine"
+func BuildApplication() spine.App {
+	app := spine.New()
+	method, path, topic := "GET", "/dynamic", "event.dynamic"
+	app.Route(method, path, (*Controller).Get)
+	_ = app.Consumers().Register(topic, (*Controller).Consume)
+	return app
+}
+type Controller struct{}
+func (*Controller) Get() {}
+func (*Controller) Consume() error { return nil }
+`
+	if err := os.WriteFile("application.go", []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := map[string]string{}
+	for _, diagnostic := range contract.Diagnostics {
+		codes[diagnostic.Code] = diagnostic.Severity
+	}
+	if codes["HTTP_ROUTE_DYNAMIC"] != "error" || codes["CONSUMER_REGISTRATION_DYNAMIC"] != "error" || contract.Complete {
+		t.Fatalf("dynamic registrations did not fail completeness: %#v", contract.Diagnostics)
+	}
+	var out, errOut bytes.Buffer
+	if code := runContract([]string{"check", "--json"}, &out, &errOut); code == 0 {
+		t.Fatalf("structured check accepted an incomplete contract: %s", out.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runContract([]string{"snapshot"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "error diagnostics") {
+		t.Fatalf("snapshot accepted an incomplete contract: code=%d, stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runContract([]string{"export", "--format", "openapi", "--output", "openapi.json"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "error diagnostics") {
+		t.Fatalf("export accepted an incomplete contract: code=%d, stderr=%s", code, errOut.String())
+	}
+	if _, err := os.Stat("openapi.json"); !os.IsNotExist(err) {
+		t.Fatalf("failed export left an artifact: %v", err)
+	}
+}
+
+func TestContractCheckProvidesStructuredPolicyResult(t *testing.T) {
+	valid := applicationContract{SchemaVersion: contractSchemaVersion, AnalysisMode: "static-source", Complete: true, Diagnostics: []contractDiagnostic{}}
+	report := buildContractCheckReport(valid, false)
+	if !report.Valid || !report.AnalysisComplete || report.Diagnostics == nil {
+		t.Fatalf("valid structured check report is unstable: %#v", report)
+	}
+	warning := valid
+	warning.Diagnostics = []contractDiagnostic{{Severity: "warning", Code: "SECURITY_WARNING", Message: "review required"}}
+	if report := buildContractCheckReport(warning, false); !report.Valid || report.WarningCount != 1 {
+		t.Fatalf("warning policy unexpectedly failed: %#v", report)
+	}
+	if report := buildContractCheckReport(warning, true); report.Valid || report.WarningCount != 1 {
+		t.Fatalf("warnings-as-errors policy did not fail: %#v", report)
+	}
+}
+
+func TestContractCheckCommandEmitsMachineReadableEvidence(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runContract([]string{"check", "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("check code=%d: %s", code, errOut.String())
+	}
+	var report contractCheckReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.Valid || !report.AnalysisComplete || report.SchemaVersion != contractCheckSchemaVersion || len(report.EvidenceBoundary) != 3 || report.Diagnostics == nil {
+		t.Fatalf("unexpected contract check evidence: %#v", report)
+	}
+}
+
+func TestApplyFileChangesPreflightPreventsPartialWrites(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("blocked.txt", []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := applyFileChanges([]fileChange{
+		{Path: "created.txt", Contents: "new"},
+		{Path: "blocked.txt", Contents: "replacement"},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
+		t.Fatalf("expected overwrite preflight error, got %v", err)
+	}
+	if _, err := os.Stat("created.txt"); !os.IsNotExist(err) {
+		t.Fatalf("preflight failure left a partial file: %v", err)
+	}
+	contents, err := os.ReadFile("blocked.txt")
+	if err != nil || string(contents) != "original" {
+		t.Fatalf("existing file changed after preflight failure: %q, %v", contents, err)
+	}
+}
+
+func TestGenerationLockPreventsConcurrentCompositionWrites(t *testing.T) {
+	inTempDir(t)
+	first, err := acquireProjectLock(generationLockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acquireProjectLock(generationLockPath); err == nil || !strings.Contains(err.Error(), "another Spine generation") {
+		t.Fatalf("concurrent generation lock was accepted: %v", err)
+	}
+	first.release()
+	second, err := acquireProjectLock(generationLockPath)
+	if err != nil {
+		t.Fatalf("released generation lock could not be reacquired: %v", err)
+	}
+	second.release()
+}
+
+func TestGenerationLockRecoversOnlyStaleRegularFile(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile(generationLockPath, []byte("abandoned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-generationLockTTL - time.Minute)
+	if err := os.Chtimes(generationLockPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireProjectLock(generationLockPath)
+	if err != nil {
+		t.Fatalf("stale generation lock was not recovered: %v", err)
+	}
+	lock.release()
+	if err := os.Symlink("missing-target", generationLockPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acquireProjectLock(generationLockPath); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("non-regular generation lock was removed or accepted: %v", err)
+	}
+}
+
+func TestGenerationLockDoesNotReleaseReplacementOwner(t *testing.T) {
+	inTempDir(t)
+	lock, err := acquireProjectLock(generationLockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(generationLockPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(generationLockPath, []byte("replacement-owner\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lock.release()
+	contents, err := os.ReadFile(generationLockPath)
+	if err != nil || string(contents) != "replacement-owner\n" {
+		t.Fatalf("previous owner removed a replacement generation lock: %q, %v", contents, err)
+	}
+}
+
+func TestInspectFindsConsumersAndWebSockets(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("go.mod", []byte("module example.com/app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("spine.toml", []byte("module = \"example.com/app\"\nentrypoint = \".\"\ncomposition = \".\"\nport = 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `package main
+
+import (
+	"context"
+
+	"github.com/NARUBROWN/spine"
+	"github.com/NARUBROWN/spine/pkg/boot"
+	"github.com/NARUBROWN/spine/pkg/route"
+	"github.com/NARUBROWN/spine/pkg/ws"
+)
+
+func BuildApplication() spine.App {
+	app := spine.New()
+	_ = boot.Options{
+		Kafka: &boot.KafkaOptions{AllowInsecureTransport: true},
+		HTTP: &boot.HTTPOptions{WebSocket: boot.WebSocketOptions{AllowedOrigins: []string{"*"}}},
+	}
+	app.Route("GET", "/orders", (*Socket).HTTP, route.WithInterceptors(routeAuth))
+	app.InterceptorFor(boot.InterceptorWebSocket, wsAuth)
+	_ = app.Consumers().Register("order.created", (*Consumer).Handle)
+	_ = app.WebSocket().Register("/ws/orders", (*Socket).Handle)
+	return app
+}
+
+type Consumer struct{}
+type Socket struct{}
+type Message struct {
+	Value string ` + "`json:\"value\"`" + `
+}
+
+func (c *Consumer) Handle(ctx context.Context, eventName string, message Message) error { return nil }
+func (s *Socket) Handle(ctx context.Context, id ws.ConnectionID, message Message) error { return nil }
+func (s *Socket) HTTP() {}
+`
+	if err := os.WriteFile("application.go", []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contract.Consumers) != 1 || contract.Consumers[0].Name != "order.created" {
+		t.Fatalf("consumer registration missing: %#v", contract.Consumers)
+	}
+	if len(contract.WebSockets) != 1 || contract.WebSockets[0].Name != "/ws/orders" {
+		t.Fatalf("WebSocket registration missing: %#v", contract.WebSockets)
+	}
+	if len(contract.HTTP) != 1 || len(contract.HTTP[0].Interceptors) != 1 || contract.HTTP[0].Interceptors[0] != "routeAuth" {
+		t.Fatalf("route interceptor missing: %#v", contract.HTTP)
+	}
+	if len(contract.Interceptors) != 1 || contract.Interceptors[0].Scope != "boot.InterceptorWebSocket" || contract.Interceptors[0].Target != "wsAuth" {
+		t.Fatalf("scoped interceptor missing: %#v", contract.Interceptors)
+	}
+	diagnosticCodes := map[string]bool{}
+	for _, diagnostic := range contract.Diagnostics {
+		diagnosticCodes[diagnostic.Code] = true
+	}
+	if !diagnosticCodes["INSECURE_TRANSPORT_ENABLED"] || !diagnosticCodes["WEBSOCKET_WILDCARD_ORIGIN"] {
+		t.Fatalf("security configuration diagnostics missing: %#v", contract.Diagnostics)
+	}
+	if len(contract.Configuration) < 5 {
+		t.Fatalf("boot configuration was not expanded into the contract: %#v", contract.Configuration)
+	}
+	if len(contract.Consumers[0].Parameters) != 3 || contract.Consumers[0].Parameters[2].Binding != "payload" {
+		t.Fatalf("consumer payload signature missing: %#v", contract.Consumers[0])
+	}
+	if len(contract.WebSockets[0].Parameters) != 3 || contract.WebSockets[0].Parameters[1].Binding != "connection" || contract.WebSockets[0].Parameters[2].Binding != "payload" {
+		t.Fatalf("WebSocket payload signature missing: %#v", contract.WebSockets[0])
+	}
+	asyncAPI, err := buildAsyncAPIDocument(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels := asyncAPI["channels"].(map[string]any)
+	operations := asyncAPI["operations"].(map[string]any)
+	if len(channels) != 2 || len(operations) != 2 {
+		t.Fatalf("AsyncAPI registrations missing: channels=%#v operations=%#v", channels, operations)
+	}
+	consumerChannel, ok := channels["consumer_order_created"].(map[string]any)
+	if !ok || consumerChannel["address"] != "order.created" {
+		t.Fatalf("consumer channel missing: %#v", channels)
+	}
+	components := asyncAPI["components"].(map[string]any)
+	schemas := components["schemas"].(map[string]any)
+	if _, ok := schemas["Message"]; !ok {
+		t.Fatalf("AsyncAPI payload schema missing: %#v", schemas)
+	}
+}
+
+func TestContractSnapshotDiffAndExplain(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"resource", "orders"}, &out, &errOut); code != 0 {
+		t.Fatalf("generate code=%d: %s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runContract([]string{"snapshot"}, &out, &errOut); code != 0 {
+		t.Fatalf("snapshot code=%d: %s", code, errOut.String())
+	}
+	if _, err := os.Stat(defaultContractSnapshot); err != nil {
+		t.Fatalf("contract snapshot was not created: %v", err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runContract([]string{"diff"}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "matches") {
+		t.Fatalf("unchanged diff code=%d, stdout=%s, stderr=%s", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runExplain([]string{"http", "GET", "/orders/:id"}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "BeforeResponse") || !strings.Contains(out.String(), "static-source") {
+		t.Fatalf("explain code=%d, stdout=%s, stderr=%s", code, out.String(), errOut.String())
+	}
+	modulePath := filepath.Join("src", "orders", "module.go")
+	contents, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(contents), "/orders/:id", "/orders/:orderId", 1)
+	if err := os.WriteFile(modulePath, []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runContract([]string{"diff"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "- http: GET /orders/:id") || !strings.Contains(errOut.String(), "+ http: GET /orders/:orderId") {
+		t.Fatalf("changed diff code=%d, stdout=%s, stderr=%s", code, out.String(), errOut.String())
+	}
+}
+
+func TestDoctorReportsOfflineEvidenceBoundary(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runDoctor([]string{"--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("doctor code=%d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), `"scope": "offline"`) || !strings.Contains(out.String(), `"ok": true`) || !strings.Contains(out.String(), "external databases") {
+		t.Fatalf("doctor did not report its evidence boundary: %s", out.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runDoctor([]string{"--connect"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "not implemented") {
+		t.Fatalf("doctor --connect must fail explicitly: code=%d, stderr=%s", code, errOut.String())
+	}
+}
+
+func TestInspectRejectsAmbiguousRoutes(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("go.mod", []byte("module example.com/app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("spine.toml", []byte("module = \"example.com/app\"\nentrypoint = \".\"\ncomposition = \".\"\nport = 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `package main
+import "github.com/NARUBROWN/spine"
+func BuildApplication() spine.App {
+	app := spine.New()
+	app.Route("GET", "/users/:id", (*Controller).ByID)
+	app.Route("GET", "/users/me", (*Controller).Me)
+	return app
+}
+type Controller struct{}
+`
+	if err := os.WriteFile("application.go", []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contractHasErrors(contract) {
+		t.Fatalf("ambiguous route was not rejected: %#v", contract.Diagnostics)
+	}
+	found := false
+	for _, diagnostic := range contract.Diagnostics {
+		found = found || diagnostic.Code == "HTTP_ROUTE_AMBIGUOUS"
+	}
+	if !found {
+		t.Fatalf("missing HTTP_ROUTE_AMBIGUOUS diagnostic: %#v", contract.Diagnostics)
+	}
+}
+
+func TestSourceStateWatchesGoModuleAndProjectConfig(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("main.go", []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := sourceState(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("spine.toml", []byte("module = \"example.com/app\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	afterConfig, err := sourceState(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == afterConfig {
+		t.Fatal("adding spine.toml did not change the development source state")
+	}
+	if err := os.WriteFile("go.mod", []byte("module example.com/app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	afterModule, err := sourceState(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterConfig == afterModule {
+		t.Fatal("adding go.mod did not change the development source state")
+	}
+}
+
+func TestBuildDevBinaryBuildsConfiguredEntrypoint(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("go.mod", []byte("module example.com/devapp\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("main.go", []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var errOut bytes.Buffer
+	binary, directory, err := buildDevBinary(projectConfig{Entrypoint: "."}, &errOut)
+	if err != nil {
+		t.Fatalf("build failed: %v, stderr=%s", err, errOut.String())
+	}
+	defer os.RemoveAll(directory)
+	if info, err := os.Stat(binary); err != nil || info.IsDir() {
+		t.Fatalf("development binary missing: %v", err)
+	}
+}
+
+func TestRunBuildUsesConfiguredEntrypointAndCreatesBin(t *testing.T) {
+	inTempDir(t)
+	if err := os.MkdirAll(filepath.Join("cmd", "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("go.mod", []byte("module example.com/my-api\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("spine.toml", []byte("module = \"example.com/my-api\"\nentrypoint = \"./cmd/api\"\ncomposition = \"./cmd/api\"\nport = 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("main.go", []byte("this root package must not be built\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("cmd", "api", "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runBuild(&out, &errOut); code != 0 {
+		t.Fatalf("build code=%d: %s", code, errOut.String())
+	}
+	if info, err := os.Stat(filepath.Join("bin", "my-api")); err != nil || info.IsDir() {
+		t.Fatalf("configured entrypoint binary missing: %v", err)
 	}
 }
 
