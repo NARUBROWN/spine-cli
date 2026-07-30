@@ -25,6 +25,10 @@ type capabilityDefinition struct {
 
 func currentCapabilities() capabilityReport {
 	capabilities := []capabilityDefinition{
+		{Name: "agent.command-schema", Implemented: true, Stability: "alpha", Evidence: "machine-readable arguments, options, side effects, and output support"},
+		{Name: "agent.project-context", Implemented: true, Stability: "alpha", Evidence: "bounded project, capability, doctor, and contract context with next actions"},
+		{Name: "agent.result-protocol", Implemented: true, Stability: "alpha", Evidence: "versioned success and error envelope for --json and --format json"},
+		{Name: "generation.optimistic-concurrency", Implemented: true, Stability: "alpha", Evidence: "dry-run base hash and --if-match guard over every planned target"},
 		{Name: "generation.project", Implemented: true, Stability: "alpha", Evidence: "spine new with reusable composition root and validation test"},
 		{Name: "generation.resource.http-get", Implemented: true, Stability: "alpha", Evidence: "resource generator with AST registration"},
 		{Name: "generation.controller", Implemented: true, Stability: "alpha"},

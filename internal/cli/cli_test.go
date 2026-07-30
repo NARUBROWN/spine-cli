@@ -27,8 +27,192 @@ func TestRunVersionUsesProgramName(t *testing.T) {
 	if code := Run([]string{"version"}, &out, &errOut); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, errOut.String())
 	}
-	if out.String() != "spine-cli 0.1.1\n" {
+	if out.String() != "spine-cli 0.1.3\n" {
 		t.Fatalf("unexpected version output: %q", out.String())
+	}
+}
+
+func TestJSONProtocolWrapsSuccessAndStructuredFailure(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"schema", "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("schema code=%d: %s", code, errOut.String())
+	}
+	var success protocolResult
+	if err := json.Unmarshal(out.Bytes(), &success); err != nil {
+		t.Fatalf("decode protocol success: %v\n%s", err, out.String())
+	}
+	if !success.OK || success.SchemaVersion != protocolSchemaVersion || success.Command != "schema" || success.Result == nil {
+		t.Fatalf("unexpected success envelope: %#v", success)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := Run([]string{"generate", "--json"}, &out, &errOut); code != 2 {
+		t.Fatalf("usage code=%d, stdout=%s, stderr=%s", code, out.String(), errOut.String())
+	}
+	var failure protocolResult
+	if err := json.Unmarshal(out.Bytes(), &failure); err != nil {
+		t.Fatalf("decode protocol failure: %v\n%s", err, out.String())
+	}
+	if failure.OK || failure.Error == nil || failure.Error.Code != "USAGE_ERROR" || failure.ExitCode != 2 || !failure.Error.Retryable {
+		t.Fatalf("unexpected failure envelope: %#v", failure)
+	}
+}
+
+func TestCommandSchemaDescribesAgentSideEffects(t *testing.T) {
+	report := currentCommandSchema()
+	commands := map[string]commandDefinition{}
+	for _, command := range report.Commands {
+		commands[command.Name] = command
+	}
+	generate := commands["generate"]
+	if !generate.Effects.WritesFiles || !generate.SupportsJSON || !generate.SupportsDryRun {
+		t.Fatalf("generate side effects are incomplete: %#v", generate)
+	}
+	if _, ok := generate.Options["if-match"]; !ok {
+		t.Fatalf("generate optimistic concurrency option missing: %#v", generate.Options)
+	}
+	if !commands["dev"].Effects.LongRunning || commands["context"].Effects.WritesFiles {
+		t.Fatalf("command effects are misleading: %#v", commands)
+	}
+}
+
+func TestDevEventStreamKeepsProcessOutputAsJSONLines(t *testing.T) {
+	var out bytes.Buffer
+	sink := newDevEventSink(&out)
+	sink.emit("process_started", map[string]any{"pid": 42, "readiness_observed": false})
+	writer := newDevEventWriter(sink, "stdout")
+	for _, chunk := range []string{"hel", "lo\n\nwor", "ld"} {
+		if _, err := writer.Write([]byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writer.Flush()
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("event stream lines=%d:\n%s", len(lines), out.String())
+	}
+	wantedOutput := []string{"hello", "", "world"}
+	for index, line := range lines {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("invalid JSONL event: %v\n%s", err, line)
+		}
+		if event["schema_version"] != "spine.dev-event/v1alpha1" {
+			t.Fatalf("event schema missing: %#v", event)
+		}
+		if index > 0 && event["line"] != wantedOutput[index-1] {
+			t.Fatalf("process output was split or dropped: got %#v, want %q", event["line"], wantedOutput[index-1])
+		}
+	}
+}
+
+func TestGlobalRootRunsCommandWithoutChangingCallerDirectory(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	before, _ := os.Getwd()
+	out.Reset()
+	errOut.Reset()
+	if code := Run([]string{"context", "--root", filepath.Join(before, "todo"), "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("context --root code=%d: %s\n%s", code, errOut.String(), out.String())
+	}
+	after, _ := os.Getwd()
+	if after != before {
+		t.Fatalf("global root leaked cwd: before=%s after=%s", before, after)
+	}
+}
+
+func TestDryRunBaseHashGuardsGenerationApply(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo", "--dry-run", "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("dry-run code=%d: %s", code, errOut.String())
+	}
+	var plan struct {
+		BaseHash string          `json:"base_hash"`
+		Changes  []plannedChange `json:"changes"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.BaseHash == "" || len(plan.Changes) == 0 || plan.Changes[0].Operation != "create" {
+		t.Fatalf("incomplete generation plan: %#v", plan)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runNew([]string{"todo", "--module", "example.com/todo", "--if-match", plan.BaseHash}, &out, &errOut); code != 0 {
+		t.Fatalf("matching plan was rejected: code=%d", code)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runNew([]string{"todo", "--module", "example.com/todo", "--force", "--if-match", plan.BaseHash}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "changed since dry-run") {
+		t.Fatalf("stale plan was accepted: code=%d, stderr=%s", code, errOut.String())
+	}
+}
+
+func TestAgentContextExplainAndVerificationJSON(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runContext([]string{"--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("context code=%d: %s\n%s", code, errOut.String(), out.String())
+	}
+	var context projectContext
+	if err := json.Unmarshal(out.Bytes(), &context); err != nil {
+		t.Fatal(err)
+	}
+	if context.SchemaVersion != contextSchemaVersion || context.ProjectRoot == "" || context.Contract == nil || len(context.NextActions) == 0 {
+		t.Fatalf("incomplete agent context: %#v", context)
+	}
+	if len(context.NextActions) != 2 || context.NextActions[1].Safe {
+		t.Fatalf("verification must not be advertised as safe: %#v", context.NextActions)
+	}
+	for _, action := range context.NextActions {
+		if !strings.Contains(action.Command, "--root \"") || !strings.Contains(action.Command, context.ProjectRoot) {
+			t.Fatalf("next action does not preserve project root: %#v", action)
+		}
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runExplain([]string{"http", "GET", "/health", "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("explain code=%d: %s", code, errOut.String())
+	}
+	var explanation map[string]any
+	if err := json.Unmarshal(out.Bytes(), &explanation); err != nil || explanation["execution_steps"] == nil {
+		t.Fatalf("invalid explanation: %v, %#v", err, explanation)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"consumer", "order", "--topic", "order.created", "--field", "order_id:int64"}, &out, &errOut); code != 0 {
+		t.Fatalf("consumer code=%d: %s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runVerify([]string{"--json"}, &out, &errOut); code == 0 {
+		t.Fatal("unimplemented consumer unexpectedly passed verification")
+	}
+	var verification verificationReport
+	if err := json.Unmarshal(out.Bytes(), &verification); err != nil {
+		t.Fatalf("decode verification: %v\n%s", err, out.String())
+	}
+	if verification.Valid || len(verification.Stages) != 1 || verification.Stages[0].Name != "contract" || len(verification.Stages[0].Diagnostics) == 0 {
+		t.Fatalf("verification failure lacks structured diagnostics: %#v", verification)
+	}
+	diagnostic := verification.Stages[0].Diagnostics[0]
+	if !diagnostic.Retryable || diagnostic.Hint == "" || len(diagnostic.NextActions) == 0 {
+		t.Fatalf("verification diagnostic is not actionable: %#v", diagnostic)
 	}
 }
 
@@ -235,7 +419,7 @@ func TestGenerateResource(t *testing.T) {
 		t.Fatalf("code = %d, stderr = %s", code, errOut.String())
 	}
 	for _, path := range []string{
-		filepath.Join("src", "receipt", "module.go"),
+		filepath.Join("src", "receipt", "receipt_route.go"),
 		filepath.Join("src", "receipt", "receipt_repository.go"),
 		filepath.Join("src", "receipt", "receipt_service.go"),
 		filepath.Join("src", "receipt", "receipt_controller.go"),
@@ -261,13 +445,127 @@ func TestGenerateLayeredComponents(t *testing.T) {
 
 	for _, kind := range []string{"controller", "service", "repository"} {
 		var out, errOut bytes.Buffer
-		if code := runGenerate([]string{kind, "user"}, &out, &errOut); code != 0 {
+		if code := runGenerate([]string{kind, "user", "--no-register"}, &out, &errOut); code != 0 {
 			t.Fatalf("%s: code = %d, stderr = %s", kind, code, errOut.String())
 		}
-		path := filepath.Join("src", kind, "user_"+kind+".go")
+		path := filepath.Join("src", "user_"+kind+".go")
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected generated file %s: %v", path, err)
 		}
+	}
+}
+
+func TestGenerateLayeredComponentsWithDependenciesAndRegistration(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	for _, arguments := range [][]string{
+		{"repository", "user"},
+		{"service", "user", "--depends", "user_repository"},
+		{"repository", "audit"},
+		{"controller", "user", "--depends", "user_service", "audit_repository"},
+		{"controller", "another"},
+	} {
+		out.Reset()
+		errOut.Reset()
+		if code := runGenerate(arguments, &out, &errOut); code != 0 {
+			t.Fatalf("generate %v code=%d: %s", arguments, code, errOut.String())
+		}
+	}
+	service, err := os.ReadFile(filepath.Join("src", "user_service.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(service), "userRepository *UserRepository") || !strings.Contains(string(service), "userRepository: userRepository") {
+		t.Fatalf("service dependency was not generated:\n%s", service)
+	}
+	controller, err := os.ReadFile(filepath.Join("src", "user_controller.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`userService\s+\*UserService`).Match(controller) || !regexp.MustCompile(`userService:\s+userService`).Match(controller) ||
+		!regexp.MustCompile(`auditRepository\s+\*AuditRepository`).Match(controller) || !regexp.MustCompile(`auditRepository:\s+auditRepository`).Match(controller) {
+		t.Fatalf("controller dependency was not generated:\n%s", controller)
+	}
+	application, err := os.ReadFile(filepath.Join("internal", "application", "application.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"src.NewUserRepository", "src.NewUserService", "src.NewAuditRepository", "src.NewUserController", "src.NewAnotherController", `route.Register(app)`} {
+		if !strings.Contains(string(application), expected) {
+			t.Fatalf("missing %s in composition root:\n%s", expected, application)
+		}
+	}
+	routes, err := os.ReadFile(filepath.Join("src", "route", "route.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`app.Route("GET", "/user/:id", (*src.UserController).Get)`, `app.Route("GET", "/another/:id", (*src.AnotherController).Get)`} {
+		if !strings.Contains(string(routes), expected) {
+			t.Fatalf("controller route %s was not collected in src/route/route.go:\n%s", expected, routes)
+		}
+	}
+	if strings.Count(string(application), "route.Register(app)") != 1 {
+		t.Fatalf("application must register collected controller routes exactly once:\n%s", application)
+	}
+}
+
+func TestGenerateRejectsDuplicateConstructorNameFromResourceThenComponent(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"resource", "test"}, &out, &errOut); code != 0 {
+		t.Fatalf("resource code=%d: %s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"controller", "test"}, &out, &errOut); code == 0 {
+		t.Fatal("duplicate NewTestController registration was accepted")
+	}
+	if !strings.Contains(errOut.String(), "constructor NewTestController is already registered") || !strings.Contains(errOut.String(), "refusing duplicate registration") {
+		t.Fatalf("unexpected duplicate error: %s", errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join("src", "test_controller.go")); !os.IsNotExist(err) {
+		t.Fatalf("rejected component left a generated file: %v", err)
+	}
+}
+
+func TestGenerateRejectsDuplicateConstructorNameFromComponentThenResource(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"controller", "test"}, &out, &errOut); code != 0 {
+		t.Fatalf("controller code=%d: %s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"resource", "test"}, &out, &errOut); code == 0 {
+		t.Fatal("resource with duplicate NewTestController registration was accepted")
+	}
+	if !strings.Contains(errOut.String(), "constructor NewTestController is already registered") || !strings.Contains(errOut.String(), "refusing duplicate registration") {
+		t.Fatalf("unexpected duplicate error: %s", errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join("src", "test")); !os.IsNotExist(err) {
+		t.Fatalf("rejected resource left generated files: %v", err)
 	}
 }
 
@@ -392,8 +690,8 @@ func TestGeneratedTemplatesAreValidGo(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, source := range []string{
-		moduleTemplate(name), repositoryTemplate(name), serviceTemplate(name), controllerTemplate(name),
-		standaloneRepositoryTemplate(name), standaloneServiceTemplate(name), standaloneControllerTemplate(name),
+		resourceRouteTemplate(name), repositoryTemplate(name), serviceTemplate(name), controllerTemplate(name),
+		standaloneRepositoryTemplate(name, "example", nil), standaloneServiceTemplate(name, "example", nil), standaloneControllerTemplate(name, "example", nil),
 	} {
 		if _, err := format.Source([]byte(source)); err != nil {
 			t.Fatalf("invalid generated source: %v", err)
@@ -490,17 +788,24 @@ func main() {
 func TestGenerateDryRunDoesNotWrite(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runGenerate([]string{"service", "billing", "--dry-run", "--json"}, &out, &errOut); code != 0 {
+	if code := runGenerate([]string{"service", "billing", "--dry-run", "--json", "--no-register"}, &out, &errOut); code != 0 {
 		t.Fatalf("code=%d: %s", code, errOut.String())
 	}
-	if _, err := os.Stat(filepath.Join("src", "service", "billing_service.go")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join("src", "billing_service.go")); !os.IsNotExist(err) {
 		t.Fatalf("dry run created a file: %v", err)
 	}
-	if !strings.Contains(out.String(), `"dry_run":true`) {
-		t.Fatalf("expected JSON dry_run output: %s", out.String())
+	var result struct {
+		DryRun bool   `json:"dry_run"`
+		Diff   string `json:"diff"`
 	}
-	if !strings.Contains(out.String(), `"diff":"--- /dev/null\n+++ src/service/billing_service.go`) {
-		t.Fatalf("expected exact dry-run diff in JSON output: %s", out.String())
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode dry-run JSON: %v; output: %s", err, out.String())
+	}
+	if !result.DryRun {
+		t.Fatalf("expected dry_run=true: %s", out.String())
+	}
+	if !strings.HasPrefix(result.Diff, "--- /dev/null\n+++ src/billing_service.go\n") {
+		t.Fatalf("unexpected portable dry-run diff: %q", result.Diff)
 	}
 }
 
@@ -808,7 +1113,7 @@ func TestGenerationLockRecoversOnlyStaleRegularFile(t *testing.T) {
 		t.Fatalf("stale generation lock was not recovered: %v", err)
 	}
 	lock.release()
-	if err := os.Symlink("missing-target", generationLockPath); err != nil {
+	if err := os.Mkdir(generationLockPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := acquireProjectLock(generationLockPath); err == nil || !strings.Contains(err.Error(), "not a regular file") {
@@ -964,7 +1269,7 @@ func TestContractSnapshotDiffAndExplain(t *testing.T) {
 	if code := runExplain([]string{"http", "GET", "/orders/:id"}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "BeforeResponse") || !strings.Contains(out.String(), "static-source") {
 		t.Fatalf("explain code=%d, stdout=%s, stderr=%s", code, out.String(), errOut.String())
 	}
-	modulePath := filepath.Join("src", "orders", "module.go")
+	modulePath := filepath.Join("src", "orders", "orders_route.go")
 	contents, err := os.ReadFile(modulePath)
 	if err != nil {
 		t.Fatal(err)
@@ -1091,6 +1396,69 @@ func TestBuildDevBinaryBuildsConfiguredEntrypoint(t *testing.T) {
 	}
 }
 
+func TestCachedDevBinaryReusesMatchingBuild(t *testing.T) {
+	inTempDir(t)
+	if err := os.WriteFile("go.mod", []byte("module example.com/devcache\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("main.go", []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state, err := sourceState(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := projectConfig{Entrypoint: "."}
+	var errOut bytes.Buffer
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	first, firstDir, cached, err := cachedDevBinaryAt(cacheRoot, "project-a", config, state, &errOut)
+	if err != nil || cached {
+		t.Fatalf("first cached build = %q, cached=%v, err=%v, stderr=%s", first, cached, err, errOut.String())
+	}
+	second, secondDir, cached, err := cachedDevBinaryAt(cacheRoot, "project-a", config, state, &errOut)
+	if err != nil || !cached {
+		t.Fatalf("second cached build = %q, cached=%v, err=%v, stderr=%s", second, cached, err, errOut.String())
+	}
+	if first != second || firstDir != secondDir {
+		t.Fatalf("cache path changed: first=%q second=%q", first, second)
+	}
+	if info, err := os.Stat(second); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("cached development binary missing: %v", err)
+	}
+}
+
+func TestDevCacheKeyChangesWithBuildIdentity(t *testing.T) {
+	config := projectConfig{Entrypoint: "."}
+	base := devCacheKey(config, "source-a", "project-a")
+	if base == devCacheKey(config, "source-b", "project-a") {
+		t.Fatal("source change did not invalidate development cache")
+	}
+	if base == devCacheKey(projectConfig{Entrypoint: "./cmd/api"}, "source-a", "project-a") {
+		t.Fatal("entrypoint change did not invalidate development cache")
+	}
+	if base == devCacheKey(config, "source-a", "project-b") {
+		t.Fatal("project root change did not isolate development cache")
+	}
+}
+
+func TestDevBinaryPathUsesExecutableExtensionOnlyOnWindows(t *testing.T) {
+	if got := devBinaryPath("temporary", "windows"); got != filepath.Join("temporary", "app.exe") {
+		t.Fatalf("windows dev binary = %q", got)
+	}
+	if got := devBinaryPath("temporary", "linux"); got != filepath.Join("temporary", "app") {
+		t.Fatalf("linux dev binary = %q", got)
+	}
+}
+
+func TestDevTerminationUsesImmediateKillOnlyOnWindows(t *testing.T) {
+	if !devTerminationUsesKill("windows") {
+		t.Fatal("Windows development process should use immediate kill")
+	}
+	if devTerminationUsesKill("linux") {
+		t.Fatal("Linux development process should retain graceful interrupt")
+	}
+}
+
 func TestRunBuildUsesConfiguredEntrypointAndCreatesBin(t *testing.T) {
 	inTempDir(t)
 	if err := os.MkdirAll(filepath.Join("cmd", "api"), 0o755); err != nil {
@@ -1140,6 +1508,294 @@ func TestCompletionAndProjectName(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := runCompletion([]string{"powershell"}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "Register-ArgumentCompleter") {
 		t.Fatalf("completion = %d, %s", code, errOut.String())
+	}
+}
+
+func TestRunRejectsJSONForLongRunningUnsupportedCommand(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"run", "--json"}, &out, &errOut); code != 2 {
+		t.Fatalf("run --json code=%d, stdout=%s, stderr=%s", code, out.String(), errOut.String())
+	}
+	var result protocolResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode protocol result: %v\n%s", err, out.String())
+	}
+	if result.Error == nil || result.Error.Code != "USAGE_ERROR" || result.ExitCode != 2 {
+		t.Fatalf("unsupported JSON mode was not a usage error: %#v", result)
+	}
+}
+
+func TestProtocolFailureClassificationIsInternallyConsistent(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := writeProtocolResult([]string{"verify", "--json"}, 1, []byte(`{"valid":false}`), "local Go verification failed", &out, &errOut)
+	if code != 5 {
+		t.Fatalf("verify failure code=%d, output=%s", code, out.String())
+	}
+	var result protocolResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == nil || result.Error.Code != "VALIDATION_FAILED" || result.ExitCode != 5 {
+		t.Fatalf("inconsistent validation envelope: %#v", result)
+	}
+	if got := protocolExitCode([]string{"run"}, 1, "application failed", []byte("startup log")); got != 3 {
+		t.Fatalf("ordinary stdout changed runtime failure classification: %d", got)
+	}
+}
+
+func TestInspectionDiagnosesMalformedRouteWithoutPanicking(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	source := `package application
+
+import (
+	"github.com/NARUBROWN/spine"
+	"github.com/NARUBROWN/spine/pkg/boot"
+)
+
+func BuildApplication() (spine.App, boot.Options, error) {
+	app := spine.New()
+	app.Route("GET")
+	return app, boot.Options{}, nil
+}
+`
+	if err := os.WriteFile(filepath.Join("internal", "application", "application.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, diagnostic := range contract.Diagnostics {
+		if diagnostic.Code == "HTTP_ROUTE_ARGUMENTS_INVALID" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("malformed route diagnostic missing: %#v", contract.Diagnostics)
+	}
+}
+
+func TestSourceStateHashesEmbeddedAssetsAndContents(t *testing.T) {
+	directory := t.TempDir()
+	mainPath := filepath.Join(directory, "main.go")
+	assetPath := filepath.Join(directory, "message.txt")
+	if err := os.WriteFile(mainPath, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(assetPath, []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := sourceState(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(assetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(assetPath, []byte("other"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(assetPath, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := sourceState(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("same-size embedded asset change with preserved mtime did not invalidate source state")
+	}
+}
+
+func TestGenerateControllerInsideRoutePackageAvoidsSelfImport(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.MkdirAll(filepath.Join("todo", "src", "route"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join("todo", "src", "route")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"controller", "user"}, &out, &errOut); code != 0 {
+		t.Fatalf("controller code=%d: %s", code, errOut.String())
+	}
+	route, err := os.ReadFile("route.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(route), `"example.com/todo/src/route"`) || !strings.Contains(string(route), `(*UserController).Get`) {
+		t.Fatalf("route package imported itself:\n%s", route)
+	}
+}
+
+func TestGenerateControllerRejectsInvalidRouteRegisterSignature(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join("src", "route"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	invalid := "package route\n\nfunc Register(value int) {}\n"
+	if err := os.WriteFile(filepath.Join("src", "route", "route.go"), []byte(invalid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"controller", "user"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "Register(app spine.App) error") {
+		t.Fatalf("invalid Register signature accepted: code=%d, stderr=%s", code, errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join("src", "user_controller.go")); !os.IsNotExist(err) {
+		t.Fatalf("failed generation left controller behind: %v", err)
+	}
+}
+
+func TestGenerateControllerRejectsExistingRouteConflict(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join("src", "route"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conflict := `package route
+
+import "github.com/NARUBROWN/spine"
+
+type ExistingController struct{}
+
+func Register(app spine.App) error {
+	app.Route("GET", "/user/:id", (*ExistingController).Get)
+	return nil
+}
+`
+	if err := os.WriteFile(filepath.Join("src", "route", "route.go"), []byte(conflict), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"controller", "user"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "already registered with a different handler") {
+		t.Fatalf("route conflict accepted: code=%d, stderr=%s", code, errOut.String())
+	}
+}
+
+func TestComponentRegistrationChecksOnlyPrimaryCompositionFunction(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	source := `package application
+
+import (
+	route "example.com/todo/src/route"
+	src "example.com/todo/src"
+
+	"github.com/NARUBROWN/spine"
+	"github.com/NARUBROWN/spine/pkg/boot"
+)
+
+func wireAlternate(app spine.App) {
+	app.Constructor(src.NewUserService)
+	_ = route.Register(app)
+}
+
+func BuildApplication() (spine.App, boot.Options, error) {
+	app := spine.New()
+	return app, boot.Options{}, nil
+}
+`
+	applicationPath := filepath.Join("internal", "application", "application.go")
+	if err := os.WriteFile(applicationPath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"service", "user"}, &out, &errOut); code != 0 {
+		t.Fatalf("service code=%d: %s", code, errOut.String())
+	}
+	application, err := os.ReadFile(applicationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(application), "app.Constructor(src.NewUserService)") != 2 {
+		t.Fatalf("primary builder registration was suppressed by helper:\n%s", application)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"controller", "widget"}, &out, &errOut); code != 0 {
+		t.Fatalf("controller code=%d: %s", code, errOut.String())
+	}
+	application, err = os.ReadFile(applicationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(application), "route.Register(app)") != 2 {
+		t.Fatalf("primary route registration was suppressed by helper:\n%s", application)
+	}
+}
+
+func TestDependenciesRejectTestFilesWrongPackagesAndDuplicates(t *testing.T) {
+	inTempDir(t)
+	var out, errOut bytes.Buffer
+	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+		t.Fatalf("new code=%d: %s", code, errOut.String())
+	}
+	if err := os.Chdir("todo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("src", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("src", "mock_service_test.go"), []byte("package src\ntype MockService struct{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := runGenerate([]string{"controller", "test-only", "--depends", "mock_service_test"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "_test.go") {
+		t.Fatalf("test-only dependency accepted: code=%d, stderr=%s", code, errOut.String())
+	}
+	if err := os.WriteFile(filepath.Join("src", "aaa.go"), []byte("package src\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("src", "wrong_service.go"), []byte("package other\ntype WrongService struct{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := findLocalComponent("src", "wrong_service"); err == nil || !strings.Contains(err.Error(), "expected src") {
+		t.Fatalf("wrong-package dependency accepted: %v", err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"service", "user"}, &out, &errOut); code != 0 {
+		t.Fatalf("service code=%d: %s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runGenerate([]string{"controller", "duplicate", "--depends", "user_service", "user_service"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "duplicate dependency") {
+		t.Fatalf("duplicate dependency accepted: code=%d, stderr=%s", code, errOut.String())
 	}
 }
 

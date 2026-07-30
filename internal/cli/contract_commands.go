@@ -91,8 +91,11 @@ func runContractSnapshot(args []string, out, errOut io.Writer) int {
 
 func runContractDiff(args []string, out, errOut io.Writer) int {
 	path := defaultContractSnapshot
+	jsonOutput := false
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
+		case "--json":
+			jsonOutput = true
 		case "--against":
 			if index+1 >= len(args) {
 				fmt.Fprintln(errOut, "--against requires a path")
@@ -133,11 +136,21 @@ func runContractDiff(args []string, out, errOut io.Writer) int {
 	expectedJSON, _ := json.Marshal(expectedSemantic)
 	currentJSON, _ := json.Marshal(currentSemantic)
 	if string(expectedJSON) == string(currentJSON) {
+		if jsonOutput {
+			return encodeIndentedJSON(map[string]any{"schema_version": "spine.contract-diff/v1alpha1", "matches": true, "against": path, "removed": []string{}, "added": []string{}}, out, errOut)
+		}
 		fmt.Fprintf(out, "Spine application contract matches %s\n", path)
 		return 0
 	}
-	fmt.Fprintf(errOut, "Spine application contract differs from %s\n", path)
 	removed, added := semanticChanges(expectedSemantic, currentSemantic)
+	if jsonOutput {
+		if code := encodeIndentedJSON(map[string]any{"schema_version": "spine.contract-diff/v1alpha1", "matches": false, "against": path, "removed": removed, "added": added}, out, errOut); code != 0 {
+			return code
+		}
+		fmt.Fprintf(errOut, "Spine application contract differs from %s\n", path)
+		return 1
+	}
+	fmt.Fprintf(errOut, "Spine application contract differs from %s\n", path)
 	for _, item := range removed {
 		fmt.Fprintf(errOut, "  - %s\n", item)
 	}
@@ -257,8 +270,18 @@ func flattenSemanticContract(contract semanticContract) []string {
 }
 
 func runExplain(args []string, out, errOut io.Writer) int {
+	jsonOutput := false
+	filtered := make([]string, 0, len(args))
+	for _, argument := range args {
+		if argument == "--json" {
+			jsonOutput = true
+			continue
+		}
+		filtered = append(filtered, argument)
+	}
+	args = filtered
 	if len(args) < 2 {
-		fmt.Fprintln(errOut, "usage: spine explain <http|consumer|websocket> <name> [path]")
+		fmt.Fprintln(errOut, "usage: spine explain <http|consumer|websocket> <name> [path] [--json]")
 		return 1
 	}
 	contract, err := inspectApplication()
@@ -275,6 +298,9 @@ func runExplain(args []string, out, errOut io.Writer) int {
 		method, path := strings.ToUpper(args[1]), args[2]
 		for _, route := range contract.HTTP {
 			if route.Method == method && route.Path == path {
+				if jsonOutput {
+					return encodeIndentedJSON(map[string]any{"kind": "http", "route": route, "execution_steps": httpExecutionSteps(contract, route), "evidence_boundary": "static-source inspection; dynamic registration and external infrastructure are not evaluated"}, out, errOut)
+				}
 				printHTTPExplanation(contract, route, out)
 				return 0
 			}
@@ -286,17 +312,30 @@ func runExplain(args []string, out, errOut io.Writer) int {
 			fmt.Fprintln(errOut, "usage: spine explain consumer <topic>")
 			return 1
 		}
-		return explainNamedRegistration("consumer", args[1], contract.Consumers, out, errOut)
+		return explainNamedRegistration("consumer", args[1], contract.Consumers, jsonOutput, out, errOut)
 	case "websocket":
 		if len(args) != 2 {
 			fmt.Fprintln(errOut, "usage: spine explain websocket <path>")
 			return 1
 		}
-		return explainNamedRegistration("WebSocket", args[1], contract.WebSockets, out, errOut)
+		return explainNamedRegistration("WebSocket", args[1], contract.WebSockets, jsonOutput, out, errOut)
 	default:
 		fmt.Fprintf(errOut, "unknown execution contract type: %s\n", args[0])
 		return 1
 	}
+}
+
+func httpExecutionSteps(contract applicationContract, route httpRegistration) []string {
+	steps := []string{"resolve request values from the handler signature"}
+	for _, interceptor := range contract.Interceptors {
+		if interceptor.Scope == "all" || strings.Contains(interceptor.Scope, "HTTP") || strings.Contains(interceptor.Scope, "All") {
+			steps = append(steps, "PreHandle "+interceptor.Target)
+		}
+	}
+	for _, target := range route.Interceptors {
+		steps = append(steps, "PreHandle "+target)
+	}
+	return append(steps, "invoke "+route.Handler, "prepare and validate the response", "run successful interceptors' BeforeResponse in reverse order", "flush the prepared response", "run AfterCompletion cleanup/observation")
 }
 
 func printHTTPExplanation(contract applicationContract, route httpRegistration, out io.Writer) {
@@ -335,9 +374,12 @@ func printHTTPExplanation(contract applicationContract, route httpRegistration, 
 	fmt.Fprintln(out, "  evidence boundary: static-source inspection; dynamic registration and external infrastructure are not evaluated")
 }
 
-func explainNamedRegistration(kind, name string, registrations []namedRegistration, out, errOut io.Writer) int {
+func explainNamedRegistration(kind, name string, registrations []namedRegistration, jsonOutput bool, out, errOut io.Writer) int {
 	for _, registration := range registrations {
 		if registration.Name == name {
+			if jsonOutput {
+				return encodeIndentedJSON(map[string]any{"kind": strings.ToLower(kind), "registration": registration, "evidence_boundary": "static-source inspection; runtime delivery and external infrastructure are not evaluated"}, out, errOut)
+			}
 			fmt.Fprintf(out, "%s %s\n  handler: %s\n  registration: %s\n", kind, name, registration.Handler, registration.Source)
 			fmt.Fprintln(out, "  evidence boundary: static-source inspection; runtime delivery and external infrastructure are not evaluated")
 			return 0

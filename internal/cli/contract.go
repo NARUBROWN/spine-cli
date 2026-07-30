@@ -79,10 +79,13 @@ type contractSetting struct {
 }
 
 type contractDiagnostic struct {
-	Severity string `json:"severity"`
-	Code     string `json:"code"`
-	Message  string `json:"message"`
-	Source   string `json:"source,omitempty"`
+	Severity    string       `json:"severity"`
+	Code        string       `json:"code"`
+	Message     string       `json:"message"`
+	Source      string       `json:"source,omitempty"`
+	Retryable   bool         `json:"retryable"`
+	Hint        string       `json:"hint,omitempty"`
+	NextActions []nextAction `json:"next_actions,omitempty"`
 }
 
 type contractInspector struct {
@@ -155,11 +158,18 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 			case "Constructor":
 				registrationCall = true
 				for _, argument := range call.Args {
-					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: expressionText(fset, argument), Source: source})
+					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: normalizeImportedExpression(expressionText(fset, argument), imports, i.module), Source: source})
+				}
+				if packageName, importPath, ok := directResourceConstructor(call, imports, i.module); ok {
+					i.addResource(packageName, importPath, source)
 				}
 			case "Route":
 				registrationCall = true
+				before := len(i.contract.HTTP)
 				i.inspectHTTPCall(call, fset, source)
+				if len(i.contract.HTTP) > before {
+					i.contract.HTTP[len(i.contract.HTTP)-1].Handler = normalizeImportedExpression(i.contract.HTTP[len(i.contract.HTTP)-1].Handler, imports, i.module)
+				}
 			case "Interceptor", "InterceptorFor":
 				registrationCall = true
 				arguments := call.Args
@@ -206,6 +216,38 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 		}
 		return true
 	})
+}
+
+func normalizeImportedExpression(expression string, imports map[string]string, module string) string {
+	for alias, importPath := range imports {
+		if strings.HasPrefix(importPath, module+"/") {
+			expression = strings.ReplaceAll(expression, alias+".", "")
+		}
+	}
+	return expression
+}
+
+func directResourceConstructor(call *ast.CallExpr, imports map[string]string, module string) (string, string, bool) {
+	if len(call.Args) != 3 {
+		return "", "", false
+	}
+	var packageName, importPath string
+	for index, suffix := range []string{"Repository", "Service", "Controller"} {
+		selector, ok := call.Args[index].(*ast.SelectorExpr)
+		if !ok {
+			return "", "", false
+		}
+		pkg, packageOK := selector.X.(*ast.Ident)
+		if !packageOK || !strings.HasPrefix(imports[pkg.Name], module+"/src/") || !strings.HasPrefix(selector.Sel.Name, "New") || !strings.HasSuffix(selector.Sel.Name, suffix) {
+			return "", "", false
+		}
+		if index == 0 {
+			packageName, importPath = pkg.Name, imports[pkg.Name]
+		} else if pkg.Name != packageName {
+			return "", "", false
+		}
+	}
+	return packageName, importPath, true
 }
 
 func (i *contractInspector) addConditionalRegistrationDiagnostic(source string) {
@@ -601,11 +643,11 @@ func (i *contractInspector) inspectRegistryCall(registry string, call *ast.CallE
 }
 
 func (i *contractInspector) inspectResource(packageName, importPath, source string) {
+	i.addResource(packageName, importPath, source)
 	if i.seen[importPath] {
 		return
 	}
 	i.seen[importPath] = true
-	i.contract.Resources = append(i.contract.Resources, resourceRegistration{Package: packageName, Import: importPath, Source: source})
 	directory := filepath.FromSlash(strings.TrimPrefix(importPath, i.module+"/"))
 	entries, err := os.ReadDir(directory)
 	if err != nil {
@@ -632,6 +674,13 @@ func (i *contractInspector) inspectResource(packageName, importPath, source stri
 			break
 		}
 	}
+}
+
+func (i *contractInspector) addResource(packageName, importPath, source string) {
+	if i.seen[importPath] {
+		return
+	}
+	i.contract.Resources = append(i.contract.Resources, resourceRegistration{Package: packageName, Import: importPath, Source: source})
 }
 
 func (i *contractInspector) addDuplicateDiagnostics() {

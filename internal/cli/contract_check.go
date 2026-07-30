@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 )
 
 const contractCheckSchemaVersion = "spine.contract-check/v1alpha1"
@@ -78,6 +79,19 @@ func buildContractCheckReport(contract applicationContract, warningsAsErrors boo
 			"runtime HTTP routes, DI constructors, and interceptors were not observed",
 			"external databases, brokers, listeners, and deployed behavior were not checked",
 		},
+	}
+	for index := range report.Diagnostics {
+		diagnostic := &report.Diagnostics[index]
+		diagnostic.Retryable = true
+		if diagnostic.Hint == "" {
+			diagnostic.Hint = "Make the registration explicit in the composition root and run the contract check again."
+		}
+		if len(diagnostic.NextActions) == 0 {
+			diagnostic.NextActions = []nextAction{{Command: "spine inspect --json", Reason: "Inspect the complete static evidence and source location", Safe: true}, {Command: "spine contract check --json", Reason: "Revalidate after correcting the source", Safe: true}}
+		}
+		if strings.Contains(diagnostic.Code, "NOT_IMPLEMENTED") {
+			diagnostic.Hint = "Implement the generated handler and remove its explicit not-implemented sentinel."
+		}
 	}
 	for _, diagnostic := range report.Diagnostics {
 		switch diagnostic.Severity {

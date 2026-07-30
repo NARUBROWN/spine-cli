@@ -35,6 +35,12 @@ func acquireProjectLock(path string) (projectLock, error) {
 			return projectLock{path: path, owner: owner}, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
+			// Windows can report an existing directory as "is a directory"
+			// instead of os.ErrExist. Normalize every existing non-regular
+			// target to the same safe error on every supported platform.
+			if info, statErr := os.Lstat(path); statErr == nil && !info.Mode().IsRegular() {
+				return projectLock{}, fmt.Errorf("generation lock %s is not a regular file; inspect it before continuing", path)
+			}
 			return projectLock{}, err
 		}
 		info, statErr := os.Lstat(path)

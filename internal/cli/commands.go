@@ -16,7 +16,7 @@ func runGo(args []string, production bool, out, errOut io.Writer) int {
 	cmd := exec.Command("go", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, out, errOut
 	if production {
-		cmd.Env = append(os.Environ(), "SPINE_ENV=production")
+		cmd.Env = append(os.Environ(), "ENV=production")
 	}
 	if err := cmd.Run(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
@@ -34,11 +34,25 @@ func runProject(development bool, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	cmd := exec.Command("go", "run", config.Entrypoint)
+	sourceDigest, err := sourceState(".")
+	if err != nil {
+		fmt.Fprintf(errOut, "could not read application sources: %v\n", err)
+		return 1
+	}
+	binary, _, cached, err := cachedDevBinary(config, sourceDigest, errOut)
+	if err != nil {
+		fmt.Fprintf(errOut, "application build failed: %v\n", err)
+		return 1
+	}
+	if cached {
+		fmt.Fprintln(out, "Using cached application build.")
+	}
+
+	cmd := exec.Command(binary)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, out, errOut
 	env := append(os.Environ(), fmt.Sprintf("SPINE_PORT=%d", config.Port))
 	if !development {
-		env = append(env, "SPINE_ENV=production")
+		env = append(env, "ENV=production")
 	}
 	cmd.Env = env
 	if err := cmd.Run(); err != nil {
@@ -68,12 +82,14 @@ func runCheck(out, errOut io.Writer) int {
 }
 
 func runVerify(args []string, out, errOut io.Writer) int {
-	warningsAsErrors := false
+	warningsAsErrors, jsonOutput := false, false
 	for _, argument := range args {
 		if argument == "--warnings-as-errors" {
 			warningsAsErrors = true
+		} else if argument == "--json" {
+			jsonOutput = true
 		} else {
-			fmt.Fprintln(errOut, "usage: spine verify [--warnings-as-errors]")
+			fmt.Fprintln(errOut, "usage: spine verify [--warnings-as-errors] [--json]")
 			return 1
 		}
 	}
@@ -83,6 +99,30 @@ func runVerify(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	report := buildContractCheckReport(contract, warningsAsErrors)
+	if jsonOutput {
+		verification := verificationReport{
+			SchemaVersion:    "spine.verification/v1alpha1",
+			Valid:            report.Valid,
+			Stages:           []verificationStage{{Name: "contract", OK: report.Valid, Diagnostics: report.Diagnostics}},
+			EvidenceBoundary: report.EvidenceBoundary,
+		}
+		if !report.Valid {
+			_ = encodeIndentedJSON(verification, out, errOut)
+			fmt.Fprintln(errOut, "static execution contract validation failed")
+			return 1
+		}
+		var checkOut, checkErr bytes.Buffer
+		code := runCheck(&checkOut, &checkErr)
+		verification.Valid = code == 0
+		verification.Stages = append(verification.Stages, verificationStage{Name: "gofmt-vet-test", OK: code == 0, Output: strings.TrimSpace(checkOut.String()), Error: strings.TrimSpace(checkErr.String())})
+		if encodeCode := encodeIndentedJSON(verification, out, errOut); encodeCode != 0 {
+			return encodeCode
+		}
+		if code != 0 {
+			fmt.Fprintln(errOut, "local Go verification failed")
+		}
+		return code
+	}
 	for _, diagnostic := range report.Diagnostics {
 		writer := out
 		if diagnostic.Severity == "error" || (warningsAsErrors && diagnostic.Severity == "warning") {
@@ -99,6 +139,21 @@ func runVerify(args []string, out, errOut io.Writer) int {
 	fmt.Fprintln(out, "Local Spine contract verification passed (source contract, gofmt, go vet, go test).")
 	fmt.Fprintln(out, "External databases, brokers, listeners, and deployed runtime behavior were not checked.")
 	return 0
+}
+
+type verificationReport struct {
+	SchemaVersion    string              `json:"schema_version"`
+	Valid            bool                `json:"valid"`
+	Stages           []verificationStage `json:"stages"`
+	EvidenceBoundary []string            `json:"evidence_boundary"`
+}
+
+type verificationStage struct {
+	Name        string               `json:"name"`
+	OK          bool                 `json:"ok"`
+	Diagnostics []contractDiagnostic `json:"diagnostics,omitempty"`
+	Output      string               `json:"output,omitempty"`
+	Error       string               `json:"error,omitempty"`
 }
 
 func unformattedFiles(root string) ([]string, error) {
@@ -167,7 +222,7 @@ func runCompletion(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "usage: spine completion <powershell|bash|zsh>")
 		return 1
 	}
-	commands := "new generate g dev run test check inspect explain verify contract doctor capabilities build completion help version"
+	commands := "new generate g dev run test check inspect explain verify contract doctor capabilities schema context build completion help version"
 	switch args[0] {
 	case "powershell":
 		fmt.Fprintf(out, "Register-ArgumentCompleter -Native -CommandName spine -ScriptBlock { param($wordToComplete) '%s'.Split(' ') | Where-Object { $_ -like \"$wordToComplete*\" } }\n", commands)

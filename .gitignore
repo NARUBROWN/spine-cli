@@ -1,6 +1,7 @@
 # Go build and test artifacts
 bin/
 .gocache/
+.gomodcache/
 coverage.out
 
 # Local environment files

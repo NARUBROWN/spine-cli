@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,8 +11,61 @@ import (
 )
 
 type writeOptions struct {
-	DryRun bool
-	Force  bool
+	DryRun  bool
+	Force   bool
+	IfMatch string
+}
+
+type plannedChange struct {
+	Operation    string `json:"operation"`
+	Path         string `json:"path"`
+	BeforeSHA256 string `json:"before_sha256,omitempty"`
+	AfterSHA256  string `json:"after_sha256"`
+}
+
+func fileChangesBaseHash(changes []fileChange) (string, error) {
+	changes = append([]fileChange(nil), changes...)
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
+	digest := sha256.New()
+	for _, change := range changes {
+		path := filepath.ToSlash(change.Path)
+		contents, err := os.ReadFile(change.Path)
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		fmt.Fprintf(digest, "%d:%s\n", len(path), path)
+		if os.IsNotExist(err) {
+			digest.Write([]byte("missing\n"))
+			continue
+		}
+		state := sha256.Sum256(contents)
+		digest.Write([]byte(hex.EncodeToString(state[:]) + "\n"))
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+func planFileChanges(changes []fileChange) ([]plannedChange, error) {
+	changes = append([]fileChange(nil), changes...)
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
+	plan := make([]plannedChange, 0, len(changes))
+	for _, change := range changes {
+		previous, err := os.ReadFile(change.Path)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		after := sha256.Sum256([]byte(change.Contents))
+		item := plannedChange{Operation: "create", Path: filepath.ToSlash(change.Path), AfterSHA256: hex.EncodeToString(after[:])}
+		if err == nil {
+			before := sha256.Sum256(previous)
+			item.BeforeSHA256 = hex.EncodeToString(before[:])
+			item.Operation = "modify"
+			if string(previous) == change.Contents {
+				item.Operation = "unchanged"
+			}
+		}
+		plan = append(plan, item)
+	}
+	return plan, nil
 }
 
 type fileChange struct {
@@ -37,14 +92,14 @@ func renderFileChanges(changes []fileChange) (string, error) {
 		if string(previous) == change.Contents {
 			continue
 		}
-		oldPath := change.Path
+		oldPath := filepath.ToSlash(change.Path)
 		oldLines := splitDiffLines(string(previous))
 		if os.IsNotExist(err) {
 			oldPath = "/dev/null"
 			oldLines = nil
 		}
 		newLines := splitDiffLines(change.Contents)
-		fmt.Fprintf(&result, "--- %s\n+++ %s\n", oldPath, change.Path)
+		fmt.Fprintf(&result, "--- %s\n+++ %s\n", oldPath, filepath.ToSlash(change.Path))
 		fmt.Fprintf(&result, "@@ -1,%d +1,%d @@\n", len(oldLines), len(newLines))
 		for _, line := range oldLines {
 			fmt.Fprintf(&result, "-%s\n", line)

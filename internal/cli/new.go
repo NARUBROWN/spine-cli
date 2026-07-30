@@ -35,6 +35,13 @@ func runNew(args []string, out, errOut io.Writer) int {
 			options.DryRun = true
 		case "--force":
 			options.Force = true
+		case "--if-match":
+			if i+1 >= len(args) {
+				fmt.Fprintln(errOut, "--if-match requires a base hash")
+				return 1
+			}
+			i++
+			options.IfMatch = args[i]
 		case "--json":
 			jsonOutput = true
 		default:
@@ -46,7 +53,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	if _, err := os.Stat(dir); err == nil && !options.Force {
 		fmt.Fprintf(errOut, "destination already exists: %s\n", dir)
 		return 1
-	} else if !os.IsNotExist(err) {
+	} else if err != nil && !os.IsNotExist(err) {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
@@ -66,6 +73,20 @@ func runNew(args []string, out, errOut io.Writer) int {
 		changes = append(changes, fileChange{Path: filepath.Join(dir, path), Contents: files[path], AllowOverwrite: options.Force})
 	}
 	diff := ""
+	baseHash, err := fileChangesBaseHash(changes)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	if options.IfMatch != "" && options.IfMatch != baseHash {
+		fmt.Fprintf(errOut, "generation targets changed since dry-run: expected base hash %s, current %s\n", options.IfMatch, baseHash)
+		return 1
+	}
+	plan, err := planFileChanges(changes)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
 	if options.DryRun {
 		diff, err = renderFileChanges(changes)
 		if err != nil {
@@ -78,7 +99,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	if jsonOutput {
-		_ = json.NewEncoder(out).Encode(map[string]any{"project": name.Route, "module": module, "directory": dir, "files": paths, "dry_run": options.DryRun, "diff": diff})
+		_ = json.NewEncoder(out).Encode(map[string]any{"project": name.Route, "module": module, "directory": dir, "files": paths, "dry_run": options.DryRun, "base_hash": baseHash, "changes": plan, "diff": diff})
 		return 0
 	}
 	if options.DryRun {

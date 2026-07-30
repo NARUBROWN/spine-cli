@@ -44,14 +44,323 @@ func modulePathFromGoMod() (string, error) {
 	return "", fmt.Errorf("could not find module name in go.mod")
 }
 
-// prepareResourceRegistration은 메모리에서 소스 변경을 준비합니다.
-// 호출자가 생성 파일과 함께 반영하므로 등록 실패가 불완전한 resource를 남기지 않습니다.
-func prepareResourceRegistration(name resourceName) (fileChange, error) {
+func prepareComponentWiring(kind string, name resourceName, directory, packageName string) ([]fileChange, error) {
 	module, err := modulePath()
+	if err != nil {
+		return nil, err
+	}
+	config, err := loadProjectConfig()
+	if err != nil {
+		return nil, err
+	}
+	path, file, fset, function, statementIndex, appName, err := findCompositionRoot(config.Composition)
+	if err != nil {
+		return nil, err
+	}
+	importPath := module + "/" + filepath.ToSlash(directory)
+	alias := packageName
+	constructorName := "New" + name.Type + strings.ToUpper(kind[:1]) + kind[1:]
+	statements := []ast.Stmt{}
+	if !hasComponentConstructor(function.Body, alias, constructorName, appName) {
+		if err := rejectDuplicateConstructorNames(constructorName); err != nil {
+			return nil, err
+		}
+		if err := addNamedImport(file, alias, importPath); err != nil {
+			return nil, err
+		}
+		statements = append(statements, &ast.ExprStmt{X: &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: ast.NewIdent(appName), Sel: ast.NewIdent("Constructor")},
+			Args: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(constructorName)}},
+		}})
+	}
+	changes := []fileChange{}
+	if kind == "controller" {
+		routeChange, routeErr := prepareLayeredControllerRoute(name, module, directory, packageName)
+		if routeErr != nil {
+			return nil, routeErr
+		}
+		changes = append(changes, routeChange)
+		routeAlias := availableImportAlias(file, "route", module+"/src/route")
+		if err := addNamedImport(file, routeAlias, module+"/src/route"); err != nil {
+			return nil, err
+		}
+		if !hasRegisterCall(function.Body, routeAlias, appName) {
+			bootAlias, ok := checkedRegistrationBootAlias(function, fset, file)
+			if !ok {
+				return nil, fmt.Errorf("composition root %s must return (spine.App, boot.Options, error) before automatic route registration; use --no-register until it is migrated", function.Name.Name)
+			}
+			statements = append(statements, checkedRegisterStatement(routeAlias, appName, bootAlias))
+		}
+	}
+	oldLength := len(function.Body.List)
+	function.Body.List = append(function.Body.List, make([]ast.Stmt, len(statements))...)
+	copy(function.Body.List[statementIndex+1+len(statements):], function.Body.List[statementIndex+1:oldLength])
+	copy(function.Body.List[statementIndex+1:], statements)
+	var formatted strings.Builder
+	if err := format.Node(&formatted, fset, file); err != nil {
+		return nil, fmt.Errorf("could not format updated %s: %w", path, err)
+	}
+	changes = append(changes, fileChange{Path: path, Contents: formatted.String(), AllowOverwrite: true})
+	return changes, nil
+}
+
+func prepareResourceModuleRegistration(name resourceName, module string) (fileChange, error) {
+	importPath := module + "/src/" + name.Package
+	registered, err := moduleRegistrationExists(name.Package, importPath)
 	if err != nil {
 		return fileChange{}, err
 	}
-	return prepareModuleRegistration(name.Package, module+"/src/"+name.Package)
+	if !registered {
+		constructors := []string{
+			"New" + name.Type + "Repository",
+			"New" + name.Type + "Service",
+			"New" + name.Type + "Controller",
+		}
+		if err := rejectDuplicateConstructorNames(constructors...); err != nil {
+			return fileChange{}, err
+		}
+	}
+	return prepareModuleRegistration(name.Package, importPath)
+}
+
+func moduleRegistrationExists(alias, importPath string) (bool, error) {
+	config, err := loadProjectConfig()
+	if err != nil {
+		return false, err
+	}
+	_, file, _, function, _, appName, err := findCompositionRoot(config.Composition)
+	if err != nil {
+		return false, err
+	}
+	return importPathsByAlias(file)[alias] == importPath && hasRegisterCall(function.Body, alias, appName), nil
+}
+
+func rejectDuplicateConstructorNames(names ...string) error {
+	contract, err := inspectApplication()
+	if err != nil {
+		return fmt.Errorf("could not inspect existing constructor registrations: %w", err)
+	}
+	wanted := make(map[string]bool, len(names))
+	for _, name := range names {
+		wanted[name] = true
+	}
+	for _, constructor := range contract.Constructors {
+		name := constructor.Target
+		if separator := strings.LastIndex(name, "."); separator >= 0 {
+			name = name[separator+1:]
+		}
+		if wanted[name] {
+			return fmt.Errorf("constructor %s is already registered at %s; refusing duplicate registration", name, constructor.Source)
+		}
+	}
+	return nil
+}
+
+func availableImportAlias(file *ast.File, preferred, importPath string) string {
+	imports := importPathsByAlias(file)
+	if existing := imports[preferred]; existing == "" || existing == importPath {
+		return preferred
+	}
+	return "generatedRoute"
+}
+
+func checkedRegisterStatement(alias, appName, bootAlias string) ast.Stmt {
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent("Register")}, Args: []ast.Expr{ast.NewIdent(appName)}}
+	return &ast.IfStmt{
+		Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("err")}, Tok: token.DEFINE, Rhs: []ast.Expr{call}},
+		Cond: &ast.BinaryExpr{X: ast.NewIdent("err"), Op: token.NEQ, Y: ast.NewIdent("nil")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{
+			ast.NewIdent("nil"),
+			&ast.CompositeLit{Type: &ast.SelectorExpr{X: ast.NewIdent(bootAlias), Sel: ast.NewIdent("Options")}},
+			ast.NewIdent("err"),
+		}}}},
+	}
+}
+
+func prepareLayeredControllerRoute(name resourceName, module, directory, packageName string) (fileChange, error) {
+	path := filepath.Join("src", "route", "route.go")
+	importPath := module + "/" + filepath.ToSlash(directory)
+	localController := filepath.Clean(directory) == filepath.Clean(filepath.Dir(path))
+	contents, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		var source string
+		if localController {
+			source = fmt.Sprintf(`package route
+
+import "github.com/NARUBROWN/spine"
+
+func Register(app spine.App) error {
+	app.Route("GET", "/%[1]s/:id", (*%[2]sController).Get)
+	return nil
+}
+`, name.Route, name.Type)
+		} else {
+			source = fmt.Sprintf(`package route
+
+import (
+	%[1]s "%[2]s"
+
+	"github.com/NARUBROWN/spine"
+)
+
+func Register(app spine.App) error {
+	app.Route("GET", "/%[3]s/:id", (*%[1]s.%[4]sController).Get)
+	return nil
+}
+`, packageName, importPath, name.Route, name.Type)
+		}
+		formatted, formatErr := format.Source([]byte(source))
+		if formatErr != nil {
+			return fileChange{}, formatErr
+		}
+		return fileChange{Path: path, Contents: string(formatted), AllowOverwrite: true}, nil
+	}
+	if err != nil {
+		return fileChange{}, err
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, contents, parser.ParseComments)
+	if err != nil {
+		return fileChange{}, fmt.Errorf("could not parse %s: %w", path, err)
+	}
+	var register *ast.FuncDecl
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if ok && function.Recv == nil && function.Name.Name == "Register" && function.Body != nil {
+			register = function
+			break
+		}
+	}
+	if register == nil || !validRouteRegisterSignature(register, fset, file) {
+		return fileChange{}, fmt.Errorf("generated route file %s must declare Register(app spine.App) error", path)
+	}
+	alias := ""
+	if !localController {
+		alias = availableImportAlias(file, packageName, importPath)
+		if err := addNamedImport(file, alias, importPath); err != nil {
+			return fileChange{}, err
+		}
+	}
+	appName := register.Type.Params.List[0].Names[0].Name
+	handler, routeExists := findLayeredControllerRoute(register, appName, "GET", "/"+name.Route+"/:id")
+	if routeExists && !isControllerGetHandler(handler, alias, name.Type+"Controller") {
+		return fileChange{}, fmt.Errorf("route GET /%s/:id is already registered with a different handler in %s", name.Route, path)
+	}
+	if !routeExists {
+		var controllerType ast.Expr = ast.NewIdent(name.Type + "Controller")
+		if alias != "" {
+			controllerType = &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name.Type + "Controller")}
+		}
+		route := &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(appName), Sel: ast.NewIdent("Route")}, Args: []ast.Expr{
+			&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("GET")},
+			&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("/" + name.Route + "/:id")},
+			&ast.SelectorExpr{X: &ast.ParenExpr{X: &ast.StarExpr{X: controllerType}}, Sel: ast.NewIdent("Get")},
+		}}}
+		insert := len(register.Body.List)
+		if insert > 0 {
+			if _, ok := register.Body.List[insert-1].(*ast.ReturnStmt); ok {
+				insert--
+			}
+		}
+		register.Body.List = append(register.Body.List, nil)
+		copy(register.Body.List[insert+1:], register.Body.List[insert:])
+		register.Body.List[insert] = route
+	}
+	var formatted strings.Builder
+	if err := format.Node(&formatted, fset, file); err != nil {
+		return fileChange{}, fmt.Errorf("could not format updated %s: %w", path, err)
+	}
+	return fileChange{Path: path, Contents: formatted.String(), AllowOverwrite: true}, nil
+}
+
+func validRouteRegisterSignature(function *ast.FuncDecl, fset *token.FileSet, file *ast.File) bool {
+	if function == nil || function.Recv != nil || function.Type.Params == nil || len(function.Type.Params.List) != 1 || len(function.Type.Params.List[0].Names) != 1 {
+		return false
+	}
+	selector, ok := function.Type.Params.List[0].Type.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "App" {
+		return false
+	}
+	alias, ok := selector.X.(*ast.Ident)
+	if !ok || importPathsByAlias(file)[alias.Name] != spineImportPath {
+		return false
+	}
+	results := fieldTypes(fset, function.Type.Results)
+	return len(results) == 1 && results[0] == "error"
+}
+
+func findLayeredControllerRoute(function *ast.FuncDecl, appName, method, path string) (ast.Expr, bool) {
+	var handler ast.Expr
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || len(call.Args) < 3 {
+			return true
+		}
+		selector, direct := directAppCall(call, appName)
+		if !direct || selector != "Route" {
+			return true
+		}
+		registeredMethod, methodOK := stringLiteral(call.Args[0])
+		registeredPath, pathOK := stringLiteral(call.Args[1])
+		if methodOK && pathOK && strings.EqualFold(registeredMethod, method) && registeredPath == path {
+			handler = call.Args[2]
+			return false
+		}
+		return true
+	})
+	return handler, handler != nil
+}
+
+func isControllerGetHandler(expression ast.Expr, alias, controller string) bool {
+	handler, ok := expression.(*ast.SelectorExpr)
+	if !ok || handler.Sel.Name != "Get" {
+		return false
+	}
+	parenthesized, ok := handler.X.(*ast.ParenExpr)
+	if !ok {
+		return false
+	}
+	pointer, ok := parenthesized.X.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	if alias == "" {
+		identifier, ok := pointer.X.(*ast.Ident)
+		return ok && identifier.Name == controller
+	}
+	typeSelector, ok := pointer.X.(*ast.SelectorExpr)
+	if !ok || typeSelector.Sel.Name != controller {
+		return false
+	}
+	packageName, ok := typeSelector.X.(*ast.Ident)
+	return ok && packageName.Name == alias
+}
+
+func hasComponentConstructor(root ast.Node, alias, constructorName, appName string) bool {
+	found := false
+	ast.Inspect(root, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := directAppCall(call, appName)
+		if !ok || selector != "Constructor" {
+			return true
+		}
+		for _, argument := range call.Args {
+			constructor, selectorOK := argument.(*ast.SelectorExpr)
+			if !selectorOK {
+				continue
+			}
+			pkg, packageOK := constructor.X.(*ast.Ident)
+			if packageOK && pkg.Name == alias && constructor.Sel.Name == constructorName {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // prepareModuleRegistration은 로컬 모듈을 검사 가능한 composition root에 안전하게 연결합니다.
@@ -71,7 +380,7 @@ func prepareModuleRegistration(alias, importPath string) (fileChange, error) {
 	if err != nil {
 		return fileChange{}, err
 	}
-	if importPathsByAlias(file)[alias] == importPath && hasRegisterCall(file, alias, appName) {
+	if importPathsByAlias(file)[alias] == importPath && hasRegisterCall(function.Body, alias, appName) {
 		contents, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return fileChange{}, readErr
@@ -211,9 +520,9 @@ func spineNewAssignment(statement ast.Stmt, aliases map[string]bool) (string, bo
 	return identifier.Name, ok && aliases[packageName.Name]
 }
 
-func hasRegisterCall(file *ast.File, packageName, appName string) bool {
+func hasRegisterCall(root ast.Node, packageName, appName string) bool {
 	found := false
-	ast.Inspect(file, func(node ast.Node) bool {
+	ast.Inspect(root, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok || len(call.Args) != 1 {
 			return true

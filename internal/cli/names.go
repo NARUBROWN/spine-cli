@@ -2,9 +2,37 @@ package cli
 
 import (
 	"fmt"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 )
+
+// currentPackageName returns the package already used at the command location.
+// An empty directory falls back to its directory name, which keeps generated files
+// immediately usable after creating a feature directory.
+func currentPackageName(fallback string) (string, error) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".go" || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), entry.Name(), nil, parser.PackageClauseOnly)
+		if parseErr != nil {
+			return "", fmt.Errorf("could not determine package from %s: %w", entry.Name(), parseErr)
+		}
+		return file.Name.Name, nil
+	}
+	if fallback == "" {
+		return "", fmt.Errorf("could not determine package at the current directory")
+	}
+	return fallback, nil
+}
 
 type resourceName struct {
 	Package string

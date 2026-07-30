@@ -8,8 +8,8 @@ Spine 애플리케이션의 기술적인 골격을 생성하는 Go CLI입니다.
 ## 설치와 실행
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.1.1
-spine version # spine-cli 0.1.1
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.1.3
+spine version # spine-cli 0.1.3
 spine new todo-api --module github.com/acme/todo-api
 cd todo-api
 go mod tidy
@@ -29,13 +29,13 @@ spine g resource receipt
 
 ```text
 src/receipt/
-  module.go
+  receipt_route.go
   receipt_controller.go
   receipt_service.go
   receipt_repository.go
 ```
 
-`resource`는 선택적인 기능 경계입니다. 모듈식 또는 DDD 스타일로 구성하고 싶을 때 사용합니다. `module.go`의 `Register(app spine.App) error`가 해당 resource의 생성자와 라우트를 등록하며, CLI가 검사 가능한 composition root에 이를 자동으로 등록합니다. 필요한 경우에만 `--no-register`를 사용하세요.
+`resource`는 선택적인 기능 경계입니다. 모듈식 또는 DDD 스타일로 구성하고 싶을 때 사용합니다. `<resource>_route.go`의 `Register(app spine.App) error`가 해당 resource의 생성자와 라우트를 등록하며, CLI가 검사 가능한 composition root에 이를 자동으로 등록합니다. 필요한 경우에만 `--no-register`를 사용하세요.
 
 ```go
 if err := receipt.Register(app); err != nil {
@@ -50,7 +50,7 @@ if err := user.Register(app); err != nil {
 
 ```text
 src/user/
-  module.go
+  user_route.go
   user_controller.go
   user_service.go
   user_repository.go
@@ -93,13 +93,14 @@ spine g repository user
 
 ```text
 src/
-  controller/
-    user_controller.go
-  service/
-    user_service.go
-  repository/
-    user_repository.go
+  user_controller.go
+  user_service.go
+  user_repository.go
+  route/
+    route.go              # 생성된 controller 라우트를 한곳에 누적
 ```
+
+`controller` 생성기는 constructor를 composition root에 등록하고 HTTP route는 `src/route/route.go`의 `Register`에 모읍니다. 여러 controller를 생성해도 `application.go`에는 `route.Register(app)` 호출이 한 번만 유지됩니다.
 
 각 개별 생성 결과는 다른 레이어의 구체 타입을 자동으로 참조하지 않습니다. 따라서 하나만 생성해도 컴파일할 수 있고, 의존성과 조립 방식은 사용자가 직접 결정할 수 있습니다.
 
@@ -141,9 +142,10 @@ handler는 구현 전까지 명시적인 `not implemented` 오류를 반환하�
 
 ```sh
 # Go 소스와 프로젝트 설정 변경을 감지합니다. 새 빌드가 성공한 경우에만 앱을 교체합니다.
+# 소스·Go 버전·플랫폼이 같으면 OS 사용자 캐시의 빌드 결과를 재사용합니다.
 spine dev
 
-# 운영 환경 변수(SPINE_ENV=production)로 실행합니다.
+# 운영 환경 변수(ENV=production)로 실행합니다.
 spine run
 
 # 정적 검사와 테스트를 실행합니다.
@@ -220,9 +222,61 @@ composition = "./internal/application"
 port = 8080
 ```
 
+## Agentic CLI 프로토콜
+
+0.1.3부터 `--json`을 지원하는 명령은 성공과 실패를 모두 `spine.cli-result/v1` envelope로
+반환합니다. Agent는 평문 메시지를 해석하지 않고 `ok`, `exit_code`, `result`, `error.code`,
+`error.retryable`, `error.hint`를 기준으로 다음 행동을 결정할 수 있습니다.
+
+```json
+{
+  "schema_version": "spine.cli-result/v1",
+  "ok": false,
+  "command": "generate",
+  "exit_code": 2,
+  "error": {
+    "code": "USAGE_ERROR",
+    "message": "usage: spine generate ...",
+    "retryable": true,
+    "hint": "Run `spine schema --json` to inspect valid arguments and options."
+  }
+}
+```
+
+Agent의 권장 시작 순서는 다음과 같습니다.
+
+```sh
+# 명령, 인자, 옵션, 파일·네트워크·장기 실행 side effect를 발견합니다.
+spine schema --json
+
+# 프로젝트 설정, capability, offline doctor, 정적 계약과 권장 다음 행동을 한 번에 읽습니다.
+spine context --json
+
+# 특정 실행 경로와 전체 로컬 검증 결과도 구조화해 읽을 수 있습니다.
+spine explain http GET /orders/:id --json
+spine verify --json
+
+# 현재 디렉터리에 의존하지 않고 명시한 프로젝트에서 실행합니다.
+spine context --root ./todo-api --json
+```
+
+기계 판독 모드의 exit code는 `0` 성공, `2` 사용법 오류, `3` 사전조건 실패,
+`4` 파일 또는 동시 변경 충돌, `5` 검증 실패, `10` 결과 인코딩 같은 내부 실패를 의미합니다.
+`context`와 `verify`는 외부 database, broker와 배포 환경을 확인한 것처럼 주장하지 않고
+`evidence_boundary`에 관찰 범위를 명시합니다.
+
+장기 실행되는 개발 서버는 JSONL event stream을 제공합니다. 애플리케이션의 stdout/stderr도
+`process_output` event로 감싸므로 Agent의 JSON parser를 깨뜨리지 않습니다. 프로세스 시작 event의
+`address`는 설정상 예상 주소이며 실제 listener readiness를 관찰하지 않았음을
+`readiness_observed: false`로 명시합니다.
+
+```sh
+spine dev --events jsonl
+```
+
 ## 안전한 생성과 셸 지원
 
-생성 명령은 기존 파일을 덮어쓰지 않습니다. 의도적으로 교체할 때만 `--force`를 사용하세요. 결과만 확인하려면 `--dry-run`, 자동화 용도에는 `--json`을 사용할 수 있습니다. `--dry-run`은 적용할 파일별 diff를 함께 출력하며 JSON 결과에도 `diff` 필드가 포함됩니다.
+생성 명령은 기존 파일을 덮어쓰지 않습니다. 의도적으로 교체할 때만 `--force`를 사용하세요. 결과만 확인하려면 `--dry-run`, 자동화 용도에는 `--json`을 사용할 수 있습니다. `--dry-run --json`은 적용할 파일별 diff, create/modify operation, 전후 SHA-256과 대상 파일 집합의 `base_hash`를 반환합니다. 실제 적용에 `--if-match <base_hash>`를 전달하면 계획 이후 대상이 하나라도 달라진 경우 전체 작업이 적용 전에 실패합니다.
 파일 계획은 사전 검사 후 원자적으로 반영되며, 프로젝트 단위 generation lock이 동시에 실행된
 두 CLI 프로세스의 composition root lost update를 차단합니다. 비정상 종료로 남은 일반 lock 파일은
 10분이 지난 뒤에만 stale lock으로 회수하고 symlink나 다른 비정상 대상은 자동 삭제하지 않습니다.
@@ -230,5 +284,7 @@ port = 8080
 ```sh
 spine g resource orders --dry-run
 spine g resource orders --json
+spine g resource orders --dry-run --json
+spine g resource orders --if-match <base_hash> --json
 spine completion powershell | Invoke-Expression
 ```
