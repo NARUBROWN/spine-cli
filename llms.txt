@@ -1,0 +1,893 @@
+# Spine CLI
+
+> Spine CLI는 Spine 애플리케이션을 생성하고, 소스 기반 실행 계약을 검사·설명·검증하며,
+> 에이전트가 안전하게 변경 계획을 세우고 적용하도록 기계 판독 프로토콜을 제공하는 Go CLI이다.
+
+이 문서는 AI agent와 자동화 도구를 위한 상세 작업 계약이다. 사람이 빠르게 설치하고 사용하는
+방법은 [README.md](./README.md)를 먼저 읽는다. 이 문서와 구현이 다르면 현재 checkout의 소스와
+테스트를 최종 근거로 사용한다.
+
+## 1. 식별 정보와 기준 버전
+
+- 프로젝트와 제품 이름: `spine-cli`
+- 설치되는 실행 파일과 명령: `spine`
+- 현재 CLI 버전: `0.1.3`
+- `spine version` 출력: `spine-cli 0.1.3`
+- Go module: `github.com/NARUBROWN/spine-cli`
+- 이 저장소와 생성 프로젝트의 Go 버전: `1.25.5`
+- 새 프로젝트가 사용하는 Spine 버전: `github.com/NARUBROWN/spine v0.5.1`
+- 라이선스: MIT
+
+버전을 추측하지 않는다. 현재 checkout에서는 `internal/cli/cli.go`의 `version`, `go.mod`,
+`internal/cli/new.go`의 project template을 함께 확인한다. README의 설치 tag도 release 시 같이
+갱신해야 한다.
+
+## 2. Agent가 반드시 지킬 규칙
+
+1. 명령과 옵션을 기억에 의존하지 말고 먼저 `spine schema --json`으로 발견한다.
+2. 구현 여부와 한계는 `spine capabilities --json`으로 확인한다.
+3. 프로젝트 작업은 `spine context --root <project-directory> --json`으로 시작한다.
+4. JSON 응답은 항상 바깥 `spine.cli-result/v1` envelope를 먼저 읽고 실제 payload는
+   `result`에서 꺼낸다.
+5. `inspect`의 성공을 검증 통과로 해석하지 않는다. `analysis_complete`, diagnostics를 확인하고
+   gate에는 `contract check` 또는 `verify`를 사용한다.
+6. 생성 전에는 `--dry-run --json`으로 `result.changes`, `result.diff`, `result.base_hash`를
+   검토한다. 승인된 hash를 실제 명령의 `--if-match`로 전달한다.
+7. 기존 파일을 바꾸는 `--force`는 dry-run diff를 검토한 뒤에만 사용한다.
+8. 정적 소스 검사, 로컬 Go 검증, 부분 runtime probe, 외부 인프라 E2E를 서로 다른 증거로
+   기록한다.
+9. `contract probe`, `verify`, `dev`, `run`은 단순 read-only 조회로 취급하지 않는다. Go 명령,
+   cache/file 변경, module 해석, 프로젝트 코드 실행이 발생할 수 있다.
+10. `capabilities`가 `implemented:false`로 반환한 기능을 우회하거나 지원한다고 주장하지 않는다.
+
+## 3. 권장 시작 순서
+
+```sh
+spine schema --json
+spine capabilities --json
+spine context --root <project-directory> --json
+```
+
+`context`는 config, capability, offline doctor, 정적 계약, evidence boundary와 다음 행동을 한 번에
+반환한다. contract 또는 doctor가 유효하지 않으면 process exit가 실패여도 진단 payload가
+`result`에 들어갈 수 있으므로 stdout JSON을 버리지 않는다.
+
+`context.next_actions`의 `safe`도 확인한다. 현재 static `contract check` 제안은 `safe:true`이고,
+Go 명령과 module 해석 가능성이 있는 `verify` 제안은 `safe:false`이다.
+
+변경이 필요하면 다음 순서를 사용한다.
+
+```text
+schema/capabilities 확인
+  -> context와 inspect로 현재 상태 수집
+  -> 생성 dry-run JSON 검토
+  -> 동일 base_hash로 적용
+  -> contract check
+  -> verify
+  -> 필요할 때만 partial runtime probe
+  -> DB/broker/listener가 범위에 있으면 별도 external E2E
+```
+
+현재 디렉터리에 의존하지 않도록 프로젝트 대상 명령에는 전역 옵션
+`--root <project-directory>`를 권장한다. 이 옵션은 명령 앞이나 뒤에 둘 수 있고, 한 번만 사용할 수
+있다. CLI는 지정한 디렉터리로 이동해 명령을 수행한 뒤 호출자의 원래 working directory로
+복귀한다.
+
+## 4. 기계 판독 결과 프로토콜
+
+### 4.1 JSON envelope
+
+지원 명령에 `--json`을 주면 성공과 실패 모두 다음 envelope로 반환한다.
+
+```json
+{
+  "schema_version": "spine.cli-result/v1",
+  "ok": true,
+  "command": "context",
+  "exit_code": 0,
+  "result": {}
+}
+```
+
+실패 결과는 `error`를 포함한다.
+
+```json
+{
+  "schema_version": "spine.cli-result/v1",
+  "ok": false,
+  "command": "generate resource",
+  "exit_code": 4,
+  "error": {
+    "code": "CONFLICT",
+    "message": "generation targets changed since dry-run",
+    "retryable": true,
+    "hint": "Create a new dry-run plan and retry only after reviewing the changed files."
+  }
+}
+```
+
+Agent는 다음 순서로 해석한다.
+
+1. `schema_version`이 지원하는 envelope인지 확인한다.
+2. process exit와 함께 `ok`, `exit_code`를 확인한다.
+3. 성공 여부와 관계없이 존재하는 `result`를 읽는다.
+4. 실패하면 `error.code`, `retryable`, `hint`를 읽고 재계획한다.
+5. command-specific payload의 자체 `schema_version`이 있으면 별도로 분기한다.
+
+`--format json`은 JSON 지원 명령에서 `--json`의 alias로 정규화되지만, canonical form인
+`--json`을 권장한다.
+
+### 4.2 JSON 지원 명령
+
+- `new`
+- `generate`, `g`
+- `inspect`
+- `explain`
+- `verify`
+- `doctor`
+- `capabilities`
+- `schema`
+- `context`
+- `contract check`
+- `contract diff`
+- `contract probe`
+
+다음 명령은 `spine.cli-result/v1` envelope를 지원하지 않는다.
+
+- `help`, `version`
+- `dev`: 대신 `--events jsonl` 사용
+- `run`, `test`, `check`, `build`, `completion`
+- `contract snapshot`
+- `contract export`: OpenAPI 또는 AsyncAPI JSON 문서를 stdout/file로 직접 출력
+
+미지원 명령에 `--json`을 전달하면 option을 무시하지 않고 `USAGE_ERROR`로 실패한다.
+
+### 4.3 기계 모드 exit code
+
+| Code | 의미 | 일반적인 다음 행동 |
+| --- | --- | --- |
+| `0` | 성공 | `result` 처리 |
+| `2` | 사용법 오류 | `spine schema --json`으로 인자·옵션 재확인 |
+| `3` | 사전조건 또는 일반 실행 실패 | config, cwd, 파일, toolchain 확인 |
+| `4` | 기존 파일, generation lock, stale plan 충돌 | 새 dry-run을 만들고 diff 재검토 |
+| `5` | 계약 또는 검증 실패 | `context`, contract diagnostics, stage 결과 확인 |
+| `10` | 결과 인코딩 같은 내부 실패 | 자동 재시도하지 말고 CLI 문제로 보고 |
+
+현재 `retryable`은 exit `10`만 `false`이다. `retryable:true`는 무조건 같은 명령을 반복하라는 뜻이
+아니라 입력이나 상태를 고친 뒤 다시 시도할 수 있다는 뜻이다.
+
+### 4.4 주요 payload schema
+
+- command schema: `spine.command-schema/v1alpha1`
+- project context: `spine.project-context/v1alpha1`
+- capabilities: `spine.cli-capabilities/v1alpha1`
+- static contract: `spine.contract/v1alpha1`
+- contract check: `spine.contract-check/v1alpha1`
+- verification: `spine.verification/v1alpha1`
+- semantic diff: `spine.contract-diff/v1alpha1`
+- partial runtime probe: `spine.runtime-probe/v1alpha1`
+- dev event stream: `spine.dev-event/v1alpha1`
+
+`v1alpha1` payload는 필드를 추측해 고정하지 말고 `schema_version`별로 처리한다.
+
+## 5. 프로젝트 모델과 spine.toml
+
+`spine.toml`은 Spine CLI가 읽는 유일한 프로젝트 설정 파일이다.
+
+```toml
+module = "github.com/acme/todo-api"
+entrypoint = "."
+composition = "./internal/application"
+port = 8080
+```
+
+허용되는 key는 정확히 다음 네 개다.
+
+- `module`: 비어 있지 않은 quoted string이며 `go.mod`의 module path와 같아야 함
+- `entrypoint`: `go build`가 사용할 package/path
+- `composition`: 정적 분석과 등록 편집이 사용할 파일 또는 디렉터리
+- `port`: 1–65535, 기본값 8080
+
+알 수 없는 key, 잘못된 quoting, 빈 module, 잘못된 port는 fail closed한다. application-specific
+설정은 `spine.toml`에 임의 key로 추가하지 말고 애플리케이션 자체 설정으로 관리한다.
+
+`generate`는 현재 위치에서 위로 올라가며 `go.mod`를 찾아 project root를 결정한다. root 또는
+`src` 밖에서 standalone component를 생성하면 `src`를 사용하고, 현재 위치가 `src` 아래이면
+그 package에 생성한다. `resource`, `slice`, `consumer`, `websocket`은 항상 정해진 `src/...`
+경로에 생성된다.
+
+## 6. 전체 명령 요약
+
+| 명령 | 핵심 동작 | Side effect/주의 |
+| --- | --- | --- |
+| `new <project>` | 새 Spine 프로젝트 계획·생성 | 파일 작성 |
+| `generate|g <kind> <name>` | 구성 요소 생성과 기본 자동 등록 | 파일 작성, project lock |
+| `schema` | 명령·인자·옵션·효과 발견 | 조회 |
+| `capabilities` | 구현/미구현 기능과 한계 발견 | 조회 |
+| `context` | project/config/doctor/contract 묶음 조회 | 조회, 결과가 invalid면 실패 |
+| `inspect` | 정적 실행 계약 상세 조회 | 조회이며 gate가 아님 |
+| `explain` | 한 HTTP/consumer/WebSocket 경로 설명 | 정적 근거만 사용 |
+| `contract check` | 계약 completeness와 diagnostic 검증 | CI gate |
+| `verify` | contract, gofmt, vet, test | Go 실행 및 module 해석 가능 |
+| `contract snapshot` | 현재 계약 저장 | 파일 작성 |
+| `contract diff` | snapshot과 의미 단위 비교 | 차이가 있으면 실패 |
+| `contract export` | OpenAPI/AsyncAPI 3.1 생성 | stdout 또는 파일 작성 |
+| `contract probe` | 부분 runtime registry 대조 | 임시 파일, `go run`, 프로젝트 코드 실행 |
+| `doctor` | toolchain/config/정적 계약 offline 진단 | 외부 연결 없음 |
+| `dev` | watch/build/process 교체 | 장기 실행, cache, listener는 앱 책임 |
+| `run` | production 환경으로 cached build 실행 | 장기 실행, cache, 프로젝트 코드 실행 |
+| `test` | `go test ./...` | Go/module 실행 |
+| `check` | gofmt 상태, vet, test | 파일은 수정하지 않음 |
+| `build` | `bin/<module-base>` 생성 | 파일 작성, Go/module 실행 |
+| `completion <shell>` | bash/zsh/PowerShell completion 출력 | 조회 |
+| `version`, `help` | 버전 또는 도움말 출력 | 조회 |
+
+`schema`의 `effects.writes_files`, `network`, `long_running`, `supports_json`,
+`supports_dry_run`을 계획 시 우선 읽는다. `network:true`는 Go module 해석 가능성을 포함한
+보수적인 표시다.
+
+현재 구현상 알려진 schema 차이가 하나 있다. `contract export`의 schema는 `output`을 required로
+표시하지만 실제 구현은 `--output`을 생략하면 JSON document를 stdout으로 출력한다. 이 경우
+현재 checkout의 구현과 테스트 가능한 동작을 기준으로 하고, agent automation에서는 모호함을
+피하기 위해 명시적인 `--output`을 권장한다. 또한 schema에는 `g`, `--format json`, `-h`, `-v`
+같은 alias가 모두 열거되지 않으므로 canonical command를 사용한다.
+
+## 7. 새 프로젝트 생성
+
+```text
+spine new <project>
+  [--module <module-path>]
+  [--dry-run]
+  [--force]
+  [--if-match <base_hash>]
+  [--json]
+```
+
+`--module`을 생략하면 `github.com/your-org/<project>`를 사용하므로 실제 프로젝트에서는 명시한다.
+
+생성 파일:
+
+```text
+<project>/
+  .gitignore
+  README.md
+  go.mod
+  main.go
+  spine.toml
+  internal/application/
+    application.go
+    application_test.go
+```
+
+생성된 `main.go`는 `BuildApplication`의 오류를 확인하고, `app.Validate(options)`를 통과한 뒤
+`app.Run(options)`을 호출한다. composition root에는 `GET /health`와 명시적인
+`boot.HTTPOptions`가 있다. `go mod tidy`는 자동 실행하지 않는다.
+
+기존 destination은 `--force` 없이는 실패한다. `new`도 target preflight, staging, rename,
+rollback을 사용하지만 `.spine-generate.lock`은 사용하지 않는다. generate의 project lock을
+`new`에도 적용된다고 가정하지 않는다.
+
+JSON `result`에는 `project`, `module`, `directory`, `files`, `dry_run`, `base_hash`, `changes`,
+`diff`가 포함된다.
+
+## 8. 생성기 공통 계약
+
+```text
+spine generate|g <resource|slice|consumer|websocket|controller|service|repository> <name>
+  [--register|--no-register]
+  [--dry-run]
+  [--force]
+  [--if-match <base_hash>]
+  [--json]
+  [generator-specific options]
+```
+
+- 기본값은 `--register`이다. 파일만 생성하려면 `--no-register`를 명시한다.
+- 이름에는 문자, 숫자, `-`, `_`만 사용할 수 있고 분리된 단어가 숫자로 시작할 수 없다.
+- 생성되는 모든 Go source는 적용 전에 `go/format.Source`로 검증·정규화한다.
+- 자동 등록은 기존 constructor 이름 중복, route 충돌, 잘못된 composition signature를
+  적용 전에 거부한다.
+- composition root 수정과 생성 파일은 하나의 file-change plan에 포함된다.
+- JSON `files`는 새 artifact 목록만 나타낼 수 있다. composition/route 파일을 포함한 실제 전체
+  mutation은 반드시 `result.changes`를 읽는다.
+
+### 8.1 resource
+
+```sh
+spine g resource user
+```
+
+```text
+src/user/
+  user_route.go
+  user_repository.go
+  user_service.go
+  user_controller.go
+```
+
+`Register(app spine.App) error`가 세 constructor와 `GET /user/:id`를 등록한다. domain model,
+aggregate, ORM model/tag, table relation, persistence adapter는 생성하지 않는다.
+
+### 8.2 vertical slice
+
+```sh
+spine g slice order \
+  --storage memory \
+  --field name:string \
+  --field quantity:int
+```
+
+- `--storage memory`와 하나 이상의 `--field`가 필수다.
+- field syntax는 `name:type`이다.
+- 허용 type: `string`, `bool`, `int`, `int64`, `float64`
+- `id`는 생성 ID용 예약 이름이다.
+- duplicate field는 실패한다.
+
+생성 결과는 model, create DTO, repository interface, mutex 기반 memory adapter, service,
+POST/GET controller, module registration, service test다. memory repository는 개발용이며 process가
+종료되면 데이터가 사라진다. Bun/GORM, transaction, outbox가 구현됐다고 해석하지 않는다.
+
+### 8.3 consumer
+
+```sh
+spine g consumer order \
+  --topic order.created \
+  --field order_id:int64
+```
+
+`src/consumer/order/`에 typed event, handler, module을 생성한다. topic과 하나 이상의 field가
+필수다. 생성 handler는 의도적으로 `<name> consumer handler is not implemented` 오류를 반환한다.
+실제 처리 로직을 구현하고 sentinel 오류를 제거하기 전에는 contract check와 verify가 실패하는
+것이 정상이다.
+
+CLI는 Kafka/RabbitMQ transport, delivery semantics, retry, dead-letter policy를 생성하거나
+추정하지 않는다.
+
+### 8.4 websocket
+
+```sh
+spine g websocket chat \
+  --path /ws/chat \
+  --field message:string
+```
+
+`src/websocket/chat/`에 typed message, handler, module을 생성한다. path는 `/`로 시작해야 하고
+하나 이상의 field가 필요하다. 생성 handler도 구현 전 fail closed한다.
+
+CLI는 authentication, origin policy, capacity, response behavior를 선택하지 않는다.
+
+### 8.5 controller, service, repository
+
+```sh
+spine g repository user
+spine g service user --depends user_repository
+spine g controller user --depends user_service audit_repository
+```
+
+- 현재 `src` package 또는 현재 `src` 하위 package에 `<name>_<kind>.go`를 생성한다.
+- `--depends`는 같은 디렉터리의 file name을 `.go` 없이 하나 이상 받는다.
+- path가 포함된 이름, `_test.go`, 다른 package, 중복 dependency는 거부한다.
+- 대상 파일이 선언한 `Controller`, `Service`, `Repository` suffix type을 constructor dependency로
+  사용한다.
+- service/repository는 constructor를 composition root에 등록한다.
+- controller는 constructor를 등록하고 `src/route/route.go`에 `GET /<name>/:id`를 모은다.
+- composition root의 `route.Register(app)`는 한 번만 유지한다.
+
+## 9. 안전한 file mutation protocol
+
+### 9.1 권장 절차
+
+1. 동일한 command에 `--dry-run --json`을 사용한다.
+2. envelope의 `result.changes` 전체를 읽는다.
+3. 각 `operation`, `path`, `before_sha256`, `after_sha256`를 검토한다.
+4. `result.diff`를 검토한다.
+5. `result.base_hash`를 보관한다.
+6. 승인된 동일 command를 `--if-match <base_hash> --json`으로 실행한다.
+7. conflict면 자동 force/retry하지 말고 새 dry-run부터 반복한다.
+
+기존 target을 교체하는 계획 자체를 미리 보려면 `--force --dry-run --json`이 필요하다.
+`--force` 없이 dry-run하더라도 overwrite preflight가 기존 파일을 거부한다. dry-run에서 `--force`는
+쓰기 권한이 아니라 overwrite 계획을 표시하도록 허용하는 옵션이며, 실제 적용 시에는 다시 신중히
+검토한다.
+
+### 9.2 hash와 apply 범위
+
+- `base_hash`는 전체 repository hash가 아니라 file-change plan의 모든 target 현재 상태 hash다.
+- target마다 존재 여부와 current SHA-256이 반영된다.
+- `changes.operation`은 `create`, `modify`, `unchanged` 중 하나다.
+- `--if-match`가 다르면 어떤 target도 적용하지 않는다.
+- 모든 target을 먼저 preflight하고 대상과 같은 directory에 stage한다.
+- stage가 끝난 뒤 rename으로 반영하며 중간 실패 시 이미 바꾼 파일을 역순 복구한다.
+- 기본값은 기존 file overwrite 거부이고, 의도적인 교체만 `--force`를 사용한다.
+
+### 9.3 generation lock
+
+`generate`는 project root의 `.spine-generate.lock`을 exclusive create하여 동시 composition update의
+lost update를 막는다.
+
+- 10분 이내 lock은 active로 보고 실패한다.
+- 10분을 넘은 stale regular file만 자동 회수한다.
+- symlink, directory 등 non-regular target은 자동 제거하지 않는다.
+- release 시 lock 내용이 현재 owner와 같을 때만 삭제한다.
+- lock 오류가 반복되어도 agent가 임의 삭제하지 말고 파일 type, owner, age를 먼저 확인한다.
+
+## 10. Composition root 규칙
+
+자동 등록과 정적 분석이 가장 잘 동작하는 형태는 다음과 같다.
+
+```go
+func BuildApplication() (spine.App, boot.Options, error) {
+	app := spine.New()
+
+	if err := user.Register(app); err != nil {
+		return nil, boot.Options{}, err
+	}
+
+	return app, boot.Options{HTTP: &boot.HTTPOptions{}}, nil
+}
+```
+
+규칙:
+
+- `composition`은 file 또는 directory일 수 있다.
+- directory이면 바로 아래 non-test Go files에서 composition을 찾는다.
+- 함수 body top level에 직접적인 `app := spine.New()` assignment가 있어야 한다.
+- 자동 module/route 등록을 위해 함수는 `(spine.App, boot.Options, error)`를 반환해야 한다.
+- `Register(app)`의 error를 검사하고 그대로 반환한다.
+- registration은 직접적이고 무조건적인 형태로 유지한다.
+- helper에 `app`을 넘기거나, 조건문/loop/defer/goroutine/function literal에 registration을 숨기지
+  않는다.
+- legacy composition이 요구 형태가 아니면 `--no-register`로 생성한 뒤 사용자가 명시적으로
+  migration한다.
+
+## 11. 정적 실행 계약
+
+`spine inspect`는 `spine.contract/v1alpha1`, `analysis_mode:"static-source"` 계약을 만든다.
+
+수집 범위:
+
+- module, entrypoint, composition
+- constructor와 정적으로 해석한 DI dependency
+- HTTP method, path, handler, parameter binding, return type
+- global/scope/route interceptor
+- consumer와 WebSocket registration
+- local resource/module의 `Register(app)`
+- `boot.Options` configuration literal
+- source location과 diagnostics
+
+분석기는 composition root의 직접 call과 현재 module 아래의 local `Register` source를 따라간다.
+constructor와 handler signature를 찾을 때 project의 non-test Go source를 검사하며 `.git`, `bin`,
+`vendor`, `.spine*` 경로는 제외한다.
+
+### 11.1 중요한 exit semantics
+
+`inspect`는 관찰 명령이다. source parsing과 기본 inspection이 성공하면 error diagnostic이 있어도
+exit 0과 envelope `ok:true`일 수 있다. 다음을 반드시 별도로 확인한다.
+
+- `result.analysis_complete`
+- `result.diagnostics[].severity`
+- `result.diagnostics[].code`
+
+실제 gate:
+
+- `spine contract check [--warnings-as-errors]`
+- `spine verify [--warnings-as-errors]`
+
+`analysis_complete`는 error diagnostic이 하나라도 있으면 `false`다. warning만 있으면 기본
+completeness는 유지되지만 `--warnings-as-errors`에서는 validation이 실패한다.
+
+### 11.2 fail-closed error 범주
+
+등록 흐름 불확실성:
+
+- `REGISTRATION_CONDITIONAL`
+- `REGISTRATION_HELPER_UNRESOLVED`
+- `DEFERRED_REGISTRATION_UNRESOLVED`
+
+HTTP 계약 불확실성/충돌:
+
+- `HTTP_ROUTE_ARGUMENTS_INVALID`
+- `HTTP_ROUTE_DYNAMIC`
+- `HTTP_ROUTE_OPTION_UNRESOLVED`
+- `HTTP_HANDLER_SIGNATURE_UNRESOLVED`
+- `HTTP_HANDLER_SIGNATURE_AMBIGUOUS`
+- `HTTP_PATH_BINDING_MISMATCH`
+- `HTTP_ROUTE_DUPLICATE`
+- `HTTP_ROUTE_AMBIGUOUS`
+
+DI/resource 불확실성:
+
+- `CONSTRUCTOR_SIGNATURE_UNRESOLVED`
+- `CONSTRUCTOR_SIGNATURE_AMBIGUOUS`
+- `RESOURCE_SOURCE_UNREADABLE`
+- `RESOURCE_SOURCE_INVALID`
+
+Message 계약 불확실성/충돌:
+
+- `CONSUMER_REGISTRATION_ARGUMENTS_INVALID`
+- `CONSUMER_REGISTRATION_DYNAMIC`
+- `CONSUMER_HANDLER_SIGNATURE_UNRESOLVED`
+- `CONSUMER_HANDLER_SIGNATURE_AMBIGUOUS`
+- `CONSUMER_HANDLER_NOT_IMPLEMENTED`
+- `CONSUMER_DUPLICATE`
+- `WEBSOCKET_REGISTRATION_ARGUMENTS_INVALID`
+- `WEBSOCKET_REGISTRATION_DYNAMIC`
+- `WEBSOCKET_HANDLER_SIGNATURE_UNRESOLVED`
+- `WEBSOCKET_HANDLER_SIGNATURE_AMBIGUOUS`
+- `WEBSOCKET_HANDLER_NOT_IMPLEMENTED`
+- `WEBSOCKET_DUPLICATE`
+
+### 11.3 security warning
+
+- `INSECURE_TRANSPORT_ENABLED`: broker option이 insecure transport를 명시적으로 허용
+- `HTTP_RECOVERY_DISABLED`: 기본 panic recovery boundary 비활성화
+- `WEBSOCKET_WILDCARD_ORIGIN`: 모든 WebSocket origin 허용
+
+기본 contract check는 warning을 보고하되 통과한다. 보안 정책에서 차단하려면
+`--warnings-as-errors`를 사용한다.
+
+### 11.4 handler parameter binding
+
+HTTP 정적 binding:
+
+- `context.Context`, `spine.Ctx`, `*ExecutionContext` suffix: context
+- `path.*`: route path parameter에 순서대로 binding
+- `query.*`: query
+- `header.*`: header
+- pointer type: request body
+- 그 외: unresolved value
+
+Message 정적 binding:
+
+- context type: context
+- WebSocket `*ConnectionID` suffix: connection
+- consumer의 첫 string parameter: event name
+- 그 외: payload
+
+이 규칙은 static source 해석이며 runtime binder 관찰 결과가 아니다.
+
+## 12. 계약 명령의 정확한 의미
+
+### 12.1 inspect와 explain
+
+```sh
+spine inspect --root <project-directory> --json
+spine explain http GET /orders/:id --root <project-directory> --json
+spine explain consumer order.created --root <project-directory> --json
+spine explain websocket /ws/orders --root <project-directory> --json
+```
+
+HTTP explain 순서:
+
+1. handler signature에서 request value 해석
+2. 적용 가능한 global/route interceptor의 `PreHandle`
+3. handler 호출
+4. response 준비와 검증
+5. 성공한 interceptor의 `BeforeResponse` 역순 실행
+6. 준비된 response flush
+7. `AfterCompletion` cleanup/observation
+
+이는 정적 실행 계약 설명이며 runtime trace가 아니다.
+
+### 12.2 contract check와 verify
+
+```sh
+spine contract check --warnings-as-errors --json
+spine verify --warnings-as-errors --json
+```
+
+`contract check`는 completeness, error/warning count, diagnostics와 evidence boundary를 반환한다.
+
+`verify` 단계:
+
+1. 정적 contract gate
+2. gofmt 상태 검사
+3. `go vet ./...`
+4. `go test ./...`
+
+contract가 invalid면 Go 단계는 실행하지 않는다. `verify`는 source를 gofmt으로 수정하지 않으며,
+race detector와 `git diff --check`도 포함하지 않는다.
+
+### 12.3 snapshot과 semantic diff
+
+```sh
+spine contract snapshot
+spine contract snapshot --output contracts/api.json
+spine contract snapshot --force
+
+spine contract diff
+spine contract diff --against contracts/api.json --json
+```
+
+- 기본 snapshot path: `spine.contract.json`
+- error diagnostic이 있는 contract는 snapshot하지 않는다.
+- 기존 snapshot overwrite에는 `--force`가 필요하다.
+- diff는 현재 contract에 error가 있으면 비교하지 않는다.
+- snapshot schema가 현재 `spine.contract/v1alpha1`과 다르면 실패한다.
+- source line 이동과 diagnostics 자체는 semantic diff에서 제외한다.
+- module, entrypoint, composition, constructor dependency, route/handler/signature/interceptor,
+  consumer, WebSocket, resource, boot configuration의 의미 변화는 비교한다.
+- 차이가 있으면 removed/added를 반환하고 exit 5로 실패한다.
+
+### 12.4 OpenAPI와 AsyncAPI export
+
+```sh
+spine contract export --format openapi --output openapi.json
+spine contract export --format asyncapi --output asyncapi.json
+```
+
+`--output`을 생략하면 document를 stdout으로 직접 출력할 수 있다. 기존 output file을 교체하려면
+`--force`가 필요하다. error diagnostic이 있는 contract는 export하지 않는다.
+
+OpenAPI 3.1 export:
+
+- 확인 가능한 HTTP path와 path parameter
+- pointer request DTO와 source에서 찾은 struct schema
+- `httpx.Response[T]`의 body type
+- runtime이 정하는 response status는 `default` response와 `x-spine-*` evidence로 표현
+- 해결하지 못한 query/header/value는 별도 extension에 보존
+- dynamic registration을 추정하지 않음
+
+AsyncAPI 3.1 export:
+
+- consumer/WebSocket channel과 receive operation
+- typed payload schema와 handler metadata
+- broker protocol, delivery guarantee, retry/DLQ를 추정하지 않음
+
+### 12.5 partial runtime probe
+
+```sh
+spine contract probe --root <project-directory> --json
+```
+
+probe는 다음을 실제 실행한다.
+
+1. project 안에 임시 `.spine-probe-*` Go package 생성
+2. 별도 `go run` process 시작
+3. composition package의 `BuildApplication()` 실행
+4. `app.Validate(options)` 실행
+5. public consumer/WebSocket registry 수집
+6. static contract와 name/handler 대조
+7. 임시 package 제거
+
+제약:
+
+- composition은 module root 아래의 import 가능한 directory여야 한다.
+- composition이 file 또는 module root `.`이면 probe가 실패한다.
+- HTTP routes, DI constructors, interceptors는 현재 `spine.App` public API로 관찰할 수 없다.
+- database/broker connectivity, listener readiness, deployed behavior를 실행·증명하지 않는다.
+- `BuildApplication`에 side effect가 있으면 프로젝트 코드 실행으로 그 side effect가 발생할 수 있다.
+- `go run`은 module download/cache/network를 사용할 수 있다.
+
+따라서 probe 전에 composition source를 읽고 실행 위험을 판단한다. probe 성공을 full runtime manifest나
+external E2E로 표현하지 않는다.
+
+## 13. 증거 수준
+
+| 수준 | 명령 | 증명하는 것 | 증명하지 않는 것 |
+| --- | --- | --- | --- |
+| 정적 소스 | `inspect`, `explain`, `contract check` | 직접 해석 가능한 등록, signature, config, completeness | 실제 Go program 전체 실행, runtime registry, 외부 인프라 |
+| 로컬 Go 검증 | `verify` | 정적 계약, gofmt 상태, vet, unit/integration tests | DB/broker/listener/deploy가 실제 준비됐다는 사실 |
+| 부분 runtime | `contract probe` | `BuildApplication`, `app.Validate`, consumer/WebSocket registry parity | HTTP/DI/interceptor runtime parity, 외부 연결, listener readiness |
+| 외부 E2E | CLI 외 별도 환경 | 명시적으로 구성·관찰한 DB/broker/listener/deployed behavior | 수행하지 않은 다른 환경이나 장애 조건 |
+
+보고할 때 각 결과를 분리한다. 예:
+
+```text
+Static contract check: passed.
+Local gofmt/vet/test: passed.
+Partial runtime consumer/WebSocket parity: not run.
+Database, broker, listener, deployment E2E: not run.
+```
+
+`doctor`도 `scope:"offline"`이다. Go toolchain, config, module, entrypoint, composition, Spine dependency,
+static contract만 확인한다. `spine doctor --connect`는 아직 구현되지 않았고 명시적으로 실패한다.
+
+## 14. capabilities와 명시적 non-goals
+
+`spine capabilities --json`을 매 실행에서 현재 근거로 사용한다. 현재 명시적으로 미구현인 주요 기능:
+
+- Kafka generator
+- RabbitMQ generator
+- Bun generator
+- full runtime manifest
+- infrastructure-connect doctor
+
+현재 생성 범위의 non-goals:
+
+- domain model과 aggregate 설계
+- ORM 선택, model/tag, relation mapping
+- production persistence adapter
+- transaction/outbox recipe
+- broker protocol과 delivery/retry/dead-letter semantics
+- WebSocket authentication/origin/capacity/response policy
+- deployed environment 검증
+
+repository generator는 persistence-neutral skeleton이다. vertical slice의 memory storage는
+development-only다. 아직 없는 기능을 generated comment, README, automation 결과에서 구현된 것처럼
+표현하지 않는다.
+
+## 15. dev, run, build, check
+
+### 15.1 dev
+
+```sh
+spine dev
+spine dev --events jsonl
+```
+
+동작:
+
+- 500ms 간격으로 project file state를 감시한다.
+- 변경 build가 성공한 뒤에만 기존 application process를 교체한다.
+- build가 실패하면 이전 process를 유지한다.
+- application이 스스로 종료돼도 source watcher는 계속 동작한다.
+- child에는 `SPINE_PORT=<spine.toml port>`, `ENV=development`를 전달한다.
+- source/build identity가 같으면 OS user cache의 binary를 재사용한다.
+- source hash는 Go source뿐 아니라 embed asset 등 project files의 내용도 포함한다.
+- `.git`, `bin`, `.gocache`, `.gomodcache`, `.spine*`는 감시 hash에서 제외한다.
+
+JSONL event mode는 child stdout/stderr까지 line별 `process_output` event로 감싸므로 stdout 전체를
+JSON Lines parser로 읽을 수 있다. 주요 event:
+
+- `build_started`, `build_succeeded`, `build_failed`
+- `process_started`, `process_exited`, `process_start_failed`
+- `change_detected`, `watching`, `stopping`
+- `process_output` with `stream:stdout|stderr`
+- configuration/source scan failure events
+
+`process_started.address`는 config로 계산한 예상 주소다. `readiness_observed:false`이므로 listener가
+실제로 bind되고 health check가 통과했다고 해석하지 않는다.
+
+### 15.2 run과 build
+
+- `spine run`은 cached binary를 사용하고 `ENV=production`, `SPINE_PORT`로 process를 실행한다.
+- `spine build`는 config entrypoint를 `bin/<go.mod module basename>`에 직접 빌드한다.
+- `spine test`는 `go test ./...`만 실행한다.
+- `spine check`는 gofmt 상태를 검사한 뒤 `go vet ./...`, `go test ./...`를 실행한다.
+- check는 gofmt을 적용하지 않는다.
+
+## 16. 저장소를 수정하는 Agent용 source map
+
+Source와 test가 문서보다 우선한다. 주요 파일:
+
+- `cmd/spine/main.go`: executable entrypoint
+- `internal/cli/cli.go`: version, top-level dispatch, help
+- `internal/cli/agent.go`: command schema, project context
+- `internal/cli/protocol.go`: JSON envelope, exit/error classification, `--root`
+- `internal/cli/new.go`: project template
+- `internal/cli/generate.go`: generator parsing과 templates
+- `internal/cli/slice.go`, `message.go`: vertical slice와 message templates
+- `internal/cli/dependencies.go`: `--depends` resolution
+- `internal/cli/register.go`: AST composition/route registration
+- `internal/cli/files.go`: plan, hash, diff, atomic apply, rollback
+- `internal/cli/lock.go`: generation concurrency lock
+- `internal/cli/contract.go`: static inspection과 diagnostics
+- `internal/cli/contract_check.go`: contract policy gate
+- `internal/cli/contract_commands.go`: snapshot, diff, explain
+- `internal/cli/runtime_probe.go`: partial runtime reconciliation
+- `internal/cli/openapi.go`, `asyncapi.go`: API contract export
+- `internal/cli/doctor.go`, `capabilities.go`: evidence limits
+- `internal/cli/dev.go`, `commands.go`: build/run/watch/check/verify
+- `internal/cli/cli_test.go`: unit와 integration regression contract
+- `internal/cli/e2e_test.go`: built CLI, generated project, context, verify, cache, JSONL E2E
+
+새 command나 option을 추가할 때 최소한 다음을 함께 갱신한다.
+
+1. dispatch/parser와 help
+2. `currentCommandSchema()`의 argument, option, effect, JSON/dry-run 지원
+3. `supportsJSONProtocol()` 또는 별도 machine stream contract
+4. capabilities가 영향을 받으면 capability report
+5. README의 사람용 요약이 영향을 받을 때만 간결하게 갱신
+6. 이 `llms.txt`의 상세 계약
+7. success, usage failure, machine envelope, side effect 회귀 테스트
+
+## 17. 저장소 검증
+
+권장 명령:
+
+```sh
+GOCACHE=/tmp/spine-cli-gocache go test -race ./...
+GOCACHE=/tmp/spine-cli-gocache go vet ./...
+git diff --check
+```
+
+검증 결과를 과장하지 않는다.
+
+- `spine verify`에는 race detector와 `git diff --check`가 포함되지 않는다.
+- repository E2E는 CLI build, `spine new`, generators, `go mod tidy`, contract check/verify,
+  runtime build cache, JSONL dev process를 실행한다.
+- E2E의 `go mod tidy`와 Go build는 network/module cache가 필요할 수 있다.
+- sandbox의 DNS, network, user cache 권한으로 실패하면 code regression과 환경 제한을 구분한다.
+- E2E를 skip한 race test는 full E2E pass가 아니다.
+
+문서만 바꿔도 Markdown link, command spelling, current version, source contract와의 일치를 검토한다.
+
+## 18. 자주 발생하는 실패와 복구
+
+### `USAGE_ERROR`
+
+- `spine schema --json`을 다시 읽는다.
+- canonical command와 option을 사용한다.
+- JSON 미지원 command에는 `--json`을 붙이지 않는다.
+
+### `PRECONDITION_FAILED`
+
+- `--root`가 실제 project directory인지 확인한다.
+- `go.mod`, `spine.toml`, entrypoint, composition path를 확인한다.
+- `spine.toml module`과 `go.mod module`이 같은지 확인한다.
+
+### `CONFLICT`
+
+- 기존 target이면 `--force --dry-run --json`으로 먼저 diff를 본다.
+- stale plan이면 새 `base_hash`를 만든다.
+- active generation lock이면 해당 process가 끝날 때까지 기다린다.
+- non-regular lock은 자동 삭제하지 않는다.
+
+### `VALIDATION_FAILED`
+
+- envelope `result`의 diagnostics와 stages를 읽는다.
+- `inspect ok`가 아니라 `analysis_complete`와 severity를 확인한다.
+- registration을 direct/unconditional하게 만든다.
+- generated consumer/WebSocket sentinel을 실제 구현으로 교체한다.
+- warning policy가 원인이면 보안 설정을 검토하고 단순히 flag를 제거해 숨기지 않는다.
+
+### runtime probe 실패
+
+- composition이 module root 아래 importable directory인지 확인한다.
+- `BuildApplication`과 `app.Validate`가 listener 없이 실행 가능한지 source를 확인한다.
+- Go module resolution과 cache/network 오류를 분리한다.
+- static/runtime consumer/WebSocket name과 handler mismatch를 확인한다.
+
+## 19. 최소 작업 recipe
+
+### 기존 프로젝트를 변경 없이 이해하기
+
+```sh
+spine schema --json
+spine capabilities --json
+spine context --root <project-directory> --json
+spine inspect --root <project-directory> --json
+```
+
+### 안전하게 resource 생성하기
+
+```sh
+spine g resource order --root <project-directory> --dry-run --json
+# result.changes, result.diff, result.base_hash를 검토한다.
+spine g resource order --root <project-directory> --if-match <base_hash> --json
+spine contract check --root <project-directory> --json
+spine verify --root <project-directory> --json
+```
+
+### 계약 drift를 CI에서 차단하기
+
+```sh
+spine contract check --root <project-directory> --warnings-as-errors --json
+spine contract diff --root <project-directory> --against spine.contract.json --json
+spine verify --root <project-directory> --warnings-as-errors --json
+```
+
+### Agent-friendly development stream 읽기
+
+```sh
+spine dev --root <project-directory> --events jsonl
+```
+
+`process_started`를 readiness로 사용하지 말고, 실제 HTTP listener가 범위라면 별도 health request를
+수행해 관찰한다.
+
+## 20. 최종 판단 규칙
+
+작업 완료 보고에는 다음을 명확히 구분한다.
+
+- 어떤 file을 생성/수정했는가
+- 어떤 static contract command가 통과했는가
+- gofmt/vet/test/race 중 실제 실행한 것은 무엇인가
+- partial runtime probe를 실행했는가
+- DB/broker/listener/deployed E2E를 실제로 관찰했는가
+- sandbox/network/cache 때문에 미실행 또는 실패한 항목은 무엇인가
+
+증거가 없는 기능은 추정하지 않는다. 이 CLI의 핵심 가치는 많은 generator를 제공하는 것이 아니라,
+Spine application의 실행 계약을 명시적으로 생성하고 검사하며, 불완전한 분석과 검증 경계를
+기계 판독 가능한 형태로 정직하게 드러내는 데 있다.
