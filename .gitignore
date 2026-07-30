@@ -4,6 +4,9 @@ bin/
 .gomodcache/
 coverage.out
 
+# Local-only documentation
+docs/
+
 # Local environment files
 .env
 .env.*

@@ -2,9 +2,6 @@
 
 Spine 애플리케이션의 기술적인 골격을 생성하는 Go CLI입니다.
 
-제품 방향과 Nest CLI/FastAPI CLI 대비 완료 기준은
-[실행 계약 컴파일러 전략](docs/execution-contract-compiler.md)에 정리되어 있습니다.
-
 ## 설치와 실행
 
 ```sh
