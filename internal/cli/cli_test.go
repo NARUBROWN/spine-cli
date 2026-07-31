@@ -27,7 +27,7 @@ func TestRunVersionUsesProgramName(t *testing.T) {
 	if code := Run([]string{"version"}, &out, &errOut); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, errOut.String())
 	}
-	if out.String() != "spine-cli 0.1.3\n" {
+	if out.String() != "spine-cli 0.1.4\n" {
 		t.Fatalf("unexpected version output: %q", out.String())
 	}
 }

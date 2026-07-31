@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const version = "0.1.3"
+const version = "0.1.4"
 
 // Run executes the spine project generator command line interface.
 func Run(args []string, out, errOut io.Writer) int {

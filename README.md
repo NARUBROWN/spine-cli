@@ -3,7 +3,8 @@
 Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 생성하고,
 소스 코드에서 실행 계약을 검사·설명·검증하는 Go CLI입니다.
 
-프로젝트 이름은 `spine-cli`, 설치되는 실행 파일과 명령은 `spine`입니다.
+프로젝트 이름은 `spine-cli`입니다. 루트 경로로 설치하면 실행 파일은 `spine-cli`,
+`cmd/spine` 경로로 설치하면 실행 파일과 명령은 `spine`입니다.
 
 - 프로젝트와 HTTP·consumer·WebSocket 구성 요소 생성
 - HTTP, DI, interceptor, consumer, WebSocket 실행 계약 검사
@@ -15,9 +16,17 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 - 새 프로젝트가 사용하는 Spine 버전: v0.5.1
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.1.3
+go install github.com/NARUBROWN/spine-cli@v0.1.4
+spine-cli version
+# spine-cli 0.1.4
+```
+
+짧은 `spine` 명령을 사용하려면 기존 `cmd/spine` 경로로 설치합니다.
+
+```sh
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.1.4
 spine version
-# spine-cli 0.1.3
+# spine-cli 0.1.4
 ```
 
 ## 빠른 시작
