@@ -59,7 +59,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	}
 
 	files := map[string]string{
-		"go.mod":  fmt.Sprintf("module %s\n\ngo 1.27.3\n\nrequire github.com/NARUBROWN/spine v0.5.1\n", module),
+		"go.mod":  fmt.Sprintf("module %s\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine v0.5.1\n", module),
 		"main.go": strings.ReplaceAll(projectMain, "{{MODULE}}", module),
 		filepath.Join("internal", "application", "application.go"):      projectApplication,
 		filepath.Join("internal", "application", "application_test.go"): projectApplicationTest,
@@ -183,7 +183,7 @@ const projectReadme = `# Spine application
 
 Generated with Spine CLI.
 
-Requires Go 1.27.3 or later.
+Recommended Go version: 1.27.3.
 
 ## Run
 

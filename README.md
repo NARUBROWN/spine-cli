@@ -10,9 +10,9 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 - HTTP, DI, interceptor, consumer, WebSocket 실행 계약 검사
 - 계약 검증, snapshot/diff, OpenAPI·AsyncAPI 내보내기
 
-## 요구사항과 설치
+## 권장 환경과 설치
 
-- Go 1.27.3 이상 (Go 1.27.x 검증 기준: 1.27.3)
+- 권장 Go 버전: 1.27.3
 - 새 프로젝트가 사용하는 Spine 버전: v0.5.1
 
 ```sh
