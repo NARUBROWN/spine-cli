@@ -220,6 +220,7 @@ func runLayeredGenerate(args []string, config projectConfig, out, errOut io.Writ
 	}
 	if r.Options.DryRun {
 		fmt.Fprintf(out, "Would generate %s %s (%s)\n%s", r.Kind, r.Name.Name.Type, layeredLayout, diff)
+		printDryRunHash(out, baseHash)
 	} else {
 		fmt.Fprintf(out, "Generated %s %s (%s)\n", r.Kind, r.Name.Name.Type, layeredLayout)
 	}

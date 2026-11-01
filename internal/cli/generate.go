@@ -12,6 +12,9 @@ import (
 )
 
 func runGenerate(args []string, out, errOut io.Writer) int {
+	if handled, code := generationHelp("generate", args, out, errOut); handled {
+		return code
+	}
 	root, rootErr := projectRoot()
 	workingDirectory := "src"
 	if rootErr == nil {
@@ -321,6 +324,7 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 	}
 	if options.DryRun {
 		fmt.Fprintf(out, "Would generate %s %q in %s\n%s", kind, name.Type, base, diff)
+		printDryRunHash(out, baseHash)
 		return 0
 	}
 	fmt.Fprintf(out, "Generated %s %q in %s\n", kind, name.Type, base)

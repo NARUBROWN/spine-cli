@@ -9,7 +9,7 @@ import (
 
 const version = "0.2.0"
 
-// Run executes the spine project generator command line interface.
+// Run은 Spine CLI 명령을 실행하고 요청한 출력 형식으로 결과를 전달합니다.
 func Run(args []string, out, errOut io.Writer) int {
 	normalizedArgs, jsonOutput := normalizeJSONArguments(args)
 	commandArgs, root, rootErr := extractRootArgument(normalizedArgs)
@@ -19,6 +19,21 @@ func Run(args []string, out, errOut io.Writer) int {
 		}
 		fmt.Fprintln(errOut, rootErr)
 		return 1
+	}
+	if len(commandArgs) > 0 && (commandArgs[0] == "new" || commandArgs[0] == "g" || commandArgs[0] == "generate") {
+		command := commandArgs[0]
+		if command == "g" {
+			command = "generate"
+		}
+		var helpOut, helpErr bytes.Buffer
+		if handled, code := generationHelp(command, commandArgs[1:], &helpOut, &helpErr); handled {
+			if jsonOutput {
+				return writeProtocolResult(commandArgs, code, helpOut.Bytes(), helpErr.String(), out, errOut)
+			}
+			fmt.Fprint(out, helpOut.String())
+			fmt.Fprint(errOut, helpErr.String())
+			return code
+		}
 	}
 	if root != "" {
 		previous, err := os.Getwd()
