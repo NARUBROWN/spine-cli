@@ -89,9 +89,11 @@ type contractDiagnostic struct {
 }
 
 type contractInspector struct {
-	contract *applicationContract
-	module   string
-	seen     map[string]bool
+	contract  *applicationContract
+	module    string
+	seen      map[string]bool
+	qualified bool
+	sources   layoutSources
 }
 
 func inspectApplication() (applicationContract, error) {
@@ -103,10 +105,33 @@ func inspectApplication() (applicationContract, error) {
 	if err != nil {
 		return applicationContract{}, err
 	}
-	_, file, fset, function, _, appName, err := findCompositionRoot(config.Composition)
-	if err != nil {
-		return applicationContract{}, err
+	var inspector *contractInspector
+	if config.Layout == layeredLayout {
+		sources, _, err := readLayoutSources()
+		if err != nil {
+			return applicationContract{}, err
+		}
+		inspector, err = inspectLayeredRegistrations(config, module, sources)
+		if err != nil {
+			return applicationContract{}, err
+		}
+	} else {
+		_, file, fset, function, _, appName, err := findCompositionRoot(config.Composition)
+		if err != nil {
+			return applicationContract{}, err
+		}
+		inspector = newContractInspector(config, module, nil)
+		inspector.inspectFile(file, fset, function.Body, appName)
+		inspector.addDuplicateDiagnostics()
 	}
+	inspector.resolveConstructorDependencies()
+	inspector.resolveHandlerSignatures()
+	inspector.sort()
+	inspector.contract.Complete = !contractHasErrors(*inspector.contract)
+	return *inspector.contract, nil
+}
+
+func newContractInspector(config projectConfig, module string, sources layoutSources) *contractInspector {
 	contract := applicationContract{
 		SchemaVersion: contractSchemaVersion,
 		AnalysisMode:  "static-source",
@@ -123,14 +148,7 @@ func inspectApplication() (applicationContract, error) {
 		Configuration: []contractSetting{},
 		Diagnostics:   []contractDiagnostic{},
 	}
-	inspector := contractInspector{contract: &contract, module: module, seen: map[string]bool{}}
-	inspector.inspectFile(file, fset, function.Body, appName)
-	inspector.resolveConstructorDependencies()
-	inspector.resolveHandlerSignatures()
-	inspector.addDuplicateDiagnostics()
-	inspector.sort()
-	contract.Complete = !contractHasErrors(contract)
-	return contract, nil
+	return &contractInspector{contract: &contract, module: module, seen: map[string]bool{}, qualified: config.Layout == layeredLayout, sources: sources}
 }
 
 func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, root ast.Node, appName string) {
@@ -181,7 +199,7 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 			case "Constructor":
 				registrationCall = true
 				for _, argument := range call.Args {
-					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: normalizeImportedExpression(expressionText(fset, argument), imports, i.module), Source: source})
+					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: i.registrationExpression(argument, file, fset), Source: source})
 				}
 				if packageName, importPath, ok := directResourceConstructor(call, imports, i.module); ok {
 					i.addResource(packageName, importPath, source)
@@ -191,7 +209,7 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 				before := len(i.contract.HTTP)
 				i.inspectHTTPCall(call, fset, source)
 				if len(i.contract.HTTP) > before {
-					i.contract.HTTP[len(i.contract.HTTP)-1].Handler = normalizeImportedExpression(i.contract.HTTP[len(i.contract.HTTP)-1].Handler, imports, i.module)
+					i.contract.HTTP[len(i.contract.HTTP)-1].Handler = i.registrationExpression(call.Args[2], file, fset)
 				}
 			case "Interceptor", "InterceptorFor":
 				registrationCall = true
@@ -208,7 +226,7 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 		}
 		if registry, ok := registryCall(call, appName); ok {
 			registrationCall = true
-			i.inspectRegistryCall(registry, call, fset, source, imports)
+			i.inspectRegistryCall(registry, call, file, fset, source, imports)
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok || selector.Sel.Name != "Register" || len(call.Args) != 1 {
@@ -369,6 +387,10 @@ func (i *contractInspector) inspectHTTPCall(call *ast.CallExpr, fset *token.File
 }
 
 func (i *contractInspector) resolveConstructorDependencies() {
+	if i.qualified {
+		i.resolveLayeredConstructors()
+		return
+	}
 	type signature struct {
 		dependencies []string
 		source       string
@@ -433,21 +455,7 @@ type staticHandlerSignature struct {
 
 func (i *contractInspector) resolveHandlerSignatures() {
 	signatures := map[string][]staticHandlerSignature{}
-	_ = filepath.WalkDir(".", func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == "bin" || entry.Name() == "vendor" || strings.HasPrefix(entry.Name(), ".spine")) {
-			return filepath.SkipDir
-		}
-		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		fset := token.NewFileSet()
-		file, parseErr := parser.ParseFile(fset, path, nil, 0)
-		if parseErr != nil {
-			return nil
-		}
+	collect := func(path string, file *ast.File, fset *token.FileSet) {
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
 			if !ok || function.Recv == nil || len(function.Recv.List) == 0 {
@@ -457,15 +465,55 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			if key == "" {
 				continue
 			}
-			signatures[key] = append(signatures[key], staticHandlerSignature{
+			if i.qualified {
+				prefix := modulePackage(i.module, filepath.ToSlash(filepath.Dir(path))) + "."
+				if strings.HasPrefix(key, "(*") {
+					key = "(*" + prefix + strings.TrimPrefix(key, "(*")
+				} else {
+					key = "(" + prefix + strings.TrimPrefix(key, "(")
+				}
+			}
+			signature := staticHandlerSignature{
 				parameters:    fieldParameters(fset, function.Type.Params),
 				returns:       fieldTypes(fset, function.Type.Results),
 				source:        relativeSource(fset.Position(function.Pos())),
 				unimplemented: containsUnimplementedHandlerError(function),
-			})
+			}
+			if i.qualified {
+				signature.parameters = layeredHandlerParameters(file, fset, function.Type.Params)
+			}
+			signatures[key] = append(signatures[key], signature)
+			// 값 receiver의 메서드도 Spine이 요구하는 포인터 메서드 집합에 포함됩니다.
+			if i.qualified && !strings.HasPrefix(key, "(*") {
+				pointerKey := "(*" + strings.TrimPrefix(key, "(")
+				signatures[pointerKey] = append(signatures[pointerKey], signature)
+			}
 		}
-		return nil
-	})
+	}
+	if i.qualified {
+		for _, source := range i.sources.sortedFiles() {
+			collect(source.Path, source.File, source.Fset)
+		}
+	} else {
+		_ = filepath.WalkDir(".", func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == "bin" || entry.Name() == "vendor" || strings.HasPrefix(entry.Name(), ".spine")) {
+				return filepath.SkipDir
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			fset := token.NewFileSet()
+			file, parseErr := parser.ParseFile(fset, path, nil, 0)
+			if parseErr == nil {
+				collect(path, file, fset)
+			}
+			return nil
+		})
+	}
+
 	for index := range i.contract.HTTP {
 		route := &i.contract.HTTP[index]
 		matches := signatures[route.Handler]
@@ -475,7 +523,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			pathKeys := contractPathKeys(route.Path)
 			boundPathCount := 0
 			for _, parameter := range route.Parameters {
-				if parameter.Binding == "path" && parameter.Key != "" {
+				if parameter.Binding == "path" {
 					boundPathCount++
 				}
 			}
@@ -648,7 +696,7 @@ func contractPathKeys(path string) []string {
 	return keys
 }
 
-func (i *contractInspector) inspectRegistryCall(registry string, call *ast.CallExpr, fset *token.FileSet, source string, imports map[string]string) {
+func (i *contractInspector) inspectRegistryCall(registry string, call *ast.CallExpr, file *ast.File, fset *token.FileSet, source string, imports map[string]string) {
 	if len(call.Args) < 2 {
 		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: strings.ToUpper(registry) + "_REGISTRATION_ARGUMENTS_INVALID", Message: registry + " registration requires a name and handler", Source: source})
 		return
@@ -657,7 +705,7 @@ func (i *contractInspector) inspectRegistryCall(registry string, call *ast.CallE
 	if !ok {
 		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: strings.ToUpper(registry) + "_REGISTRATION_DYNAMIC", Message: "static inspection cannot resolve this registration name; only string literals, concatenation, and direct os.Getenv calls are supported", Source: source})
 	}
-	registration := namedRegistration{Name: name, Handler: normalizeImportedExpression(expressionText(fset, call.Args[1]), imports, i.module), Source: source}
+	registration := namedRegistration{Name: name, Handler: i.registrationExpression(call.Args[1], file, fset), Source: source}
 	if registry == "consumer" {
 		i.contract.Consumers = append(i.contract.Consumers, registration)
 	} else {
@@ -723,6 +771,10 @@ func (i *contractInspector) inspectResource(packageName, importPath, source stri
 	}
 	i.seen[importPath] = true
 	directory := filepath.FromSlash(strings.TrimPrefix(importPath, i.module+"/"))
+	if i.qualified {
+		i.inspectLayeredResource(filepath.ToSlash(directory), importPath, source)
+		return
+	}
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "RESOURCE_SOURCE_UNREADABLE", Message: fmt.Sprintf("could not read resource %s: %v", importPath, err), Source: source})

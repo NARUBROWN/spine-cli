@@ -181,22 +181,24 @@ module = "github.com/acme/todo-api"
 entrypoint = "."
 composition = "./internal/application"
 port = 8080
+layout = "layered-v1"
 ```
 
-허용되는 key는 정확히 다음 네 개다.
+허용되는 key는 다음과 같다.
 
 - `module`: 비어 있지 않은 quoted string이며 `go.mod`의 module path와 같아야 함
 - `entrypoint`: `go build`가 사용할 package/path
 - `composition`: 정적 분석과 등록 편집이 사용할 파일 또는 디렉터리
 - `port`: 1–65535, 기본값 8080
+- `layout`: `layered-v1` 또는 `legacy`. 생략한 기존 설정은 legacy로 해석
 
 알 수 없는 key, 잘못된 quoting, 빈 module, 잘못된 port는 fail closed한다. application-specific
 설정은 `spine.toml`에 임의 key로 추가하지 말고 애플리케이션 자체 설정으로 관리한다.
 
-`generate`는 현재 위치에서 위로 올라가며 `go.mod`를 찾아 project root를 결정한다. root 또는
-`src` 밖에서 standalone component를 생성하면 `src`를 사용하고, 현재 위치가 `src` 아래이면
-그 package에 생성한다. `resource`, `slice`, `consumer`, `websocket`은 항상 정해진 `src/...`
-경로에 생성된다.
+`generate`는 현재 위치에서 위로 올라가며 `go.mod`를 찾아 project root를 결정한다.
+`layered-v1`은 프로젝트 루트와 역할별 기본 경로와 명시한 하위 경로로 위치를 정한다.
+현재 작업 디렉터리는 결과에 영향을 주지 않는다. layout을 생략한 기존 프로젝트에는 이전 경로
+규칙을 적용한다. 파일을 자동으로 이동하거나 CLI로 기존 프로젝트를 마이그레이션하지 않는다.
 
 ## 6. 전체 명령 요약
 
@@ -239,6 +241,7 @@ port = 8080
 ```text
 spine new <project>
   [--module <module-path>]
+  [--layout <layered-v1|legacy>]
   [--dry-run]
   [--force]
   [--if-match <base_hash>]
@@ -259,23 +262,29 @@ spine new <project>
   internal/application/
     application.go
     application_test.go
+  src/controller/health_controller.go
+  src/route/route.go
 ```
 
 생성된 `main.go`는 `BuildApplication`의 오류를 확인하고, `app.Validate(options)`를 통과한 뒤
-`app.Run(options)`을 호출한다. composition root에는 `GET /health`와 명시적인
-`boot.HTTPOptions`가 있다. `go mod tidy`는 자동 실행하지 않는다.
+`app.Run(options)`을 호출한다. health 예제는 controller, route, application으로 나뉜다.
+composition root는 생성자와 `route.Register(app)`와 명시적인 `boot.HTTPOptions`를 연결한다.
+`spine.toml`에 `layout = "layered-v1"`을 기록한다. `go mod tidy`는 자동 실행하지 않는다.
+`--layout legacy`는 이전 구조 재현용이며, health를 composition 안에 선언한다.
 
 기존 destination은 `--force` 없이는 실패한다. `new`도 target preflight, staging, rename,
 rollback을 사용하지만 `.spine-generate.lock`은 사용하지 않는다. generate의 project lock을
 `new`에도 적용된다고 가정하지 않는다.
 
-JSON `result`에는 `project`, `module`, `directory`, `files`, `dry_run`, `base_hash`, `changes`,
+JSON `result`에는 `project`, `module`, `layout`, `directory`, `files`, `dry_run`, `base_hash`, `changes`,
 `diff`가 포함된다.
 
 ## 8. 생성기 공통 계약
 
+이 절의 기본 규칙은 `layout = "layered-v1"`이다. legacy 차이는 8.6절을 참고한다.
+
 ```text
-spine generate|g <resource|slice|consumer|websocket|controller|service|repository> <name>
+spine generate|g <domain|dto|repository|service|controller|resource|route|consumer|websocket> <[group/]name>
   [--register|--no-register]
   [--dry-run]
   [--force]
@@ -284,96 +293,134 @@ spine generate|g <resource|slice|consumer|websocket|controller|service|repositor
   [generator-specific options]
 ```
 
-- 기본값은 `--register`이다. 파일만 생성하려면 `--no-register`를 명시한다.
-- 이름에는 문자, 숫자, `-`, `_`만 사용할 수 있고 분리된 단어가 숫자로 시작할 수 없다.
-- 생성되는 모든 Go source는 적용 전에 `go/format.Source`로 검증·정규화한다.
-- 자동 등록은 기존 constructor 이름 중복, route 충돌, 잘못된 composition signature를
+- 기본값은 `--register`이다. domain과 DTO는 데이터 타입이므로 DI에 등록하지 않는다.
+- `--no-register`는 파일만 생성한다. route는 등록 자체가 목적이므로 이 옵션을 거부한다.
+- 이름의 마지막 부분은 파일과 타입 이름, 앞부분은 선택적인 하위 경로다.
+- 문자, 숫자, `-`, `_`를 허용하며 각 단어가 숫자로 시작할 수 없다. 경로에는 빈 부분과
+  `.`, `..`, 절대 경로와 역슬래시를 허용하지 않는다. Go keyword와 유효하지 않은 package도 거부한다.
+- `order-item`은 `order_item.go`와 `OrderItem`으로 정규화한다. 생성자 역할의 파일에는
+  `_repository`, `_service`, `_controller`를 붙인다.
+- 같은 패키지의 선언 충돌과 경로의 symlink, 중첩된 Go 모듈 경계, import와 DI 순환, 모호한 생성자를
   적용 전에 거부한다.
-- composition root 수정과 생성 파일은 하나의 file-change plan에 포함된다.
-- JSON `files`는 새 artifact 목록만 나타낼 수 있다. composition/route 파일을 포함한 실제 전체
-  mutation은 반드시 `result.changes`를 읽는다.
+- 생성하는 Go 소스는 적용 전에 gofmt으로 정규화한다. import와 composition 변경도 같은 원자적
+  계획에 포함한다. `result.changes` 전체를 읽고 검토한다.
 
-### 8.1 resource
+### 8.1 역할별 경로와 그룹
+
+| 역할 | 기본 경로 | 생성 내용 |
+| --- | --- | --- |
+| domain | `database/domain/` | 명시한 필드만 있는 타입 |
+| repository | `database/repository/` | 구조체와 생성자 |
+| DTO | `src/dto/` | JSON 태그가 있는 타입 |
+| service | `src/service/` | 구조체와 생성자 |
+| controller | `src/controller/` | 구조체와 생성자 |
+| route | `src/route/route.go` | HTTP 등록 |
+| application | `internal/application/` | 생성자와 Register 호출 연결 |
+
+`spine schema --json`의 `generation_roles`와 `spine context --json`의 `generation_roles`는
+같은 정의를 사용한다. context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
+`role`, `group`, `package`, `type`으로 현재 구성 요소를 찾는다. `package`는 모듈 경로까지 포함한다.
+route와 application은 고정 연결 위치이며 composition은 설정의 `composition`을 따른다.
 
 ```sh
-spine g resource user
+spine g domain user
+spine g domain account/user --field id:int64 --field name:string
+spine g dto commerce/account/create-user-request --field name:string
 ```
+
+첫 명령은 `database/domain/user.go`, 두 번째는 `database/domain/account/user.go`를 생성한다.
+그룹은 생략하거나 여러 단계로 지정한다. 각 역할의 그룹은 독립적이며, CLI가 애그리거트로 해석하지
+않는다. 기존 파일의 package가 디렉터리 이름과 다르면 충돌로 거부한다.
+
+`--field name:type`는 반복 가능하다. `string`, `bool`, `int`, `int64`, `float64`를 지원한다.
+중복 필드는 거부한다. ID나 시간 필드나 ORM 태그는 자동 생성하지 않으며, `id`는 명시할 수 있다.
+domain은 태그를 추가하지 않고 DTO는 명시한 필드에 JSON 태그를 추가한다.
+
+### 8.2 repository, service, controller와 의존성
+
+```sh
+spine g repository account/user
+spine g service user --depends database/repository/account:UserRepository
+spine g controller admin/user --depends src/service:UserService
+```
+
+`--depends`는 `<모듈 기준 패키지 경로>:<공개 타입>`이다. 여러 의존성은 옵션을 반복한다.
+실제 타입 선언과 해당 타입 또는 포인터를 반환하는 단일 공개 함수를 확인한다. 생성자가 인터페이스를
+반환하면 해당 인터페이스를 그대로 사용한다. concrete 타입을 반환하는 함수를 인터페이스 구현체로
+추론하지 않는다. 여러 후보나 누락된 타입과 생성자, 미등록 간접 의존성은 오류다.
+
+생성자 인자와 필요한 import를 만들고 application에 의존성 생성자와 새 생성자를 등록한다.
+타입과 생성자는 전체 패키지 경로로 식별한다. 다른 패키지의 동명 타입과 함수는 허용하고,
+패키지 이름이 겹치면 import 별칭을 만든다. 생성자가 없는 domain과 DTO는 주입할 수 없다.
+
+세 역할 모두 구조체와 생성자 골격만 만든다. repository에 DB 연결, 메모리 저장소, ID 할당이나
+CRUD를 추가하지 않는다. controller에 임의의 HTTP 메서드나 경로를 만들지 않는다.
+
+### 8.3 명시적인 HTTP 경로
+
+핸들러를 먼저 구현한 뒤 메서드와 경로와 실제 메서드 참조를 지정한다.
+
+```sh
+spine g route get-user --method GET --path /users/:id \
+  --handler src/controller/admin:UserController.Get
+```
+
+`--handler`는 `<모듈 기준 패키지 경로>:<공개 타입>.<공개 메서드>`다. 함수 존재와 경로 매개변수
+바인딩을 확인하고 포인터 메서드 표현식으로 등록한다. 예를 들어 `/users/:id`에는 `path.Int`와 같은
+경로 매개변수가 필요하다. receiver는 단일 공개 생성자가 포인터로 반환해야 한다. 값 receiver의
+메서드도 포인터 메서드 집합을 통해 등록한다. variadic 핸들러와 해석하지 못하는 참조는 거부한다.
+
+`src/route/route.go`의 `Register(app spine.App) error`를 수정하고, 필요한 생성자와
+`route.Register(app)`를 application에 연결한다. 기존 메서드와 경로가 같은 요청은 같은 핸들러일
+때만 재실행을 허용한다. 경로 충돌은 적용 전에 거부한다. route 이름은 생성 요청의 이름이며
+별도의 핸들러 메서드를 만들지 않는다.
+
+### 8.4 resource
+
+```sh
+spine g resource account/user
+```
+
+같은 그룹을 전달해 domain, repository, service, controller의 개별 계획을 조합한다.
 
 ```text
-src/user/
-  user_route.go
-  user_repository.go
-  user_service.go
-  user_controller.go
+database/domain/account/user.go
+database/repository/account/user_repository.go
+src/service/account/user_service.go
+src/controller/account/user_controller.go
 ```
 
-`Register(app spine.App) error`가 세 constructor와 `GET /user/:id`를 등록한다. domain model,
-aggregate, ORM model/tag, table relation, persistence adapter는 생성하지 않는다.
+service는 같은 그룹의 repository를 받고 controller는 service를 받는다. domain은 빈 타입이며
+DI에 등록하지 않는다. DTO와 HTTP 경로는 명시적으로 추가한다. `slice`는 새 구조에서 제공하지 않는다.
 
-### 8.2 vertical slice
+### 8.5 consumer와 WebSocket
 
 ```sh
-spine g slice order \
-  --storage memory \
-  --field name:string \
-  --field quantity:int
+spine g consumer account/order --topic order.created --field order_id:int64
+spine g websocket chat --path /ws/chat --field message:string
 ```
 
-- `--storage memory`와 하나 이상의 `--field`가 필수다.
-- field syntax는 `name:type`이다.
-- 허용 type: `string`, `bool`, `int`, `int64`, `float64`
-- `id`는 생성 ID용 예약 이름이다.
-- duplicate field는 실패한다.
+각각 `src/consumer/account/order/`, `src/websocket/chat/`에 typed payload와 handler와
+`Register` 함수를 생성한다. topic 또는 path와 하나 이상의 field가 필수다. 생성된 핸들러는
+`<name> consumer handler is not implemented` 또는 `<name> websocket handler is not implemented`
+오류를 반환한다. 처리 로직을 구현하고 sentinel 오류를 제거하기 전에는 계약 검사와 verify가 실패한다.
 
-생성 결과는 model, create DTO, repository interface, mutex 기반 memory adapter, service,
-POST/GET controller, module registration, service test다. memory repository는 개발용이며 process가
-종료되면 데이터가 사라진다. Bun/GORM, transaction, outbox가 구현됐다고 해석하지 않는다.
+Kafka/RabbitMQ transport, delivery, retry, dead-letter policy와 WebSocket 접근 정책은 애플리케이션에서
+정한다. CLI가 이 정책을 추정하거나 생성하지 않는다.
 
-### 8.3 consumer
+### 8.6 legacy 호환성
 
-```sh
-spine g consumer order \
-  --topic order.created \
-  --field order_id:int64
-```
+layout이 없거나 `legacy`인 프로젝트는 이전 규칙을 유지한다. CLI가 파일을 이동하거나 새 역할별
+경로로 조용히 해석하지 않는다. 명시적인 구조 전환은 에이전트가 별도 작업으로 수행한다.
 
-`src/consumer/order/`에 typed event, handler, module을 생성한다. topic과 하나 이상의 field가
-필수다. 생성 handler는 의도적으로 `<name> consumer handler is not implemented` 오류를 반환한다.
-실제 처리 로직을 구현하고 sentinel 오류를 제거하기 전에는 contract check와 verify가 실패하는
-것이 정상이다.
-
-CLI는 Kafka/RabbitMQ transport, delivery semantics, retry, dead-letter policy를 생성하거나
-추정하지 않는다.
-
-### 8.4 websocket
-
-```sh
-spine g websocket chat \
-  --path /ws/chat \
-  --field message:string
-```
-
-`src/websocket/chat/`에 typed message, handler, module을 생성한다. path는 `/`로 시작해야 하고
-하나 이상의 field가 필요하다. 생성 handler도 구현 전 fail closed한다.
-
-CLI는 authentication, origin policy, capacity, response behavior를 선택하지 않는다.
-
-### 8.5 controller, service, repository
-
-```sh
-spine g repository user
-spine g service user --depends user_repository
-spine g controller user --depends user_service audit_repository
-```
-
-- 현재 `src` package 또는 현재 `src` 하위 package에 `<name>_<kind>.go`를 생성한다.
-- `--depends`는 같은 디렉터리의 file name을 `.go` 없이 하나 이상 받는다.
-- path가 포함된 이름, `_test.go`, 다른 package, 중복 dependency는 거부한다.
-- 대상 파일이 선언한 `Controller`, `Service`, `Repository` suffix type을 constructor dependency로
-  사용한다.
-- service/repository는 constructor를 composition root에 등록한다.
-- controller는 constructor를 등록하고 `src/route/route.go`에 `GET /<name>/:id`를 모은다.
-- composition root의 `route.Register(app)`는 한 번만 유지한다.
+- 개별 repository, service, controller는 현재 위치가 `src` 아래이면 그 패키지에, 그 밖이면
+  `src`에 생성한다. `--depends user_repository`처럼 같은 디렉터리의 파일 이름을 지정한다.
+- controller는 기본 GET 경로를 추가한다.
+- `resource user`는 `src/user`에 세 구성 요소와 `GET /user/:id` 등록을 만든다. domain을 만들지 않는다.
+- domain, DTO, 명시적인 route 생성기는 제공하지 않는다.
+- `slice order --storage memory --field name:string`은 기존 개발용 메모리 CRUD 예제다.
+  `id`는 예약 이름이며 process 종료 시 데이터가 사라진다. 새 구조의 확장 범위에 포함하지 않는다.
+- consumer와 WebSocket은 이전의 그룹 없는 이름과 경로 규칙을 유지한다.
 
 ## 9. 안전한 file mutation protocol
 
@@ -387,14 +434,19 @@ spine g controller user --depends user_service audit_repository
 6. 승인된 동일 command를 `--if-match <base_hash> --json`으로 실행한다.
 7. conflict면 자동 force/retry하지 말고 새 dry-run부터 반복한다.
 
-기존 target을 교체하는 계획 자체를 미리 보려면 `--force --dry-run --json`이 필요하다.
+layered-v1의 기존 파일 충돌 응답은 실패해도 `result.diff`를 제공한다.
+적용 가능한 교체 계획과 hash를 받으려면 `--force --dry-run --json`이 필요하다.
 `--force` 없이 dry-run하더라도 overwrite preflight가 기존 파일을 거부한다. dry-run에서 `--force`는
 쓰기 권한이 아니라 overwrite 계획을 표시하도록 허용하는 옵션이며, 실제 적용 시에는 다시 신중히
 검토한다.
 
 ### 9.2 hash와 apply 범위
 
-- `base_hash`는 전체 repository hash가 아니라 file-change plan의 모든 target 현재 상태 hash다.
+- `new`와 legacy 생성기의 `base_hash`는 file-change plan의 모든 target 현재 상태 hash다.
+- layered-v1 생성기는 target 상태와 생성할 내용, 분석한 빌드 대상 Go 소스와 `go.mod`, `go.sum`,
+  `spine.toml`의 상태와 직접적인 `os.Getenv("이름")` 호출이 참조하는 환경 값을 포함한다.
+  환경 값 자체는 출력하지 않는다. 검토 후 의존성이나 설정이 달라져도 기존 계획 적용을 거부한다.
+- layered-v1 JSON은 `layout`, `kind`, `name`, `group`, `roles`, `inputs_hash`도 제공한다.
 - target마다 존재 여부와 current SHA-256이 반영된다.
 - `changes.operation`은 `create`, `modify`, `unchanged` 중 하나다.
 - `--if-match`가 다르면 어떤 target도 적용하지 않는다.
@@ -707,7 +759,7 @@ static contract만 확인한다. `spine doctor --connect`는 아직 구현되지
 - WebSocket authentication/origin/capacity/response policy
 - deployed environment 검증
 
-repository generator는 persistence-neutral skeleton이다. vertical slice의 memory storage는
+repository generator는 persistence-neutral skeleton이다. legacy vertical slice의 memory storage는
 development-only다. 아직 없는 기능을 generated comment, README, automation 결과에서 구현된 것처럼
 표현하지 않는다.
 
@@ -761,9 +813,15 @@ Source와 test가 문서보다 우선한다. 주요 파일:
 - `internal/cli/agent.go`: command schema, project context
 - `internal/cli/protocol.go`: JSON envelope, exit/error classification, `--root`
 - `internal/cli/new.go`: project template
-- `internal/cli/generate.go`: generator parsing과 templates
+- `internal/cli/layout.go`: 역할별 경로와 이름, 대상 패키지와 경로 검증
+- `internal/cli/layered_sources.go`: 소스 스냅샷과 해시, 패키지와 생성자 목록
+- `internal/cli/layered_generate.go`, `layered_plan.go`: 명령 처리와 구성 요소 템플릿, 적용 전 생성 계획
+- `internal/cli/layered_wiring.go`, `layered_route.go`: 의존성 연결과 생성자, 모듈, 라우트 등록
+- `internal/cli/layered_validation.go`: import와 DI 그래프 검증
+- `internal/cli/layered_contract.go`: 소스 스냅샷에 공통 계약 검사기를 적용하고 전체 패키지 경로로 식별
+- `internal/cli/generate.go`: legacy generator parsing과 templates
 - `internal/cli/slice.go`, `message.go`: vertical slice와 message templates
-- `internal/cli/dependencies.go`: `--depends` resolution
+- `internal/cli/dependencies.go`: legacy `--depends` resolution
 - `internal/cli/register.go`: AST composition/route registration
 - `internal/cli/files.go`: plan, hash, diff, atomic apply, rollback
 - `internal/cli/lock.go`: generation concurrency lock
@@ -775,7 +833,11 @@ Source와 test가 문서보다 우선한다. 주요 파일:
 - `internal/cli/doctor.go`, `capabilities.go`: evidence limits
 - `internal/cli/dev.go`, `commands.go`: build/run/watch/check/verify
 - `internal/cli/cli_test.go`: unit와 integration regression contract
-- `internal/cli/e2e_test.go`: built CLI, generated project, context, verify, cache, JSONL E2E
+- `internal/cli/e2e_test.go`: legacy CLI, generated project, context, verify, cache, JSONL E2E
+- `internal/cli/layered_test.go`, `layered_validation_test.go`, `layered_e2e_test.go`: 역할별 생성과 충돌, 조건부 등록과 입력 변경, 생성 프로젝트 로컬 검증
+
+layered-v1의 생성 계획과 정적 계약 검사는 같은 소스 스냅샷과 생성자 목록, 등록 해석기를 사용한다.
+파일을 생성하기 전에 계획 전체를 검증하고, 파일 반영은 공통 atomic apply가 수행한다.
 
 새 command나 option을 추가할 때 최소한 다음을 함께 갱신한다.
 

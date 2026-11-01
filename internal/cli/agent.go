@@ -14,11 +14,13 @@ const commandSchemaVersion = "spine.command-schema/v1alpha1"
 const contextSchemaVersion = "spine.project-context/v1alpha1"
 
 type commandSchema struct {
-	SchemaVersion string                      `json:"schema_version"`
-	CLIVersion    string                      `json:"cli_version"`
-	Protocol      string                      `json:"protocol_schema"`
-	GlobalOptions map[string]optionDefinition `json:"global_options"`
-	Commands      []commandDefinition         `json:"commands"`
+	SchemaVersion   string                      `json:"schema_version"`
+	CLIVersion      string                      `json:"cli_version"`
+	Protocol        string                      `json:"protocol_schema"`
+	GlobalOptions   map[string]optionDefinition `json:"global_options"`
+	Commands        []commandDefinition         `json:"commands"`
+	GenerationRoles []generationRole            `json:"generation_roles"`
+	Layouts         []string                    `json:"layouts"`
 }
 
 type commandDefinition struct {
@@ -77,7 +79,22 @@ func currentCommandSchema() commandSchema {
 		{Name: "run", Summary: "Build and run the application in production mode", Effects: commandEffects{WritesFiles: true, Network: true, LongRunning: true}},
 	}
 	sort.Slice(commands, func(i, j int) bool { return commands[i].Name < commands[j].Name })
-	return commandSchema{SchemaVersion: commandSchemaVersion, CLIVersion: version, Protocol: protocolSchemaVersion, GlobalOptions: map[string]optionDefinition{"root": {Type: "string", Description: "Run the command from an explicit project directory"}}, Commands: commands}
+	for index := range commands {
+		c := &commands[index]
+		if c.Name == "generate" {
+			c.Arguments[0].Enum = append(c.Arguments[0].Enum, "domain", "dto", "route")
+			c.Arguments[1].Name = "[group/]name"
+			c.Options["method"] = optionDefinition{Type: "string", Description: "HTTP method for explicit route registration"}
+			c.Options["handler"] = optionDefinition{Type: "string", Description: "Module-relative package/path:Type.Method"}
+			d := c.Options["depends"]
+			d.Description = "layered-v1: module-relative package/path:Type; legacy: local file name"
+			c.Options["depends"] = d
+		}
+		if c.Name == "new" {
+			c.Options["layout"] = optionDefinition{Type: "string", Enum: []string{layeredLayout, "legacy"}, Description: "New projects default to layered-v1; legacy preserves the previous generation rules"}
+		}
+	}
+	return commandSchema{SchemaVersion: commandSchemaVersion, CLIVersion: version, Protocol: protocolSchemaVersion, GlobalOptions: map[string]optionDefinition{"root": {Type: "string", Description: "Run the command from an explicit project directory"}}, Commands: commands, GenerationRoles: generationRoles(), Layouts: []string{layeredLayout, "legacy"}}
 }
 
 func runSchema(args []string, out, errOut io.Writer) int {
@@ -107,6 +124,8 @@ type projectContext struct {
 	Contract         *contractCheckReport `json:"contract,omitempty"`
 	NextActions      []nextAction         `json:"next_actions"`
 	EvidenceBoundary []string             `json:"evidence_boundary"`
+	GenerationRoles  []generationRole     `json:"generation_roles,omitempty"`
+	Components       []layoutComponent    `json:"components,omitempty"`
 }
 
 type projectContextConfig struct {
@@ -114,6 +133,7 @@ type projectContextConfig struct {
 	Entrypoint  string `json:"entrypoint"`
 	Composition string `json:"composition"`
 	Port        int    `json:"port"`
+	Layout      string `json:"layout"`
 }
 
 type nextAction struct {
@@ -154,7 +174,7 @@ func runContext(args []string, out, errOut io.Writer) int {
 		SchemaVersion: contextSchemaVersion,
 		CLIVersion:    version,
 		ProjectRoot:   filepath.Clean(absoluteRoot),
-		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port},
+		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout},
 		Capabilities:  currentCapabilities(),
 		Doctor:        doctor,
 		NextActions: []nextAction{
@@ -162,6 +182,13 @@ func runContext(args []string, out, errOut io.Writer) int {
 			{Command: "spine verify --root " + quoteCommandArgument(absoluteRoot) + " --json", Reason: "Run local verification after changes", Safe: false},
 		},
 		EvidenceBoundary: []string{"project source and local toolchain only", "external databases, brokers, listeners, and deployed behavior were not observed"},
+	}
+	var inventoryErr error
+	if config.Layout == layeredLayout {
+		context.GenerationRoles = generationRoles()
+		context.Components, inventoryErr = layoutInventory(config.Module)
+	} else if context.Config.Layout == "" {
+		context.Config.Layout = "legacy"
 	}
 	contract, inspectErr := inspectApplication()
 	if inspectErr == nil {
@@ -175,11 +202,14 @@ func runContext(args []string, out, errOut io.Writer) int {
 	} else {
 		fmt.Fprintf(out, "Spine project context (%s)\n  root: %s\n  module: %s\n  doctor: %t\n", context.SchemaVersion, context.ProjectRoot, context.Config.Module, context.Doctor.OK)
 	}
+	if inventoryErr != nil {
+		fmt.Fprintf(errOut, "layout inventory failed: %v\n", inventoryErr)
+	}
 	if inspectErr != nil {
 		fmt.Fprintf(errOut, "contract inspection failed: %v\n", inspectErr)
 		return 1
 	}
-	if !doctor.OK || (context.Contract != nil && !context.Contract.Valid) {
+	if inventoryErr != nil || !doctor.OK || (context.Contract != nil && !context.Contract.Valid) {
 		return 1
 	}
 	return 0

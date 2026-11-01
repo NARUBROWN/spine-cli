@@ -1,14 +1,14 @@
 # Spine CLI
 
 Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 생성하고,
-소스 코드에서 실행 계약을 검사·설명·검증하는 Go CLI입니다.
+소스 코드에서 실행 계약을 검사하고 설명하며 검증하는 Go CLI입니다.
 
 프로젝트 이름은 `spine-cli`입니다. 루트 경로로 설치하면 실행 파일은 `spine-cli`,
 `cmd/spine` 경로로 설치하면 실행 파일과 명령은 `spine`입니다.
 
-- 프로젝트와 HTTP·consumer·WebSocket 구성 요소 생성
+- 프로젝트와 domain, DTO, repository, service, controller, 메시지 구성 요소 생성
 - HTTP, DI, interceptor, consumer, WebSocket 실행 계약 검사
-- 계약 검증, snapshot/diff, OpenAPI·AsyncAPI 내보내기
+- 계약 검증, snapshot/diff, OpenAPI와 AsyncAPI 내보내기
 
 ## 권장 환경과 설치
 
@@ -49,31 +49,66 @@ curl http://localhost:8080/health
 
 ## 생성기
 
-생성 결과는 기본적으로 composition root에 등록됩니다. 등록 없이 파일만 만들려면
-`--no-register`를 사용합니다.
+새 프로젝트는 `layout = "layered-v1"`을 사용합니다. 역할별 기본 경로 아래에 파일을 바로
+두거나, 이름 앞에 선택적인 하위 경로를 지정할 수 있습니다.
 
-| 명령 | 생성 내용 | 주의점 |
+| 역할 | 기본 경로 | 생성 내용 |
 | --- | --- | --- |
-| `spine g resource user` | controller, service, repository, GET route | 도메인 모델과 ORM은 생성하지 않음 |
-| `spine g slice order --storage memory --field name:string` | typed vertical slice와 service test | 메모리 저장소는 개발용 |
-| `spine g controller user` | 독립 controller와 route 등록 | `--depends`로 같은 package의 구성 요소 주입 가능 |
-| `spine g service user` | 독립 service | 조립 방식은 사용자가 결정 |
-| `spine g repository user` | persistence-neutral repository 골격 | DB adapter는 사용자가 구현 |
-| `spine g consumer order --topic order.created --field order_id:int64` | typed event와 handler | handler 구현 전에는 검증 실패 |
-| `spine g websocket chat --path /ws/chat --field message:string` | typed message와 handler | 인증·origin·capacity 정책은 직접 구성 |
-
-레이어별 구성 요소는 파일 이름으로 의존성을 연결할 수 있습니다.
+| domain | `database/domain/` | 명시한 필드만 포함하는 타입 |
+| repository | `database/repository/` | 구조체와 생성자 |
+| DTO | `src/dto/` | JSON 태그가 있는 타입 |
+| service | `src/service/` | 구조체와 생성자 |
+| controller | `src/controller/` | 구조체와 생성자 |
+| route | `src/route/route.go` | 명시한 HTTP 메서드와 경로 등록 |
+| application | `internal/application/` | 생성자와 등록 함수 연결 |
 
 ```sh
-spine g repository user
-spine g service user --depends user_repository
-spine g controller user --depends user_service
+spine g domain account/user --field id:int64 --field name:string
+spine g dto account/create-user-request --field name:string
+spine g repository account/user
+spine g service user --depends database/repository/account:UserRepository
+spine g controller admin/user --depends src/service:UserService
 ```
 
-`resource`는 선택적인 기능 경계일 뿐입니다. 도메인 모델, aggregate, ORM tag,
-테이블 관계, transaction, outbox는 프로젝트 요구에 맞게 직접 설계합니다.
-consumer와 WebSocket handler는 생성 직후 명시적인 `not implemented` 오류를 반환하므로,
-실제 로직을 구현한 뒤 해당 오류를 제거해야 합니다.
+`domain user`는 `database/domain/user.go`, `domain account/user`는
+`database/domain/account/user.go`를 생성합니다. `commerce/account/user`처럼 여러 단계로
+묶을 수도 있습니다. 그룹은 역할마다 독립적으로 정하며 실행 위치는 생성 경로에 영향을 주지 않습니다.
+CLI는 그룹을 애그리거트로 해석하지 않습니다.
+
+`--depends`는 모듈 기준 패키지 경로와 타입을 받습니다. 여러 의존성은 옵션을 반복해서 지정합니다.
+CLI는 실제 타입과 단일 공개 생성자를 확인하고 import와 생성자 인자와 application 등록을 연결합니다.
+서로 다른 패키지의 동명 타입도 구분합니다. domain과 DTO는 DI에 등록하지 않습니다.
+repository에는 DB 연결이나 CRUD 구현을 추가하지 않습니다.
+
+controller 생성만으로 HTTP 경로가 생기지는 않습니다. 실제 `Get` 메서드를 작성한 뒤 등록합니다.
+
+```sh
+# src/controller/admin 패키지에 UserController.Get 메서드가 있을 때 실행
+spine g route get-user --method GET --path /users/:id \
+  --handler src/controller/admin:UserController.Get
+```
+
+`Get`은 경로의 `id`를 받는 핸들러여야 합니다. 예를 들어 Spine의 `path.Int` 매개변수를 사용할 수
+있습니다. CLI는 메서드 존재와 경로 바인딩과 기존 경로 충돌을 확인합니다.
+
+`spine g resource account/user`는 같은 그룹의 domain, repository, service, controller 생성을
+조합합니다. DTO와 HTTP 경로는 별도로 추가합니다. 생성자는 기본적으로 application에 등록하며,
+파일만 생성하려면 `--no-register`를 사용합니다.
+
+consumer와 WebSocket 생성기도 사용할 수 있습니다.
+
+```sh
+spine g consumer order --topic order.created --field order_id:int64
+spine g websocket chat --path /ws/chat --field message:string
+```
+
+생성한 메시지 핸들러는 `not implemented` 오류를 반환합니다. 실제 로직을 작성하고 이 오류를
+제거한 뒤 검증하세요. transport와 재시도와 WebSocket 접근 정책은 애플리케이션에서 구성합니다.
+
+`layout`이 없는 기존 프로젝트와 `layout = "legacy"` 프로젝트에는 이전 생성 규칙을 적용합니다.
+기존 파일을 이동하거나 구조를 자동 전환하지 않습니다. 이전 구조의 재현이 필요하면
+`spine new <project> --layout legacy`를 사용할 수 있습니다. `slice --storage memory`는
+legacy에서만 지원하며, 새 구조에 CRUD 생성 기능을 추가하지 않습니다.
 
 ## 실행 계약
 
@@ -129,6 +164,7 @@ module = "github.com/acme/todo-api"
 entrypoint = "."
 composition = "./internal/application"
 port = 8080
+layout = "layered-v1"
 ```
 
 `module`은 `go.mod`의 module path와 같아야 합니다.
@@ -144,8 +180,11 @@ spine g resource orders --dry-run --json
 spine g resource orders --if-match <base_hash> --json
 ```
 
-JSON dry-run에는 대상별 diff와 SHA-256, 전체 대상 상태를 나타내는 `base_hash`가 포함됩니다.
-`--if-match`는 계획을 확인한 뒤 파일이 달라졌다면 적용 전에 중단합니다.
+JSON dry-run에는 모든 변경 파일과 diff와 SHA-256, `base_hash`가 포함됩니다.
+새 구조의 `g`는 대상 파일뿐 아니라 분석한 Go 소스와 모듈 파일과 `spine.toml`, 생성할 내용도
+해시에 포함합니다. 소스의 직접적인 `os.Getenv("이름")` 호출이 참조하는 환경 값도 변경 검사에
+포함하며 값 자체는 출력하지 않습니다. 검토 후 입력이나 계획이 달라지면 `--if-match` 적용을 중단합니다.
+동일한 요청은 import와 생성자와 경로를 중복 등록하지 않습니다.
 
 ## AI Agent에서 사용하기
 

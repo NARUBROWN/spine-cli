@@ -107,16 +107,22 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, `Spine CLI - scaffold explicit, execution-centric Spine applications.
 
 Usage:
-  spine new <project> [--module <module-path>] [--dry-run] [--json] [--if-match <hash>]
-  spine generate resource <name> [--no-register]
-  spine generate slice <name> --storage memory --field name:string
+  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--dry-run] [--json] [--if-match <hash>]
+  spine g domain <[group/]name> [--field name:type]
+  spine g dto <[group/]name> [--field name:type]
+  spine g repository <[group/]name>
+  spine g service <[group/]name> [--depends package/path:Type]
+  spine g controller <[group/]name> [--depends package/path:Type]
+  spine g route <name> --method GET --path /users --handler package/path:Type.Method
+  spine g resource <[group/]name> [--no-register]
   spine generate consumer <name> --topic <topic> --field name:string
   spine generate websocket <name> --path </path> --field message:string
-  spine generate controller <name>
-  spine generate service <name>
-  spine generate repository <name>
   spine schema [--json]
   spine context [--json]
+
+Layout:
+  New projects use layered-v1 role roots with optional nested groups.
+  Existing projects without layout retain legacy rules, including slice generation.
 
 Global options:
   --root <directory>  Run from an explicit project directory.
@@ -132,7 +138,7 @@ Examples:
   spine g websocket chat --path /ws/chat --field message:string
   spine dev --events jsonl
   spine inspect
-  spine explain http GET /users/:id
+  spine explain http GET /health
   spine verify
   spine contract check --json
   spine contract snapshot

@@ -39,7 +39,7 @@ func TestCLIEndToEndAgentGenerationAndRuntimeCache(t *testing.T) {
 
 	t.Run("agent generation and verification", func(t *testing.T) {
 		workspace := t.TempDir()
-		created := runE2E(binary, workspace, nil, "new", "todo", "--module", "example.com/todo", "--json")
+		created := runE2E(binary, workspace, nil, "new", "todo", "--module", "example.com/todo", "--layout", "legacy", "--json")
 		assertE2ESuccess(t, created, "new project")
 		assertProtocolOK(t, created.stdout)
 		project := filepath.Join(workspace, "todo")
