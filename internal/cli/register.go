@@ -443,24 +443,21 @@ func findCompositionRoot(composition string) (string, *ast.File, *token.FileSet,
 		if parseErr != nil {
 			return "", nil, nil, nil, 0, "", fmt.Errorf("could not parse %s: %w", path, parseErr)
 		}
-		spineAliases := importAliases(file, spineImportPath)
-		if len(spineAliases) == 0 {
-			continue
-		}
+
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
 			if !ok || function.Body == nil {
 				continue
 			}
 			for index, statement := range function.Body.List {
-				appName, ok := spineNewAssignment(statement, spineAliases)
+				appName, ok := applicationAssignment(statement, file)
 				if ok {
 					return path, file, fset, function, index, appName, nil
 				}
 			}
 		}
 	}
-	return "", nil, nil, nil, 0, "", fmt.Errorf("could not find a top-level app := spine.New() assignment in composition path %q", composition)
+	return "", nil, nil, nil, 0, "", fmt.Errorf("could not find a supported top-level Spine application assignment in composition path %q", composition)
 }
 
 func checkedRegistrationBootAlias(function *ast.FuncDecl, fset *token.FileSet, file *ast.File) (string, bool) {
@@ -497,27 +494,6 @@ func importAliases(file *ast.File, importPath string) map[string]bool {
 		aliases[alias] = true
 	}
 	return aliases
-}
-
-func spineNewAssignment(statement ast.Stmt, aliases map[string]bool) (string, bool) {
-	assignment, ok := statement.(*ast.AssignStmt)
-	if !ok || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
-		return "", false
-	}
-	identifier, ok := assignment.Lhs[0].(*ast.Ident)
-	if !ok {
-		return "", false
-	}
-	call, ok := assignment.Rhs[0].(*ast.CallExpr)
-	if !ok {
-		return "", false
-	}
-	selector, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || selector.Sel.Name != "New" {
-		return "", false
-	}
-	packageName, ok := selector.X.(*ast.Ident)
-	return identifier.Name, ok && aliases[packageName.Name]
 }
 
 func hasRegisterCall(root ast.Node, packageName, appName string) bool {

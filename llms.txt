@@ -17,7 +17,10 @@
 - Go module: `github.com/NARUBROWN/spine-cli`
 - 이 저장소와 생성 프로젝트의 Go 호환 기준: `1.25.5`
 - 권장·검증 Go 버전: `1.27.3`
-- 새 프로젝트가 사용하는 Spine 버전: `github.com/NARUBROWN/spine v0.5.2`
+- 새 프로젝트의 개발 레시피: `echo-dev-ded538a25193`
+- Spine: `github.com/NARUBROWN/spine v0.5.3-0.20261101161224-490135eda06f`
+- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform v0.0.0-20261101230311-ded538a25193`
+- 위 플랫폼 통합은 개발 브랜치 동작이며 v0.2.0 릴리스에는 포함되지 않는다.
 - 라이선스: MIT
 
 버전을 추측하지 않는다. 현재 checkout에서는 `internal/cli/cli.go`의 `version`, `go.mod`,
@@ -163,7 +166,7 @@ Agent는 다음 순서로 해석한다.
 - command schema: `spine.command-schema/v1alpha1`
 - project context: `spine.project-context/v1alpha1`
 - capabilities: `spine.cli-capabilities/v1alpha1`
-- static contract: `spine.contract/v1alpha1`
+- static contract: `spine.contract/v1alpha2`
 - contract check: `spine.contract-check/v1alpha1`
 - verification: `spine.verification/v1alpha1`
 - semantic diff: `spine.contract-diff/v1alpha1`
@@ -242,45 +245,38 @@ layout = "layered-v1"
 spine new <project>
   [--module <module-path>]
   [--layout <layered-v1|legacy>]
+  [--platform echo]
+  [--skip-install]
   [--dry-run]
-  [--force]
+  [--force (requires --skip-install)]
   [--if-match <base_hash>]
   [--json]
 ```
 
-`--module`을 생략하면 `github.com/your-org/<project>`를 사용하므로 실제 프로젝트에서는 명시한다.
+`--module` 생략 시 `github.com/your-org/<project>`를 사용한다. 기본 layout은 layered-v1이다.
+`new`는 `platform.New()`로 Echo를 연결하고 고정된 공개 모듈 레시피를 설치한다.
+`go mod tidy`, 선택 버전 확인, 정적 계약 검사와 entrypoint 빌드가 성공하면 새 디렉터리를 게시한다.
+서버, Prepare, 사용자 테스트와 listener는 실행하지 않는다. 기본 생성 후에는 `spine dev`로 실행한다.
 
-생성 파일:
+`--skip-install`은 플랫폼 코드, go.mod, spine.toml과 기존 프로젝트 파일만 생성한다.
+go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go mod tidy`와 `spine dev`다.
+기본 dry-run은 임시 프로젝트에서 네트워크와 Go 캐시를 사용할 수 있다.
+`--skip-install --dry-run`은 Go 명령 없이 오프라인으로 계획한다. 목적지 파일은 둘 다 변경하지 않는다.
 
-```text
-<project>/
-  .gitignore
-  README.md
-  go.mod
-  main.go
-  spine.toml
-  internal/application/
-    application.go
-    application_test.go
-  src/controller/health_controller.go
-  src/route/route.go
-```
+기본 설치는 기존 목적지를 덮어쓰지 않는다. `--force`는 `--skip-install`에만 허용한다.
+활성 workspace는 `GOWORK=off` 또는 설치 생략을 안내한다. go.work와 외부 모듈은 변경하지 않는다.
+`base_hash`는 목적지 상태, 생성 모드, 레시피와 최종 파일을 포함한다. 설치 생략 계획을
+설치 포함 적용에 재사용할 수 없다. 실패와 취소 시 임시 파일을 정리하고 최종 목적지는 게시하지 않는다.
+프로젝트 파일 게시와 Go 캐시 변경은 별개다. 캐시까지 되돌리지는 않는다.
 
-생성된 `main.go`는 `BuildApplication`의 오류를 확인하고, `app.Validate(options)`를 통과한 뒤
-`app.Run(options)`을 호출한다. health 예제는 controller, route, application으로 나뉜다.
-composition root는 생성자와 `route.Register(app)`와 명시적인 `boot.HTTPOptions`를 연결한다.
-`spine.toml`에 `layout = "layered-v1"`을 기록한다. `go mod tidy`는 자동 실행하지 않는다.
-`--layout legacy`는 이전 구조 재현용이며, health를 composition 안에 선언한다.
+기존 생성 파일에 go.sum과 `platform = "echo"` 설정이 추가된다. 기본 health와 역할별 경로,
+`BuildApplication → Validate → Run`, SPINE_PORT는 유지한다. legacy는 health를 composition에 선언한다.
+JSON `result`의 project, module, layout, directory, files, dry_run, base_hash, changes와 diff를 유지하며
+platform, recipe, stability, install_skipped, selected_modules, stages와 execution_boundary를 추가한다.
+실패 시 failed_stage와 cause를 반환한다. new의 일반/JSON 종료코드는 2 사용법, 3 전제조건 및 다운로드,
+4 충돌, 5 계약 및 호환성 및 빌드, 10 내부 오류다.
 
-기존 destination은 `--force` 없이는 실패한다. `new`도 target preflight, staging, rename,
-rollback을 사용하지만 `.spine-generate.lock`은 사용하지 않는다. generate의 project lock을
-`new`에도 적용된다고 가정하지 않는다.
-
-JSON `result`에는 `project`, `module`, `layout`, `directory`, `files`, `dry_run`, `base_hash`, `changes`,
-`diff`가 포함된다.
-
-`new --help`, `g --help`, `g <kind> --help`와 `-h`는 프로젝트 설정이나 생성 대상을 읽기 전에
-도움말을 출력한다. JSON을 함께 요청하면 기존 envelope의 `result.output`에 도움말을 넣는다.
+`new --help`, `g --help`, `g <kind> --help`와 `-h`는 프로젝트를 읽거나 파일을 쓰기 전에 출력한다.
 
 ## 8. 생성기 공통 계약
 
@@ -502,7 +498,17 @@ func BuildApplication() (spine.App, boot.Options, error) {
 
 ## 11. 정적 실행 계약
 
-`spine inspect`는 `spine.contract/v1alpha1`, `analysis_mode:"static-source"` 계약을 만든다.
+`spine inspect`는 `spine.contract/v1alpha2`, `analysis_mode:"static-source"` 계약을 만든다.
+`http_adapter`는 HTTP 활성 상태, provider, selection, canonical_factory, expected_contract,
+selected_modules, required_capabilities, resolution과 source를 제공한다. 별칭을 포함한 플랫폼 New,
+Option, WithHTTPAdapter 및 NewWithHTTPAdapter 구성을 인식한다. snapshot은 동등한 생성식과
+소스 위치를 의미 차이로 보지 않으며 모듈 버전과 필요한 기능의 변경은 비교한다.
+HTTP_ADAPTER_MISSING, HTTP_ADAPTER_UNRESOLVED, HTTP_CONFIGURATION_UNRESOLVED 및
+MODULE_GRAPH_UNAVAILABLE 진단이 있으면 분석을 완전하다고 주장하지 않는다.
+doctor의 http_adapter와 context의 doctor.http_adapter 및 contract.http_adapter에도 같은 선택 정보를 제공한다.
+모듈 조회는 네트워크와 toolchain 다운로드 없이 임시 모듈 사본에서 수행한다.
+필요한 정보가 캐시에 없다면 go mod tidy 후 다시 검사한다. 기존 v0.5.2의 내장 Echo는
+legacy-implicit으로 인식하고 HTTP 비활성 worker는 factory를 요구하지 않는다.
 
 수집 범위:
 
@@ -675,7 +681,7 @@ spine contract diff --against contracts/api.json --json
 - error diagnostic이 있는 contract는 snapshot하지 않는다.
 - 기존 snapshot overwrite에는 `--force`가 필요하다.
 - diff는 현재 contract에 error가 있으면 비교하지 않는다.
-- snapshot schema가 현재 `spine.contract/v1alpha1`과 다르면 실패한다.
+- snapshot schema가 현재 `spine.contract/v1alpha2`과 다르면 실패한다.
 - source line 이동과 diagnostics 자체는 semantic diff에서 제외한다.
 - module, entrypoint, composition, constructor dependency, route/handler/signature/interceptor,
   consumer, WebSocket, resource, boot configuration의 의미 변화는 비교한다.

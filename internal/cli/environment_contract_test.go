@@ -27,9 +27,12 @@ func (*Controller) Consume() error { return nil }
 `
 
 func writeEnvironmentContract(t *testing.T, source string) {
+	if err := prepareTestModuleCache(); err != nil {
+		t.Fatal(err)
+	}
 	t.Helper()
 	for path, contents := range map[string]string{
-		"go.mod":         "module example.com/environment\n",
+		"go.mod":         "module example.com/environment\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine v0.5.2\n",
 		"spine.toml":     "module = \"example.com/environment\"\nentrypoint = \".\"\ncomposition = \".\"\nport = 8080\n",
 		"application.go": source,
 	} {

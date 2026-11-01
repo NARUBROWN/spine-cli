@@ -12,8 +12,10 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 
 ## 권장 환경과 설치
 
-- 권장 Go 버전: 1.27.3
-- 새 프로젝트가 사용하는 Spine 버전: v0.5.2
+- 최소 Go 버전: 1.25.5
+- 새 프로젝트의 플랫폼: Echo 개발 레시피 `echo-dev-ded538a25193`
+- Spine: `v0.5.3-0.20261101161224-490135eda06f`
+- Echo 플랫폼: `v0.0.0-20261101230311-ded538a25193` (Echo v5.4.4)
 
 ```sh
 go install github.com/NARUBROWN/spine-cli@v0.2.0
@@ -34,7 +36,6 @@ spine version
 ```sh
 spine new todo-api --module github.com/acme/todo-api
 cd todo-api
-go mod tidy
 spine dev
 ```
 
@@ -43,6 +44,17 @@ spine dev
 ```sh
 curl http://localhost:8080/health
 ```
+
+현재 개발 브랜치의 `new`는 Echo 플랫폼 연결과 의존성 설치, 정적 계약 검사와 빌드를
+완료한 뒤 프로젝트를 생성합니다. 서버는 `spine dev`로 시작합니다. 설치 과정에서는
+애플리케이션 초기화, 테스트나 listener를 실행하지 않습니다. 위 설치 예시의 v0.2.0 릴리스에는
+이 플랫폼 통합이 아직 포함되지 않았습니다.
+
+파일만 생성하려면 `spine new todo-api --skip-install`을 사용하고, 생성 후 `go mod tidy`를
+실행하세요. `--platform echo`는 기본 플랫폼을 명시합니다. 설치 포함 `--dry-run`은 정확한
+의존성 계획을 위해 네트워크와 Go 캐시를 사용할 수 있으며, 오프라인 계획은
+`--skip-install --dry-run`으로 확인합니다. `--force`는 `--skip-install`과 함께만 허용합니다.
+활성 Go workspace는 설치 범위 밖이므로 `GOWORK=off`로 실행하거나 설치를 생략하세요.
 
 새 프로젝트에는 명시적인 `BuildApplication` composition root, `app.Validate`,
 `GET /health`, `spine.toml`이 포함됩니다.
@@ -120,6 +132,18 @@ spine g websocket chat --path /ws/chat --field message:string
 legacy에서만 지원하며, 새 구조에 CRUD 생성 기능을 추가하지 않습니다.
 
 ## 실행 계약
+
+`platform.New()`, `spine.New(platform.Option())`,
+`spine.New(spine.WithHTTPAdapter(platform.NewFactory()))`와
+`spine.NewWithHTTPAdapter(platform.NewFactory())`를 같은 Echo 선택으로 인식합니다.
+`inspect`의 `http_adapter`는 소스에서 확인한 선택과 오프라인 모듈 그래프의 실제 버전을
+보여줍니다. 런타임 factory를 실행해 관찰한 결과는 아닙니다. 새 커널에서 HTTP를 활성화하고
+factory를 빠뜨리면 `HTTP_ADAPTER_MISSING`으로 진단합니다. 기존 v0.5.2 앱은 내장 Echo를
+`legacy-implicit`으로 표시합니다.
+
+계약 payload는 `spine.contract/v1alpha2`입니다. 이전 snapshot은 현재 계약을 검토한 뒤
+`spine contract snapshot --force`로 다시 생성해야 합니다. CLI 바깥 JSON envelope는
+`spine.cli-result/v1`을 유지합니다.
 
 ```sh
 # 현재 등록 계약 조회와 단일 실행 경로 설명

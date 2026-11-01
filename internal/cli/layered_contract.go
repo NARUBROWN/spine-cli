@@ -83,13 +83,14 @@ func (i *contractInspector) resolveLayeredConstructors() {
 
 // inspectLayeredRegistrations는 아직 적용하지 않은 소스에도 동일한 등록 해석 규칙을 적용합니다.
 func inspectLayeredRegistrations(config projectConfig, module string, sources layoutSources) (*contractInspector, error) {
-	source, function, _, appName, err := sources.composition(config.Composition)
+	source, function, index, appName, err := sources.composition(config.Composition)
 	if err != nil {
 		return nil, err
 	}
 	inspector := newContractInspector(config, module, sources)
 	inspector.inspectFile(source.File, source.Fset, function.Body, appName)
 	inspector.addDuplicateDiagnostics()
+	inspector.inspectHTTPAdapter(config, source.File, source.Fset, function, index)
 	return inspector, nil
 }
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"go/format"
 	"io"
 	"os"
@@ -827,7 +828,7 @@ func TestNewCreatesSpineTomlAndCurrentSpineVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(mod), "github.com/NARUBROWN/spine v0.5.2") {
+	if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+platformSpineVersion) {
 		t.Fatalf("unexpected go.mod: %s", mod)
 	}
 }
@@ -1825,5 +1826,9 @@ func inTempDir(t *testing.T) {
 
 // runLegacyNew는 기존 구조의 호환성을 검사할 때 사용하는 프로젝트 준비 함수입니다.
 func runLegacyNew(args []string, out, errOut io.Writer) int {
-	return runNew(append(args, "--layout", "legacy"), out, errOut)
+	if err := prepareTestModuleCache(); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	return runNew(append(args, "--layout", "legacy", "--skip-install"), out, errOut)
 }
