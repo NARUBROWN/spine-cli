@@ -10,16 +10,17 @@ import (
 const contractCheckSchemaVersion = "spine.contract-check/v1alpha1"
 
 type contractCheckReport struct {
-	SchemaVersion    string               `json:"schema_version"`
-	ContractSchema   string               `json:"contract_schema"`
-	AnalysisMode     string               `json:"analysis_mode"`
-	AnalysisComplete bool                 `json:"analysis_complete"`
-	Valid            bool                 `json:"valid"`
-	WarningsAsErrors bool                 `json:"warnings_as_errors"`
-	ErrorCount       int                  `json:"error_count"`
-	WarningCount     int                  `json:"warning_count"`
-	Diagnostics      []contractDiagnostic `json:"diagnostics"`
-	EvidenceBoundary []string             `json:"evidence_boundary"`
+	SchemaVersion    string                `json:"schema_version"`
+	ContractSchema   string                `json:"contract_schema"`
+	AnalysisMode     string                `json:"analysis_mode"`
+	AnalysisComplete bool                  `json:"analysis_complete"`
+	Valid            bool                  `json:"valid"`
+	WarningsAsErrors bool                  `json:"warnings_as_errors"`
+	ErrorCount       int                   `json:"error_count"`
+	WarningCount     int                   `json:"warning_count"`
+	Diagnostics      []contractDiagnostic  `json:"diagnostics"`
+	HTTPAdapter      *httpAdapterSelection `json:"http_adapter,omitempty"`
+	EvidenceBoundary []string              `json:"evidence_boundary"`
 }
 
 func runContractCheck(args []string, out, errOut io.Writer) int {
@@ -80,6 +81,10 @@ func buildContractCheckReport(contract applicationContract, warningsAsErrors boo
 			"runtime HTTP routes, DI constructors, and interceptors were not observed",
 			"external databases, brokers, listeners, and deployed behavior were not checked",
 		},
+	}
+	if contract.HTTPAdapter.Resolution != "" {
+		adapter := contract.HTTPAdapter
+		report.HTTPAdapter = &adapter
 	}
 	for index := range report.Diagnostics {
 		diagnostic := &report.Diagnostics[index]

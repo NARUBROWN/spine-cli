@@ -16,6 +16,7 @@ type semanticContract struct {
 	Module        string   `json:"module"`
 	Entrypoint    string   `json:"entrypoint"`
 	Composition   string   `json:"composition"`
+	HTTPAdapter   string   `json:"http_adapter"`
 	Constructors  []string `json:"constructors"`
 	HTTP          []string `json:"http"`
 	Interceptors  []string `json:"interceptors"`
@@ -119,7 +120,7 @@ func runContractDiff(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	if expected.SchemaVersion != contractSchemaVersion {
-		fmt.Fprintf(errOut, "unsupported contract snapshot schema %q; expected %q\n", expected.SchemaVersion, contractSchemaVersion)
+		fmt.Fprintf(errOut, "unsupported contract snapshot schema %q; expected %q. Review the current contract and regenerate with spine contract snapshot --force\n", expected.SchemaVersion, contractSchemaVersion)
 		return 1
 	}
 	current, err := inspectApplication()
@@ -169,6 +170,14 @@ func semanticView(contract applicationContract) semanticContract {
 		Constructors:  []string{}, HTTP: []string{}, Interceptors: []string{},
 		Consumers: []string{}, WebSockets: []string{}, Resources: []string{}, Configuration: []string{},
 	}
+	adapter := contract.HTTPAdapter
+	adapter.Source = ""
+	adapter.Selection = ""
+	for index := range adapter.SelectedModules {
+		adapter.SelectedModules[index].Dir = ""
+	}
+	adapterJSON, _ := json.Marshal(adapter)
+	result.HTTPAdapter = string(adapterJSON)
 	for _, item := range contract.Constructors {
 		result.Constructors = append(result.Constructors, item.Target+"("+strings.Join(item.Dependencies, ", ")+")")
 	}
@@ -244,6 +253,7 @@ func flattenSemanticContract(contract semanticContract) []string {
 		"module: " + contract.Module,
 		"entrypoint: " + contract.Entrypoint,
 		"composition: " + contract.Composition,
+		"http_adapter: " + contract.HTTPAdapter,
 	}
 	for _, item := range contract.Constructors {
 		items = append(items, "constructor: "+item)

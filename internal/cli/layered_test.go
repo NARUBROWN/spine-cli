@@ -10,10 +10,13 @@ import (
 )
 
 func layeredProject(t *testing.T) {
+	if err := prepareTestModuleCache(); err != nil {
+		t.Fatal(err)
+	}
 	t.Helper()
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runNew([]string{"todo", "--module", "example.com/todo", "--skip-install"}, &out, &errOut); code != 0 {
 		t.Fatalf("new: %s", errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -351,7 +354,7 @@ func TestLayeredAliasedPathTypesAndCompositionRouteConflicts(t *testing.T) {
 		t.Fatalf("valid aliased path type was unresolved: %v %#v", err, contract.Diagnostics)
 	}
 	composition, _ := os.ReadFile("internal/application/application.go")
-	composition = bytes.Replace(composition, []byte("app := spine.New()"), []byte("app := spine.New()\napp.Route(\"GET\", \"/direct/:key\", (*controller.MemberController).Get)"), 1)
+	composition = bytes.Replace(composition, []byte("app := platform.New()"), []byte("app := platform.New()\napp.Route(\"GET\", \"/direct/:key\", (*controller.MemberController).Get)"), 1)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	before, _ := os.ReadFile(layeredRoutePath)
 	var out, errOut bytes.Buffer
@@ -369,7 +372,7 @@ func TestLayeredSchemaAndContextExposeTheSameRolePaths(t *testing.T) {
 	layeredGenerate(t, "domain", "commerce/account/member")
 	layeredGenerate(t, "dto", "request")
 	composition, _ := os.ReadFile("internal/application/application.go")
-	composition = bytes.Replace(composition, []byte("app := spine.New()"), []byte("app := spine.New()\napp.Constructor(newLocalDependency)"), 1)
+	composition = bytes.Replace(composition, []byte("app := platform.New()"), []byte("app := platform.New()\napp.Constructor(newLocalDependency)"), 1)
 	composition = append(composition, []byte("\ntype localDependency struct{}\nfunc newLocalDependency() *localDependency { return &localDependency{} }\n")...)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	var out, errOut bytes.Buffer

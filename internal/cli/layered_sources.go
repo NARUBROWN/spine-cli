@@ -225,20 +225,20 @@ func (sources layoutSources) composition(composition string) (*layoutSource, *as
 	sort.Strings(paths)
 	for _, path := range paths {
 		s := sources[path]
-		aliases := importAliases(s.File, spineImportPath)
+
 		for _, decl := range s.File.Decls {
 			f, ok := decl.(*ast.FuncDecl)
 			if !ok || f.Body == nil {
 				continue
 			}
 			for index, stmt := range f.Body.List {
-				if name, ok := spineNewAssignment(stmt, aliases); ok {
+				if name, ok := applicationAssignment(stmt, s.File); ok {
 					return s, f, index, name, nil
 				}
 			}
 		}
 	}
-	return nil, nil, 0, "", fmt.Errorf("could not find a top-level app := spine.New() assignment in composition path %q", composition)
+	return nil, nil, 0, "", fmt.Errorf("could not find a supported top-level Spine application assignment in composition path %q", composition)
 }
 
 func canonicalType(s *layoutSource, expression ast.Expr, module string) string {

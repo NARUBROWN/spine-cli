@@ -1,21 +1,23 @@
 package cli
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
 
 type doctorReport struct {
-	Scope  string        `json:"scope"`
-	OK     bool          `json:"ok"`
-	Checks []doctorCheck `json:"checks"`
-	Limits []string      `json:"limits"`
+	Scope       string                `json:"scope"`
+	OK          bool                  `json:"ok"`
+	Checks      []doctorCheck         `json:"checks"`
+	Limits      []string              `json:"limits"`
+	HTTPAdapter *httpAdapterSelection `json:"http_adapter,omitempty"`
 }
 
 type doctorCheck struct {
@@ -93,6 +95,27 @@ func inspectDoctorReport() doctorReport {
 	spineVersion, dependencyErr := spineDependencyVersion("go.mod")
 	add("Spine dependency", dependencyErr, spineVersion)
 	contract, contractErr := inspectApplication()
+	if contractErr == nil {
+		adapter := contract.HTTPAdapter
+		report.HTTPAdapter = &adapter
+		modules := []string{}
+		for _, module := range adapter.SelectedModules {
+			value := module.Path + "@" + module.Version
+			if module.Replace != nil {
+				value += " => " + module.Replace.Path + "@" + module.Replace.Version
+			}
+			modules = append(modules, value)
+		}
+		var adapterErr error
+		if adapter.Resolution == "unresolved" {
+			adapterErr = fmt.Errorf("adapter selection or module graph is unresolved; inspect contract diagnostics")
+		}
+		selection := fmt.Sprintf("%s (%s)", adapter.Provider, adapter.Selection)
+		if adapter.Enabled != nil && !*adapter.Enabled && adapter.Selection == "missing" {
+			selection = "disabled (no factory required)"
+		}
+		add("HTTP adapter (static)", adapterErr, fmt.Sprintf("%s; %s", selection, strings.Join(modules, ", ")))
+	}
 	if contractErr == nil && contractHasErrors(contract) {
 		var messages []string
 		for _, diagnostic := range contract.Diagnostics {
@@ -107,22 +130,22 @@ func inspectDoctorReport() doctorReport {
 }
 
 func spineDependencyVersion(path string) (string, error) {
-	file, err := os.Open(path)
+	root, err := filepath.Abs(filepath.Dir(path))
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		fields := strings.Fields(strings.TrimSpace(scanner.Text()))
-		for index, field := range fields {
-			if field == spineImportPath && index+1 < len(fields) {
-				return fields[index+1], nil
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
+	modules, err := selectedModules(context.Background(), root, true)
+	if err != nil {
 		return "", err
 	}
-	return "", fmt.Errorf("go.mod does not require %s", spineImportPath)
+	for _, module := range modules {
+		if module.Path == spineImportPath {
+			value := module.Version
+			if module.Replace != nil {
+				value += " => " + module.Replace.Path + " " + module.Replace.Version
+			}
+			return value, nil
+		}
+	}
+	return "", fmt.Errorf("selected module graph does not contain %s", spineImportPath)
 }

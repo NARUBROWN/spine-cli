@@ -21,7 +21,7 @@ func generationHelp(command string, args []string, out, errOut io.Writer) (bool,
 			kind = args[0]
 		}
 		if command == "new" {
-			fmt.Fprintln(out, "Usage: spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--dry-run] [--json] [--if-match <hash>] [--force]")
+			fmt.Fprintln(out, "Usage: spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo] [--skip-install] [--dry-run] [--json] [--if-match <hash>] [--force with --skip-install]")
 			return true, 0
 		}
 		usage, ok := generatorUsage(kind)
@@ -43,7 +43,7 @@ func generationHelp(command string, args []string, out, errOut io.Writer) (bool,
 
 func generationValueOption(argument string) bool {
 	switch argument {
-	case "--module", "--layout", "--if-match", "--field", "--depends", "--method", "--path", "--handler", "--topic", "--storage":
+	case "--module", "--layout", "--platform", "--if-match", "--field", "--depends", "--method", "--path", "--handler", "--topic", "--storage":
 		return true
 	}
 	return false

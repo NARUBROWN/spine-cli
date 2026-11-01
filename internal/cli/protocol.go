@@ -51,7 +51,7 @@ func extractRootArgument(args []string) ([]string, string, error) {
 			result = append(result, args[index])
 			continue
 		}
-		if index+1 >= len(args) {
+		if index+1 >= len(args) || strings.HasPrefix(args[index+1], "-") {
 			return nil, "", fmt.Errorf("--root requires a directory")
 		}
 		if root != "" {
@@ -132,6 +132,9 @@ func protocolExitCode(args []string, commandCode int, stderr string, stdout []by
 	if commandCode == 0 {
 		return 0
 	}
+	if commandWithoutRoot(args) == "new" {
+		return commandCode
+	}
 	lower := strings.ToLower(stderr)
 	switch {
 	case strings.Contains(lower, "usage:"), strings.Contains(lower, "unknown option"), strings.Contains(lower, "unknown command"), strings.Contains(lower, "requires"), strings.Contains(lower, "does not support --json"):
@@ -161,9 +164,24 @@ func classifyProtocolError(message string, exitCode int) *protocolError {
 	case 4:
 		code = "CONFLICT"
 		hint = "Create a new dry-run plan and retry only after reviewing the changed files."
+	case 10:
+		code = "INTERNAL_ERROR"
+		hint = "Inspect the error details before retrying."
 	case 5:
 		code = "VALIDATION_FAILED"
 		hint = "Run `spine context --json` and inspect contract diagnostics."
 	}
 	return &protocolError{Code: code, Message: message, Retryable: exitCode != 10, Hint: hint}
+}
+
+// root 파싱 오류가 있어도 전역 옵션의 값을 명령 이름으로 오인하지 않습니다.
+func commandWithoutRoot(args []string) string {
+	for index := 0; index < len(args); index++ {
+		if args[index] == "--root" {
+			index++
+			continue
+		}
+		return args[index]
+	}
+	return ""
 }

@@ -7,24 +7,27 @@ import (
 	"strings"
 )
 
-// projectConfig is deliberately small. It is the single project-level contract
-// used by Spine CLI; application-specific configuration remains in the app.
+// projectConfig는 CLI 공통 설정만 보관하며 앱별 설정은 애플리케이션에서 관리합니다.
 type projectConfig struct {
 	Module      string
 	Entrypoint  string
 	Composition string
 	Port        int
 	Layout      string
+	Platform    string
 }
 
 func defaultProjectConfig(module string) projectConfig {
-	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080, Layout: layeredLayout}
+	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080, Layout: layeredLayout, Platform: "echo"}
 }
 
 func projectConfigTemplate(config projectConfig) string {
 	result := fmt.Sprintf("module = %q\nentrypoint = %q\ncomposition = %q\nport = %d\n", config.Module, config.Entrypoint, config.Composition, config.Port)
 	if config.Layout != "" {
 		result += fmt.Sprintf("layout = %q\n", config.Layout)
+	}
+	if config.Platform != "" {
+		result += fmt.Sprintf("platform = %q\n", config.Platform)
 	}
 	return result
 }
@@ -46,7 +49,7 @@ func loadProjectConfig() (projectConfig, error) {
 		}
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		switch key {
-		case "module", "entrypoint", "composition", "layout":
+		case "module", "entrypoint", "composition", "layout", "platform":
 			unquoted, err := strconv.Unquote(value)
 			if err != nil || unquoted == "" {
 				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
@@ -57,6 +60,11 @@ func loadProjectConfig() (projectConfig, error) {
 				config.Entrypoint = unquoted
 			} else if key == "composition" {
 				config.Composition = unquoted
+			} else if key == "platform" {
+				if unquoted != "echo" {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported platform %q", lineNumber+1, unquoted)
+				}
+				config.Platform = unquoted
 			} else {
 				if unquoted != layeredLayout && unquoted != "legacy" {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported layout %q", lineNumber+1, unquoted)

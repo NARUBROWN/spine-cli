@@ -13,12 +13,17 @@ const version = "0.2.0"
 func Run(args []string, out, errOut io.Writer) int {
 	normalizedArgs, jsonOutput := normalizeJSONArguments(args)
 	commandArgs, root, rootErr := extractRootArgument(normalizedArgs)
+	newCommand := commandWithoutRoot(normalizedArgs) == "new"
 	if rootErr != nil {
+		code := 1
+		if newCommand {
+			code = 2
+		}
 		if jsonOutput {
-			return writeProtocolResult(normalizedArgs, 1, nil, rootErr.Error(), out, errOut)
+			return writeProtocolResult(normalizedArgs, code, nil, rootErr.Error(), out, errOut)
 		}
 		fmt.Fprintln(errOut, rootErr)
-		return 1
+		return code
 	}
 	if len(commandArgs) > 0 && (commandArgs[0] == "new" || commandArgs[0] == "g" || commandArgs[0] == "generate") {
 		command := commandArgs[0]
@@ -42,11 +47,15 @@ func Run(args []string, out, errOut io.Writer) int {
 			return 1
 		}
 		if err := os.Chdir(root); err != nil {
+			code := 1
+			if newCommand {
+				code = 3
+			}
 			if jsonOutput {
-				return writeProtocolResult(commandArgs, 1, nil, fmt.Sprintf("could not enter --root %s: %v", root, err), out, errOut)
+				return writeProtocolResult(commandArgs, code, nil, fmt.Sprintf("could not enter --root %s: %v", root, err), out, errOut)
 			}
 			fmt.Fprintf(errOut, "could not enter --root %s: %v\n", root, err)
-			return 1
+			return code
 		}
 		defer os.Chdir(previous)
 	}
@@ -134,7 +143,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, `Spine CLI - scaffold explicit, execution-centric Spine applications.
 
 Usage:
-  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--dry-run] [--json] [--if-match <hash>]
+  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
   spine g domain <[group/]name> [--field name:type]
   spine g dto <[group/]name> [--field name:type]
   spine g repository <[group/]name>

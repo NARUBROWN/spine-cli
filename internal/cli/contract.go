@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-const contractSchemaVersion = "spine.contract/v1alpha1"
+const contractSchemaVersion = "spine.contract/v1alpha2"
 
 type applicationContract struct {
 	SchemaVersion string                 `json:"schema_version"`
@@ -24,6 +24,7 @@ type applicationContract struct {
 	Module        string                 `json:"module"`
 	Entrypoint    string                 `json:"entrypoint"`
 	Composition   string                 `json:"composition"`
+	HTTPAdapter   httpAdapterSelection   `json:"http_adapter"`
 	Constructors  []contractRegistration `json:"constructors"`
 	HTTP          []httpRegistration     `json:"http"`
 	Interceptors  []contractRegistration `json:"interceptors"`
@@ -118,13 +119,14 @@ func inspectApplication() (applicationContract, error) {
 			return applicationContract{}, err
 		}
 	} else {
-		_, file, fset, function, _, appName, err := findCompositionRoot(config.Composition)
+		_, file, fset, function, index, appName, err := findCompositionRoot(config.Composition)
 		if err != nil {
 			return applicationContract{}, err
 		}
 		inspector = newContractInspector(config, module, nil)
 		inspector.inspectFile(file, fset, function.Body, appName)
 		inspector.addDuplicateDiagnostics()
+		inspector.inspectHTTPAdapter(config, file, fset, function, index)
 	}
 	inspector.resolveConstructorDependencies()
 	inspector.resolveHandlerSignatures()
@@ -213,6 +215,9 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 				if len(i.contract.HTTP) > before {
 					i.contract.HTTP[len(i.contract.HTTP)-1].Handler = i.registrationExpression(call.Args[2], file, fset)
 				}
+			case "Transport":
+				registrationCall = true
+				i.contract.Configuration = append(i.contract.Configuration, contractSetting{Path: "http_adapter.native_hooks", Value: "required", Source: source})
 			case "Interceptor", "InterceptorFor":
 				registrationCall = true
 				arguments := call.Args
@@ -1000,6 +1005,9 @@ func importPathsByAlias(file *ast.File) map[string]string {
 			continue
 		}
 		alias := filepath.Base(path)
+		if path == echoPlatformPath {
+			alias = "platform"
+		}
 		if spec.Name != nil {
 			alias = spec.Name.Name
 		}

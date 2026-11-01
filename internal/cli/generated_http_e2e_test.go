@@ -38,7 +38,7 @@ func TestGeneratedProjectsHandleHTTPInputErrors(t *testing.T) {
 			apply(workspace, "new", "todo", "--module", "example.com/todo", "--layout", layout)
 			project := filepath.Join(workspace, "todo")
 			mod, _ := os.ReadFile(filepath.Join(project, "go.mod"))
-			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine v0.5.2") {
+			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+platformSpineVersion) {
 				t.Fatalf("generated project uses an unfixed runtime: %s", mod)
 			}
 			if err := os.MkdirAll(filepath.Join(project, "handlers"), 0o755); err != nil {
@@ -74,7 +74,7 @@ func (*Controller) Fail() error { return errors.New("internal fixture failure") 
 				path := filepath.Join(project, "internal", "application", "application.go")
 				source, _ := os.ReadFile(path)
 				text := strings.Replace(string(source), "import (", "import (\n\"example.com/todo/handlers\"", 1)
-				text = strings.Replace(text, "app := spine.New()", `app := spine.New()
+				text = strings.Replace(text, "app := platform.New()", `app := platform.New()
  app.Constructor(handlers.NewController)
  app.Route("POST", "/products", (*handlers.Controller).Create)
  app.Route("GET", "/products/:id", (*handlers.Controller).Detail)
@@ -83,6 +83,7 @@ func (*Controller) Fail() error { return errors.New("internal fixture failure") 
 				writeE2EFile(t, path, text)
 			}
 			writeE2EFile(t, filepath.Join(project, "internal", "application", "http_test.go"), generatedHTTPInputTest)
+			writeE2EFile(t, filepath.Join(project, "internal", "application", "platform_test.go"), generatedPlatformLifecycleTest)
 			format := exec.Command("go", "fmt", "./...")
 			format.Dir = project
 			if output, err := format.CombinedOutput(); err != nil {
