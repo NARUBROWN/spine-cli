@@ -12,7 +12,7 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 
 ## 요구사항과 설치
 
-- Go 1.25.5 이상
+- Go 1.27.3 이상 (Go 1.27.x 검증 기준: 1.27.3)
 - 새 프로젝트가 사용하는 Spine 버전: v0.5.1
 
 ```sh
