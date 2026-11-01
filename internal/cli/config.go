@@ -14,14 +14,19 @@ type projectConfig struct {
 	Entrypoint  string
 	Composition string
 	Port        int
+	Layout      string
 }
 
 func defaultProjectConfig(module string) projectConfig {
-	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080}
+	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080, Layout: layeredLayout}
 }
 
 func projectConfigTemplate(config projectConfig) string {
-	return fmt.Sprintf("module = %q\nentrypoint = %q\ncomposition = %q\nport = %d\n", config.Module, config.Entrypoint, config.Composition, config.Port)
+	result := fmt.Sprintf("module = %q\nentrypoint = %q\ncomposition = %q\nport = %d\n", config.Module, config.Entrypoint, config.Composition, config.Port)
+	if config.Layout != "" {
+		result += fmt.Sprintf("layout = %q\n", config.Layout)
+	}
+	return result
 }
 
 func loadProjectConfig() (projectConfig, error) {
@@ -41,7 +46,7 @@ func loadProjectConfig() (projectConfig, error) {
 		}
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		switch key {
-		case "module", "entrypoint", "composition":
+		case "module", "entrypoint", "composition", "layout":
 			unquoted, err := strconv.Unquote(value)
 			if err != nil || unquoted == "" {
 				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
@@ -50,8 +55,13 @@ func loadProjectConfig() (projectConfig, error) {
 				config.Module = unquoted
 			} else if key == "entrypoint" {
 				config.Entrypoint = unquoted
-			} else {
+			} else if key == "composition" {
 				config.Composition = unquoted
+			} else {
+				if unquoted != layeredLayout && unquoted != "legacy" {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported layout %q", lineNumber+1, unquoted)
+				}
+				config.Layout = unquoted
 			}
 		case "port":
 			port, err := strconv.Atoi(value)

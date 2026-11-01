@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"go/format"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -110,7 +111,7 @@ func TestDevEventStreamKeepsProcessOutputAsJSONLines(t *testing.T) {
 func TestGlobalRootRunsCommandWithoutChangingCallerDirectory(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	before, _ := os.Getwd()
@@ -128,7 +129,7 @@ func TestGlobalRootRunsCommandWithoutChangingCallerDirectory(t *testing.T) {
 func TestDryRunBaseHashGuardsGenerationApply(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo", "--dry-run", "--json"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo", "--dry-run", "--json"}, &out, &errOut); code != 0 {
 		t.Fatalf("dry-run code=%d: %s", code, errOut.String())
 	}
 	var plan struct {
@@ -143,12 +144,12 @@ func TestDryRunBaseHashGuardsGenerationApply(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if code := runNew([]string{"todo", "--module", "example.com/todo", "--if-match", plan.BaseHash}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo", "--if-match", plan.BaseHash}, &out, &errOut); code != 0 {
 		t.Fatalf("matching plan was rejected: code=%d", code)
 	}
 	out.Reset()
 	errOut.Reset()
-	if code := runNew([]string{"todo", "--module", "example.com/todo", "--force", "--if-match", plan.BaseHash}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "changed since dry-run") {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo", "--force", "--if-match", plan.BaseHash}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "changed since dry-run") {
 		t.Fatalf("stale plan was accepted: code=%d, stderr=%s", code, errOut.String())
 	}
 }
@@ -156,7 +157,7 @@ func TestDryRunBaseHashGuardsGenerationApply(t *testing.T) {
 func TestAgentContextExplainAndVerificationJSON(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -342,7 +343,7 @@ func TestCompositionImportPathRequiresPackageBelowModuleRoot(t *testing.T) {
 func TestGenerateTypedConsumerAndWebSocketContracts(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"events", "--module", "example.com/events"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"events", "--module", "example.com/events"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("events"); err != nil {
@@ -458,7 +459,7 @@ func TestGenerateLayeredComponents(t *testing.T) {
 func TestGenerateLayeredComponentsWithDependenciesAndRegistration(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -518,7 +519,7 @@ func TestGenerateLayeredComponentsWithDependenciesAndRegistration(t *testing.T) 
 func TestGenerateRejectsDuplicateConstructorNameFromResourceThenComponent(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -545,7 +546,7 @@ func TestGenerateRejectsDuplicateConstructorNameFromResourceThenComponent(t *tes
 func TestGenerateRejectsDuplicateConstructorNameFromComponentThenResource(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -572,7 +573,7 @@ func TestGenerateRejectsDuplicateConstructorNameFromComponentThenResource(t *tes
 func TestGenerateTypedVerticalSlice(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -812,7 +813,7 @@ func TestGenerateDryRunDoesNotWrite(t *testing.T) {
 func TestNewCreatesSpineTomlAndCurrentSpineVersion(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("code=%d: %s", code, errOut.String())
 	}
 	config, err := os.ReadFile(filepath.Join("todo", "spine.toml"))
@@ -834,7 +835,7 @@ func TestNewCreatesSpineTomlAndCurrentSpineVersion(t *testing.T) {
 func TestNewCreatesReusableCompositionRoot(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("code=%d: %s", code, errOut.String())
 	}
 	mainSource, err := os.ReadFile(filepath.Join("todo", "main.go"))
@@ -863,7 +864,7 @@ func TestNewCreatesReusableCompositionRoot(t *testing.T) {
 func TestGeneratedResourceAndApplicationInspection(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1041,7 +1042,7 @@ func TestContractCheckProvidesStructuredPolicyResult(t *testing.T) {
 func TestContractCheckCommandEmitsMachineReadableEvidence(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1243,7 +1244,7 @@ func (s *Socket) HTTP() {}
 func TestContractSnapshotDiffAndExplain(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1291,7 +1292,7 @@ func TestContractSnapshotDiffAndExplain(t *testing.T) {
 func TestDoctorReportsOfflineEvidenceBoundary(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1549,7 +1550,7 @@ func TestProtocolFailureClassificationIsInternallyConsistent(t *testing.T) {
 func TestInspectionDiagnosesMalformedRouteWithoutPanicking(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1622,7 +1623,7 @@ func TestSourceStateHashesEmbeddedAssetsAndContents(t *testing.T) {
 func TestGenerateControllerInsideRoutePackageAvoidsSelfImport(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.MkdirAll(filepath.Join("todo", "src", "route"), 0o755); err != nil {
@@ -1648,7 +1649,7 @@ func TestGenerateControllerInsideRoutePackageAvoidsSelfImport(t *testing.T) {
 func TestGenerateControllerRejectsInvalidRouteRegisterSignature(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1674,7 +1675,7 @@ func TestGenerateControllerRejectsInvalidRouteRegisterSignature(t *testing.T) {
 func TestGenerateControllerRejectsExistingRouteConflict(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1707,7 +1708,7 @@ func Register(app spine.App) error {
 func TestComponentRegistrationChecksOnlyPrimaryCompositionFunction(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1766,7 +1767,7 @@ func BuildApplication() (spine.App, boot.Options, error) {
 func TestDependenciesRejectTestFilesWrongPackagesAndDuplicates(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
+	if code := runLegacyNew([]string{"todo", "--module", "example.com/todo"}, &out, &errOut); code != 0 {
 		t.Fatalf("new code=%d: %s", code, errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -1812,4 +1813,9 @@ func inTempDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(previous) })
+}
+
+// runLegacyNew는 기존 구조의 호환성을 검사할 때 사용하는 프로젝트 준비 함수입니다.
+func runLegacyNew(args []string, out, errOut io.Writer) int {
+	return runNew(append(args, "--layout", "legacy"), out, errOut)
 }

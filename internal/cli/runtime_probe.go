@@ -154,6 +154,10 @@ func compositionImportPath() (string, error) {
 }
 
 func runtimeProbeSource(compositionImport string) string {
+	handlerExpression := `fmt.Sprintf("(*%s).%s", meta.ControllerType.Elem().Name(), meta.Method.Name)`
+	if config, err := loadProjectConfig(); err == nil && config.Layout == layeredLayout {
+		handlerExpression = `fmt.Sprintf("(*%s.%s).%s", meta.ControllerType.Elem().PkgPath(), meta.ControllerType.Elem().Name(), meta.Method.Name)`
+	}
 	return fmt.Sprintf(`package main
 
 import (
@@ -175,7 +179,7 @@ type payload struct {
 }
 
 func handlerName(meta core.HandlerMeta) string {
-	return fmt.Sprintf("(*%%s).%%s", meta.ControllerType.Elem().Name(), meta.Method.Name)
+	return %s
 }
 
 func main() {
@@ -199,7 +203,7 @@ func main() {
 	}
 	fmt.Printf(%q+"%%s\n", encoded)
 }
-`, compositionImport, runtimeProbeMarker)
+`, compositionImport, handlerExpression, runtimeProbeMarker)
 }
 
 func compareRuntimeProbe(static applicationContract, payload runtimeProbePayload) runtimeProbeReport {

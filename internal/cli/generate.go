@@ -28,6 +28,14 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 		}
 		defer os.Chdir(previous)
 	}
+	if config, err := loadProjectConfig(); err == nil && config.Layout == layeredLayout {
+		return runLayeredGenerate(args, config, out, errOut)
+	} else if err != nil {
+		if _, statErr := os.Stat("spine.toml"); statErr == nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+	}
 	if len(args) < 2 {
 		fmt.Fprintln(errOut, "usage: spine generate <resource|slice|consumer|websocket|controller|service|repository> <name> [options]")
 		return 1
