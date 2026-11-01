@@ -16,17 +16,17 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 - 새 프로젝트가 사용하는 Spine 버전: v0.5.1
 
 ```sh
-go install github.com/NARUBROWN/spine-cli@v0.1.4
+go install github.com/NARUBROWN/spine-cli@v0.2.0
 spine-cli version
-# spine-cli 0.1.4
+# spine-cli 0.2.0
 ```
 
 짧은 `spine` 명령을 사용하려면 기존 `cmd/spine` 경로로 설치합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.1.4
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.2.0
 spine version
-# spine-cli 0.1.4
+# spine-cli 0.2.0
 ```
 
 ## 빠른 시작

@@ -12,8 +12,8 @@
 - 프로젝트와 제품 이름: `spine-cli`
 - 루트 경로로 설치되는 실행 파일과 명령: `spine-cli`
 - `cmd/spine` 경로로 설치되는 실행 파일과 명령: `spine`
-- 현재 CLI 버전: `0.1.4`
-- `spine-cli version`과 `spine version` 출력: `spine-cli 0.1.4`
+- 현재 CLI 버전: `0.2.0`
+- `spine-cli version`과 `spine version` 출력: `spine-cli 0.2.0`
 - Go module: `github.com/NARUBROWN/spine-cli`
 - 이 저장소와 생성 프로젝트의 Go 호환 기준: `1.25.5`
 - 권장·검증 Go 버전: `1.27.3`
