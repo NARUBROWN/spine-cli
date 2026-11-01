@@ -40,7 +40,7 @@ func currentCapabilities() capabilityReport {
 		{Name: "generation.kafka", Implemented: false, Stability: "planned"},
 		{Name: "generation.rabbitmq", Implemented: false, Stability: "planned"},
 		{Name: "generation.bun", Implemented: false, Stability: "planned"},
-		{Name: "contract.static-inspection", Implemented: true, Stability: "alpha", Evidence: "HTTP, DI, interceptors, consumers, WebSockets, resources, boot options"},
+		{Name: "contract.static-inspection", Implemented: true, Stability: "alpha", Evidence: "HTTP, DI, interceptors, consumers, WebSockets, resources, boot options; explicit os.Getenv registration inputs and string equality conditions", Limit: "environment-dependent registrations use the inspection process's inputs; arbitrary functions and local variables are not evaluated"},
 		{Name: "contract.explain", Implemented: true, Stability: "alpha", Limit: "static-source evidence only"},
 		{Name: "contract.snapshot-diff", Implemented: true, Stability: "alpha", Evidence: "semantic drift ignores source line movement"},
 		{Name: "contract.structured-check", Implemented: true, Stability: "alpha", Evidence: "machine-readable completeness, diagnostics, evidence boundaries, and warnings-as-errors policy"},

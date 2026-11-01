@@ -436,6 +436,7 @@ func BuildApplication() (spine.App, boot.Options, error) {
 - 자동 module/route 등록을 위해 함수는 `(spine.App, boot.Options, error)`를 반환해야 한다.
 - `Register(app)`의 error를 검사하고 그대로 반환한다.
 - registration은 직접적이고 무조건적인 형태로 유지한다.
+- 예제의 토픽 접두사와 테스트 라우트를 위해, 문자열·연결·직접적인 `os.Getenv("이름")` 등록 이름과 이 문자열의 `==`/`!=` 분기는 검사 프로세스의 환경변수로 해석한다. `if` 초기화문이 있거나 임의 함수·지역 변수·미해석 외부 분기에 의존하면 추측하지 않는다. 검사와 실행에는 같은 환경변수를 전달해야 한다.
 - helper에 `app`을 넘기거나, 조건문/loop/defer/goroutine/function literal에 registration을 숨기지
   않는다.
 - legacy composition이 요구 형태가 아니면 `--no-register`로 생성한 뒤 사용자가 명시적으로
@@ -452,6 +453,7 @@ func BuildApplication() (spine.App, boot.Options, error) {
 - HTTP method, path, handler, parameter binding, return type
 - global/scope/route interceptor
 - consumer와 WebSocket registration
+- 현재 module의 별도 패키지에서 가져온 consumer/WebSocket handler의 import alias를 정규화한 signature
 - local resource/module의 `Register(app)`
 - `boot.Options` configuration literal
 - source location과 diagnostics

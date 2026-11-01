@@ -100,6 +100,8 @@ spine contract export --format asyncapi --output asyncapi.json
 검증 결과는 다음 경계를 가집니다.
 
 - `inspect`, `explain`, `contract check`는 정적 소스 분석입니다.
+- 등록 이름의 문자열·문자열 연결·직접적인 `os.Getenv("이름")` 호출과, 이 문자열의 `==`/`!=` 조건은 검사 프로세스의 환경변수로 해석합니다. 검사와 앱 실행에 같은 값을 전달해야 합니다.
+- 임의 함수·지역 변수·환경변수 변경 호출은 평가하지 않으며, 해석하지 못한 등록은 계속 오류로 처리합니다.
 - 분석할 수 없는 조건부·동적 등록은 오류와 `analysis_complete: false`로 표시합니다.
 - `contract probe`는 `BuildApplication`, `app.Validate`, consumer/WebSocket 공개 registry만 대조합니다.
 - `verify` 성공은 계약·gofmt·vet·test의 로컬 통과를 뜻합니다. DB, broker, listener,

@@ -76,6 +76,7 @@ func buildContractCheckReport(contract applicationContract, warningsAsErrors boo
 		Diagnostics:      append([]contractDiagnostic{}, contract.Diagnostics...),
 		EvidenceBoundary: []string{
 			"project source was inspected without claiming complete Go program execution",
+			"direct os.Getenv registration names and string equality conditions use this inspection process's environment; use the same inputs at runtime",
 			"runtime HTTP routes, DI constructors, and interceptors were not observed",
 			"external databases, brokers, listeners, and deployed behavior were not checked",
 		},

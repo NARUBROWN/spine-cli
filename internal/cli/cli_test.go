@@ -1056,8 +1056,11 @@ func TestContractCheckCommandEmitsMachineReadableEvidence(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if !report.Valid || !report.AnalysisComplete || report.SchemaVersion != contractCheckSchemaVersion || len(report.EvidenceBoundary) != 3 || report.Diagnostics == nil {
+	if !report.Valid || !report.AnalysisComplete || report.SchemaVersion != contractCheckSchemaVersion || len(report.EvidenceBoundary) < 3 || report.Diagnostics == nil {
 		t.Fatalf("unexpected contract check evidence: %#v", report)
+	}
+	if !strings.Contains(strings.Join(report.EvidenceBoundary, "\n"), "os.Getenv") {
+		t.Fatalf("environment input boundary is missing: %#v", report.EvidenceBoundary)
 	}
 }
 

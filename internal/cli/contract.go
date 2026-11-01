@@ -136,7 +136,22 @@ func inspectApplication() (applicationContract, error) {
 func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, root ast.Node, appName string) {
 	imports := importPathsByAlias(file)
 	parents := astParentMap(root)
+	conditions := map[*ast.IfStmt]bool{}
+	skipped := map[ast.Node]bool{}
 	ast.Inspect(root, func(node ast.Node) bool {
+		if skipped[node] {
+			return false
+		}
+		if statement, ok := node.(*ast.IfStmt); ok && statement.Init == nil {
+			if enabled, resolved := registrationCondition(statement.Cond, imports); resolved {
+				conditions[statement] = enabled
+				if enabled && statement.Else != nil {
+					skipped[statement.Else] = true
+				} else if !enabled {
+					skipped[statement.Body] = true
+				}
+			}
+		}
 		if literal, ok := node.(*ast.FuncLit); ok {
 			if containsAppContractCall(literal.Body, appName) {
 				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "DEFERRED_REGISTRATION_UNRESOLVED", Message: "registration inside a function literal is not known to execute during composition", Source: relativeSource(fset.Position(literal.Pos()))})
@@ -152,6 +167,14 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 			return true
 		}
 		source := relativeSource(fset.Position(call.Pos()))
+		if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
+			if alias, ok := selector.X.(*ast.Ident); ok && alias.Obj == nil && imports[alias.Name] == "os" {
+				switch selector.Sel.Name {
+				case "Setenv", "Unsetenv", "Clearenv":
+					i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "ENVIRONMENT_MUTATION_UNRESOLVED", Message: "composition mutates environment inputs, so static inspection cannot prove the active registrations", Source: source})
+				}
+			}
+		}
 		registrationCall := false
 		if selector, ok := directAppCall(call, appName); ok {
 			switch selector {
@@ -185,11 +208,11 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 		}
 		if registry, ok := registryCall(call, appName); ok {
 			registrationCall = true
-			i.inspectRegistryCall(registry, call, fset, source)
+			i.inspectRegistryCall(registry, call, fset, source, imports)
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok || selector.Sel.Name != "Register" || len(call.Args) != 1 {
-			if registrationCall && conditionallyExecuted(call, root, parents) {
+			if registrationCall && conditionallyExecuted(call, root, parents, conditions) {
 				i.addConditionalRegistrationDiagnostic(source)
 			}
 			if !registrationCall && hasIdentifierArgument(call, appName) {
@@ -200,7 +223,7 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 		pkg, packageOK := selector.X.(*ast.Ident)
 		app, appOK := call.Args[0].(*ast.Ident)
 		if !packageOK || !appOK || app.Name != appName {
-			if registrationCall && conditionallyExecuted(call, root, parents) {
+			if registrationCall && conditionallyExecuted(call, root, parents, conditions) {
 				i.addConditionalRegistrationDiagnostic(source)
 			}
 			return true
@@ -211,7 +234,7 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 		}
 		registrationCall = true
 		i.inspectResource(pkg.Name, importPath, source)
-		if conditionallyExecuted(call, root, parents) {
+		if conditionallyExecuted(call, root, parents, conditions) {
 			i.addConditionalRegistrationDiagnostic(source)
 		}
 		return true
@@ -625,21 +648,72 @@ func contractPathKeys(path string) []string {
 	return keys
 }
 
-func (i *contractInspector) inspectRegistryCall(registry string, call *ast.CallExpr, fset *token.FileSet, source string) {
+func (i *contractInspector) inspectRegistryCall(registry string, call *ast.CallExpr, fset *token.FileSet, source string, imports map[string]string) {
 	if len(call.Args) < 2 {
 		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: strings.ToUpper(registry) + "_REGISTRATION_ARGUMENTS_INVALID", Message: registry + " registration requires a name and handler", Source: source})
 		return
 	}
-	name, ok := stringLiteral(call.Args[0])
+	name, ok := registrationString(call.Args[0], imports)
 	if !ok {
-		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: strings.ToUpper(registry) + "_REGISTRATION_DYNAMIC", Message: "static inspection cannot resolve a non-literal registration name", Source: source})
+		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: strings.ToUpper(registry) + "_REGISTRATION_DYNAMIC", Message: "static inspection cannot resolve this registration name; only string literals, concatenation, and direct os.Getenv calls are supported", Source: source})
 	}
-	registration := namedRegistration{Name: name, Handler: expressionText(fset, call.Args[1]), Source: source}
+	registration := namedRegistration{Name: name, Handler: normalizeImportedExpression(expressionText(fset, call.Args[1]), imports, i.module), Source: source}
 	if registry == "consumer" {
 		i.contract.Consumers = append(i.contract.Consumers, registration)
 	} else {
 		i.contract.WebSockets = append(i.contract.WebSockets, registration)
 	}
+}
+
+// registrationString은 코드를 실행하지 않고 문자열과 명시적인 환경변수 입력만 해석합니다.
+// 지역 변수와 임의 함수 호출은 현재 값이 같아 보이더라도 추측하지 않습니다.
+func registrationString(expression ast.Expr, imports map[string]string) (string, bool) {
+	if value, ok := stringLiteral(expression); ok {
+		return value, true
+	}
+	switch value := expression.(type) {
+	case *ast.ParenExpr:
+		return registrationString(value.X, imports)
+	case *ast.BinaryExpr:
+		if value.Op != token.ADD {
+			return "", false
+		}
+		left, leftOK := registrationString(value.X, imports)
+		right, rightOK := registrationString(value.Y, imports)
+		return left + right, leftOK && rightOK
+	case *ast.CallExpr:
+		selector, ok := value.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "Getenv" || len(value.Args) != 1 {
+			return "", false
+		}
+		alias, ok := selector.X.(*ast.Ident)
+		if !ok || alias.Obj != nil || imports[alias.Name] != "os" {
+			return "", false
+		}
+		key, ok := stringLiteral(value.Args[0])
+		if !ok || key == "" {
+			return "", false
+		}
+		return os.Getenv(key), true
+	}
+	return "", false
+}
+
+func registrationCondition(expression ast.Expr, imports map[string]string) (bool, bool) {
+	if parentheses, ok := expression.(*ast.ParenExpr); ok {
+		return registrationCondition(parentheses.X, imports)
+	}
+	comparison, ok := expression.(*ast.BinaryExpr)
+	if !ok || (comparison.Op != token.EQL && comparison.Op != token.NEQ) {
+		return false, false
+	}
+	left, leftOK := registrationString(comparison.X, imports)
+	right, rightOK := registrationString(comparison.Y, imports)
+	if !leftOK || !rightOK {
+		return false, false
+	}
+	equal := left == right
+	return equal == (comparison.Op == token.EQL), true
 }
 
 func (i *contractInspector) inspectResource(packageName, importPath, source string) {
@@ -782,13 +856,15 @@ func astParentMap(root ast.Node) map[ast.Node]ast.Node {
 	return parents
 }
 
-func conditionallyExecuted(node, root ast.Node, parents map[ast.Node]ast.Node) bool {
+func conditionallyExecuted(node, root ast.Node, parents map[ast.Node]ast.Node, conditions map[*ast.IfStmt]bool) bool {
 	child := node
 	for parent := parents[child]; parent != nil && parent != root; parent = parents[child] {
 		switch statement := parent.(type) {
 		case *ast.IfStmt:
 			if child != statement.Init {
-				return true
+				if _, resolved := conditions[statement]; !resolved {
+					return true
+				}
 			}
 		case *ast.ForStmt:
 			if child != statement.Init {
