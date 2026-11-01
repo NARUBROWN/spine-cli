@@ -56,6 +56,18 @@ func runCommand(args []string, out, errOut io.Writer) int {
 		printHelp(out)
 		return 0
 	}
+	// 실행 명령은 인자를 검사한 뒤에만 프로젝트를 읽거나 외부 명령을 시작합니다.
+	switch args[0] {
+	case "run", "test", "check", "build":
+		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+			fmt.Fprintf(out, "Usage: spine %s [--root <directory>]\n\nThis command accepts no command-specific options. Use go test directly for Go test filters.\n", args[0])
+			return 0
+		}
+		if len(args) > 1 {
+			fmt.Fprintf(errOut, "unknown option or argument for %s: %s\nUsage: spine %s [--root <directory>]\n", args[0], args[1], args[0])
+			return 1
+		}
+	}
 
 	switch args[0] {
 	case "help", "--help", "-h":

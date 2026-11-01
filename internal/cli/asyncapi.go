@@ -7,17 +7,21 @@ import (
 )
 
 func buildAsyncAPIDocument(contract applicationContract) (map[string]any, error) {
-	schemas, err := inspectStructSchemas(".")
+	catalog, err := newAPISchemas(contract.Module)
 	if err != nil {
 		return nil, err
 	}
 	channels := map[string]any{}
 	operations := map[string]any{}
 	for _, registration := range contract.Consumers {
-		addAsyncAPIRegistration(channels, operations, registration, "consumer")
+		if err := addAsyncAPIRegistration(catalog, channels, operations, registration, "consumer"); err != nil {
+			return nil, err
+		}
 	}
 	for _, registration := range contract.WebSockets {
-		addAsyncAPIRegistration(channels, operations, registration, "websocket")
+		if err := addAsyncAPIRegistration(catalog, channels, operations, registration, "websocket"); err != nil {
+			return nil, err
+		}
 	}
 	return map[string]any{
 		"asyncapi": "3.1.0",
@@ -29,13 +33,16 @@ func buildAsyncAPIDocument(contract applicationContract) (map[string]any, error)
 		"defaultContentType": "application/json",
 		"channels":           channels,
 		"operations":         operations,
-		"components":         map[string]any{"schemas": schemas},
+		"components":         map[string]any{"schemas": catalog.schemas},
 		"x-spine-contract":   map[string]any{"schema_version": contract.SchemaVersion, "analysis_mode": contract.AnalysisMode},
 	}, nil
 }
 
-func addAsyncAPIRegistration(channels, operations map[string]any, registration namedRegistration, transport string) {
-	channelID := asyncAPIIdentifier(transport + "_" + registration.Name)
+func addAsyncAPIRegistration(catalog *apiSchemas, channels, operations map[string]any, registration namedRegistration, transport string) error {
+	channelID := stableDocumentID(asyncAPIIdentifier(transport+"_"+registration.Name), transport, registration.Name)
+	if _, exists := channels[channelID]; exists {
+		return fmt.Errorf("AsyncAPI channel identifier collision: %s", channelID)
+	}
 	messageID := channelID + "Message"
 	payloadType := messagePayloadType(registration.Parameters)
 	channel := map[string]any{
@@ -43,7 +50,7 @@ func addAsyncAPIRegistration(channels, operations map[string]any, registration n
 		"messages": map[string]any{
 			messageID: map[string]any{
 				"name":            messageID,
-				"payload":         openAPISchemaForType(payloadType),
+				"payload":         catalog.schema(payloadType, registration.schemaSource),
 				"x-spine-go-type": payloadType,
 				"x-spine-handler": registration.Handler,
 				"x-spine-source":  registration.Source,
@@ -52,7 +59,10 @@ func addAsyncAPIRegistration(channels, operations map[string]any, registration n
 		"x-spine-transport": transport,
 	}
 	channels[channelID] = channel
-	operationID := asyncAPIIdentifier("receive_" + registration.Handler + "_" + registration.Name)
+	operationID := stableDocumentID(asyncAPIIdentifier("receive_"+registration.Handler+"_"+registration.Name), transport, registration.Handler, registration.Name)
+	if _, exists := operations[operationID]; exists {
+		return fmt.Errorf("AsyncAPI operation identifier collision: %s", operationID)
+	}
 	operations[operationID] = map[string]any{
 		"action":                     "receive",
 		"channel":                    map[string]any{"$ref": "#/channels/" + channelID},
@@ -60,6 +70,7 @@ func addAsyncAPIRegistration(channels, operations map[string]any, registration n
 		"x-spine-handler-parameters": registration.Parameters,
 		"x-spine-return-types":       registration.Returns,
 	}
+	return nil
 }
 
 func messagePayloadType(parameters []handlerParameter) string {

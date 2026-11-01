@@ -137,10 +137,17 @@ spine contract export --format asyncapi --output asyncapi.json
 - `inspect`, `explain`, `contract check`는 정적 소스 분석입니다.
 - 등록 이름의 문자열·문자열 연결·직접적인 `os.Getenv("이름")` 호출과, 이 문자열의 `==`/`!=` 조건은 검사 프로세스의 환경변수로 해석합니다. 검사와 앱 실행에 같은 값을 전달해야 합니다.
 - 임의 함수·지역 변수·환경변수 변경 호출은 평가하지 않으며, 해석하지 못한 등록은 계속 오류로 처리합니다.
-- 분석할 수 없는 조건부·동적 등록은 오류와 `analysis_complete: false`로 표시합니다.
+- 분석할 수 없는 조건부 등록과 동적 등록, 현재 모듈 밖의 `Register(app)` 호출은 오류와
+  `analysis_complete: false`로 표시합니다.
 - `contract probe`는 `BuildApplication`, `app.Validate`, consumer/WebSocket 공개 registry만 대조합니다.
 - `verify` 성공은 계약·gofmt·vet·test의 로컬 통과를 뜻합니다. DB, broker, listener,
   배포 환경의 정상 동작은 별도의 E2E 검증이 필요합니다.
+
+OpenAPI와 AsyncAPI는 타입을 선언한 패키지와 import 범위를 기준으로 스키마를 구분합니다.
+JSON 태그가 없으면 Go 필드 이름을 그대로 사용하고, `time.Time`은 `string`과 `date-time`으로
+표현합니다. 해석할 수 없는 타입은 `x-spine-unresolved-type`으로 표시합니다. 이 표시는 문서의
+분석 한계이며 실제 API의 요청 필드가 아닙니다. AsyncAPI의 채널과 operation 식별자는 원래 이름을
+구분하도록 만들며, 문서에 기록된 참조를 사용해야 합니다.
 
 ## 개발 명령
 
@@ -154,6 +161,15 @@ spine contract export --format asyncapi --output asyncapi.json
 | `spine build` | `bin/<모듈명>`에 바이너리 생성 |
 | `spine doctor` | 도구 체인, 설정, 정적 계약을 오프라인 진단 |
 | `spine completion <shell>` | bash, zsh, PowerShell completion 생성 |
+
+`run`, `test`, `check`, `build`는 `--help` 또는 `-h`로 도움말을 확인할 수 있습니다.
+그 밖의 명령별 옵션은 실행 전에 오류로 처리합니다. 테스트 필터는 `go test ./... -run <이름>`으로
+직접 실행하세요.
+
+`run`은 매번 `go build`를 호출해 Go 자체의 빌드 캐시와 로컬 의존성 변경을 반영합니다.
+`dev`는 Go가 열거한 소스와 embed 파일, 모듈과 프로젝트 설정을 감시합니다. 일반 로그 기록은
+재시작 조건에서 제외하며 유효한 설정 변경 시 새 포트를 전달합니다. SIGTERM에서도 자식 앱을
+종료하고 회수합니다.
 
 ## 프로젝트 설정
 

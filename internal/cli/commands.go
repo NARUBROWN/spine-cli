@@ -34,19 +34,13 @@ func runProject(development bool, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	sourceDigest, err := sourceState(".")
-	if err != nil {
-		fmt.Fprintf(errOut, "could not read application sources: %v\n", err)
-		return 1
-	}
-	binary, _, cached, err := cachedDevBinary(config, sourceDigest, errOut)
+	// Go 자체의 빌드 캐시가 로컬 replace와 워크스페이스 의존성까지 검증하도록 매번 빌드합니다.
+	binary, directory, err := buildDevBinary(config, errOut)
 	if err != nil {
 		fmt.Fprintf(errOut, "application build failed: %v\n", err)
 		return 1
 	}
-	if cached {
-		fmt.Fprintln(out, "Using cached application build.")
-	}
+	defer os.RemoveAll(directory)
 
 	cmd := exec.Command(binary)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, out, errOut

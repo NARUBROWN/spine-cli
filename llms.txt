@@ -219,7 +219,7 @@ layout = "layered-v1"
 | `contract probe` | 부분 runtime registry 대조 | 임시 파일, `go run`, 프로젝트 코드 실행 |
 | `doctor` | toolchain/config/정적 계약 offline 진단 | 외부 연결 없음 |
 | `dev` | watch/build/process 교체 | 장기 실행, cache, listener는 앱 책임 |
-| `run` | production 환경으로 cached build 실행 | 장기 실행, cache, 프로젝트 코드 실행 |
+| `run` | 매번 Go build 후 production 환경으로 실행 | 장기 실행, Go cache, 프로젝트 코드 실행 |
 | `test` | `go test ./...` | Go/module 실행 |
 | `check` | gofmt 상태, vet, test | 파일은 수정하지 않음 |
 | `build` | `bin/<module-base>` 생성 | 파일 작성, Go/module 실행 |
@@ -512,6 +512,8 @@ func BuildApplication() (spine.App, boot.Options, error) {
 - source location과 diagnostics
 
 분석기는 composition root의 직접 call과 현재 module 아래의 local `Register` source를 따라간다.
+현재 module 밖의 `Register(app)`는 `EXTERNAL_REGISTRATION_UNRESOLVED` 오류로 표시하며,
+해당 호출을 분석하지 않은 상태로 계약 검사를 통과시키지 않는다.
 constructor와 handler signature를 찾을 때 project의 non-test Go source를 검사하며 `.git`, `bin`,
 `vendor`, `.spine*` 경로는 제외한다.
 
@@ -679,7 +681,11 @@ OpenAPI 3.1 export:
 
 - 확인 가능한 HTTP path와 path parameter
 - pointer request DTO와 source에서 찾은 struct schema
-- `httpx.Response[T]`의 body type
+- `httpx.Response[T]`의 body type과 해당 import 별칭
+- 스키마 타입은 패키지 경로와 타입 이름으로 구분하고, 동명 타입의 component ID에는 안정적인 구분자를 사용
+- JSON 태그가 없으면 Go 필드 이름을 유지하고 `json:"-"`와 선택적 필드 태그를 반영
+- `time.Time`은 JSON 날짜와 시간 문자열로 표현
+- 해석할 수 없는 타입은 존재하지 않는 `$ref` 대신 `x-spine-unresolved-type`으로 표시
 - runtime이 정하는 response status는 `default` response와 `x-spine-*` evidence로 표현
 - 해결하지 못한 query/header/value는 별도 extension에 보존
 - dynamic registration을 추정하지 않음
@@ -688,6 +694,9 @@ AsyncAPI 3.1 export:
 
 - consumer/WebSocket channel과 receive operation
 - typed payload schema와 handler metadata
+- 채널과 operation ID는 transport와 원래 등록 이름을 구분하는 안정적인 식별자를 사용
+- ID를 토픽 문자열에서 직접 조합하지 말고 문서에 기록된 `$ref`를 사용
+- 식별자 충돌은 기존 항목을 덮어쓰기 전에 오류로 처리
 - broker protocol, delivery guarantee, retry/DLQ를 추정하지 않음
 
 ### 12.5 partial runtime probe
@@ -774,14 +783,22 @@ spine dev --events jsonl
 
 동작:
 
-- 500ms 간격으로 project file state를 감시한다.
+- 500ms 간격으로 `go list -deps -json`이 열거한 빌드 입력의 상태를 확인한다.
 - 변경 build가 성공한 뒤에만 기존 application process를 교체한다.
 - build가 실패하면 이전 process를 유지한다.
 - application이 스스로 종료돼도 source watcher는 계속 동작한다.
 - child에는 `SPINE_PORT=<spine.toml port>`, `ENV=development`를 전달한다.
 - source/build identity가 같으면 OS user cache의 binary를 재사용한다.
-- source hash는 Go source뿐 아니라 embed asset 등 project files의 내용도 포함한다.
-- `.git`, `bin`, `.gocache`, `.gomodcache`, `.spine*`는 감시 hash에서 제외한다.
+- source hash는 빌드에 사용하는 소스와 embed 파일, 로컬 replace 의존성, 모듈과 workspace 설정,
+  `spine.toml`, Go toolchain 식별 정보를 포함한다.
+- 버전 고정 모듈 캐시의 소스는 매번 다시 읽지 않는다. 현재 모듈과 로컬 replace, vendor 파일은
+  계속 감시한다. 같은 설정 오류는 반복 출력하지 않고, 설정이 복구되면 오류 상태를 초기화한다.
+- 일반 로그와 빌드에 사용하지 않는 파일은 재시작 조건에서 제외한다. embed 대상 파일은 확장자와
+  관계없이 변경을 감지한다.
+- 변경을 처리할 때 `spine.toml`을 다시 읽고 새 설정으로 빌드와 재시작을 수행한다.
+- 잘못된 설정이나 실패한 빌드 때문에 기존 앱을 먼저 종료하지 않는다.
+- SIGINT와 SIGTERM은 정상 종료 경로로 처리하며, 자식 앱에 종료 신호를 보낸 뒤 회수한다.
+  Go 조회와 빌드 명령도 종료 context에 연결한다.
 
 JSONL event mode는 child stdout/stderr까지 line별 `process_output` event로 감싸므로 stdout 전체를
 JSON Lines parser로 읽을 수 있다. 주요 event:
@@ -797,11 +814,15 @@ JSON Lines parser로 읽을 수 있다. 주요 event:
 
 ### 15.2 run과 build
 
-- `spine run`은 cached binary를 사용하고 `ENV=production`, `SPINE_PORT`로 process를 실행한다.
+- `spine run`은 매번 `go build`를 호출하고 Go 자체의 빌드 캐시를 사용한다.
+  로컬 replace와 workspace 의존성은 Go가 다시 검증하며, `ENV=production`, `SPINE_PORT`를 전달한다.
 - `spine build`는 config entrypoint를 `bin/<go.mod module basename>`에 직접 빌드한다.
 - `spine test`는 `go test ./...`만 실행한다.
 - `spine check`는 gofmt 상태를 검사한 뒤 `go vet ./...`, `go test ./...`를 실행한다.
 - check는 gofmt을 적용하지 않는다.
+- `run`, `test`, `check`, `build`의 `--help`와 `-h`는 앱이나 Go 검사를 실행하지 않는다.
+  그 밖의 명령별 인자는 지원하지 않으며 오류로 처리한다. `spine test -run`을 조용히 무시하지 않는다.
+  테스트 필터는 `go test ./... -run <이름>`으로 직접 실행한다.
 
 ## 16. 저장소를 수정하는 Agent용 source map
 
@@ -830,10 +851,14 @@ Source와 test가 문서보다 우선한다. 주요 파일:
 - `internal/cli/contract_commands.go`: snapshot, diff, explain
 - `internal/cli/runtime_probe.go`: partial runtime reconciliation
 - `internal/cli/openapi.go`, `asyncapi.go`: API contract export
+- `internal/cli/api_schemas.go`: 선언 패키지와 import 범위를 사용하는 공통 스키마 수집기
+- `internal/cli/build_inputs.go`: Go 빌드 입력과 외부 로컬 의존성, embed 상태 조회
 - `internal/cli/doctor.go`, `capabilities.go`: evidence limits
 - `internal/cli/dev.go`, `commands.go`: build/run/watch/check/verify
 - `internal/cli/cli_test.go`: unit와 integration regression contract
-- `internal/cli/e2e_test.go`: legacy CLI, generated project, context, verify, cache, JSONL E2E
+- `internal/cli/e2e_test.go`: legacy CLI, generated project, context, verify, Go cache, JSONL E2E
+- `internal/cli/api_export_regression_test.go`: 동명 DTO와 시간 타입, JSON 이름, AsyncAPI 충돌 회귀 검증
+- `internal/cli/runtime_regression_test.go`, `runtime_e2e_test.go`: 로컬 replace, 로그 감시, 설정 재적용, 종료 신호와 자식 회수 검증
 - `internal/cli/layered_test.go`, `layered_validation_test.go`, `layered_e2e_test.go`: 역할별 생성과 충돌, 조건부 등록과 입력 변경, 생성 프로젝트 로컬 검증
 
 layered-v1의 생성 계획과 정적 계약 검사는 같은 소스 스냅샷과 생성자 목록, 등록 해석기를 사용한다.

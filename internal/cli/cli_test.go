@@ -1230,8 +1230,14 @@ func (s *Socket) HTTP() {}
 	if len(channels) != 2 || len(operations) != 2 {
 		t.Fatalf("AsyncAPI registrations missing: channels=%#v operations=%#v", channels, operations)
 	}
-	consumerChannel, ok := channels["consumer_order_created"].(map[string]any)
-	if !ok || consumerChannel["address"] != "order.created" {
+	var consumerChannel map[string]any
+	for _, channel := range channels {
+		candidate := channel.(map[string]any)
+		if candidate["address"] == "order.created" {
+			consumerChannel = candidate
+		}
+	}
+	if consumerChannel == nil {
 		t.Fatalf("consumer channel missing: %#v", channels)
 	}
 	components := asyncAPI["components"].(map[string]any)
@@ -1355,6 +1361,7 @@ func TestSourceStateWatchesGoModuleAndProjectConfig(t *testing.T) {
 	if err := os.WriteFile("main.go", []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeE2EFile(t, "go.mod", "module example.com/app\n\ngo 1.25\n")
 	before, err := sourceState(".")
 	if err != nil {
 		t.Fatal(err)
@@ -1369,7 +1376,7 @@ func TestSourceStateWatchesGoModuleAndProjectConfig(t *testing.T) {
 	if before == afterConfig {
 		t.Fatal("adding spine.toml did not change the development source state")
 	}
-	if err := os.WriteFile("go.mod", []byte("module example.com/app\n"), 0o644); err != nil {
+	if err := os.WriteFile("go.mod", []byte("module example.com/app\n\ngo 1.25\n// module changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	afterModule, err := sourceState(".")
@@ -1377,7 +1384,7 @@ func TestSourceStateWatchesGoModuleAndProjectConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if afterConfig == afterModule {
-		t.Fatal("adding go.mod did not change the development source state")
+		t.Fatal("changing go.mod did not change the development source state")
 	}
 }
 
@@ -1591,12 +1598,13 @@ func TestSourceStateHashesEmbeddedAssetsAndContents(t *testing.T) {
 	directory := t.TempDir()
 	mainPath := filepath.Join(directory, "main.go")
 	assetPath := filepath.Join(directory, "message.txt")
-	if err := os.WriteFile(mainPath, []byte("package main\n"), 0o644); err != nil {
+	if err := os.WriteFile(mainPath, []byte("package main\nimport _ \"embed\"\n//go:embed message.txt\nvar message string\nfunc main() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(assetPath, []byte("first"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeE2EFile(t, filepath.Join(directory, "go.mod"), "module example.com/embed\n\ngo 1.25\n")
 	before, err := sourceState(directory)
 	if err != nil {
 		t.Fatal(err)
