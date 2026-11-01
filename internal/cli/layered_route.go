@@ -37,7 +37,10 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 			if f.Type.TypeParams != nil {
 				return fmt.Errorf("generic handlers are unsupported")
 			}
-			params := bindHTTPParameters(layeredHandlerParameters(s.File, s.Fset, f.Type.Params), r.Path)
+			params, diagnostics := newHTTPBindingCatalog(p.Module, p.Sources).parameters(s, f.Type.Params, r.Path, r.Handler)
+			if len(diagnostics) > 0 {
+				return fmt.Errorf("%s: %s. %s", diagnostics[0].Code, diagnostics[0].Message, diagnostics[0].Hint)
+			}
 			bound := 0
 			for _, param := range params {
 				if param.Binding == "path" {

@@ -17,7 +17,7 @@
 - Go module: `github.com/NARUBROWN/spine-cli`
 - 이 저장소와 생성 프로젝트의 Go 호환 기준: `1.25.5`
 - 권장·검증 Go 버전: `1.27.3`
-- 새 프로젝트가 사용하는 Spine 버전: `github.com/NARUBROWN/spine v0.5.1`
+- 새 프로젝트가 사용하는 Spine 버전: `github.com/NARUBROWN/spine v0.5.2`
 - 라이선스: MIT
 
 버전을 추측하지 않는다. 현재 checkout에서는 `internal/cli/cli.go`의 `version`, `go.mod`,
@@ -279,6 +279,9 @@ rollback을 사용하지만 `.spine-generate.lock`은 사용하지 않는다. ge
 JSON `result`에는 `project`, `module`, `layout`, `directory`, `files`, `dry_run`, `base_hash`, `changes`,
 `diff`가 포함된다.
 
+`new --help`, `g --help`, `g <kind> --help`와 `-h`는 프로젝트 설정이나 생성 대상을 읽기 전에
+도움말을 출력한다. JSON을 함께 요청하면 기존 envelope의 `result.output`에 도움말을 넣는다.
+
 ## 8. 생성기 공통 계약
 
 이 절의 기본 규칙은 `layout = "layered-v1"`이다. legacy 차이는 8.6절을 참고한다.
@@ -442,6 +445,8 @@ layered-v1의 기존 파일 충돌 응답은 실패해도 `result.diff`를 제�
 
 ### 9.2 hash와 apply 범위
 
+- 일반 dry-run도 `Base hash: <hash>`와 `--if-match <hash>` 적용 안내를 출력한다.
+  Agent는 계속 JSON의 `changes`, `diff`, `base_hash`를 구조적으로 확인하는 방식을 권장한다.
 - `new`와 legacy 생성기의 `base_hash`는 file-change plan의 모든 target 현재 상태 hash다.
 - layered-v1 생성기는 target 상태와 생성할 내용, 분석한 빌드 대상 Go 소스와 `go.mod`, `go.sum`,
   `spine.toml`의 상태와 직접적인 `os.Getenv("이름")` 호출이 참조하는 환경 값을 포함한다.
@@ -550,6 +555,8 @@ HTTP 계약 불확실성/충돌:
 - `HTTP_HANDLER_SIGNATURE_UNRESOLVED`
 - `HTTP_HANDLER_SIGNATURE_AMBIGUOUS`
 - `HTTP_PATH_BINDING_MISMATCH`
+- `HTTP_PARAMETER_BINDING_UNSUPPORTED`: 기본 HTTP resolver가 처리하지 못하는 인자 형태
+- `HTTP_PARAMETER_BINDING_UNRESOLVED`: 외부 타입이나 사용자 정의 resolver의 지원 여부를 확인할 수 없음
 - `HTTP_ROUTE_DUPLICATE`
 - `HTTP_ROUTE_AMBIGUOUS`
 
@@ -588,12 +595,19 @@ Message 계약 불확실성/충돌:
 
 HTTP 정적 binding:
 
-- `context.Context`, `spine.Ctx`, `*ExecutionContext` suffix: context
-- `path.*`: route path parameter에 순서대로 binding
-- `query.*`: query
-- `header.*`: header
-- pointer type: request body
-- 그 외: unresolved value
+- `context.Context`, `core.ControllerContext`, `pkg/spine.Ctx`와 확인 가능한 Get 전용 context interface: context
+- 실제 Spine `path.Int`, `path.String`, `path.Boolean` 타입: route path parameter에 순서대로 binding
+- 실제 Spine `query.Values`, `query.Pagination`: query
+- 실제 Spine `header.Values`: header
+- 실제 Spine `multipart.UploadedFiles`: multipart
+- 현재 모듈 소스 또는 기본 wrapper 지원 규칙에서 구조체임을 확인한 포인터: request body
+  예를 들어 `path.Int`는 경로 인자지만 `*path.Int`는 DTO resolver가 처리하는 본문이다.
+- import 별칭과 타입 별칭은 선언 파일을 기준으로 해석한다. 별도 정의한 동명 wrapper를 기본 타입으로 간주하지 않는다.
+- 값 DTO와 지원되지 않는 기본 타입은 오류, 지원 여부를 확인할 수 없는 타입과 resolver는 분석 불완전 오류다.
+
+경로 생성과 계약 검사는 같은 HTTP 인자 지원 규칙을 사용한다. 오류에는 handler, 0부터 시작하는
+인자 위치, 타입, source와 회복 hint가 포함된다. consumer와 WebSocket payload 규칙에는 이 HTTP
+제약을 적용하지 않는다. 외부 DTO의 내부 선언과 임의 사용자 정의 resolver를 실행하거나 추측하지 않는다.
 
 Message 정적 binding:
 

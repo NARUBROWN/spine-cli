@@ -11,6 +11,9 @@ import (
 )
 
 func runNew(args []string, out, errOut io.Writer) int {
+	if handled, code := generationHelp("new", args, out, errOut); handled {
+		return code
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(errOut, "project name is required")
 		return 1
@@ -72,7 +75,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	}
 
 	files := map[string]string{
-		"go.mod":  fmt.Sprintf("module %s\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine v0.5.1\n", module),
+		"go.mod":  fmt.Sprintf("module %s\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine v0.5.2\n", module),
 		"main.go": strings.ReplaceAll(projectMain, "{{MODULE}}", module),
 		filepath.Join("internal", "application", "application.go"):      projectApplication,
 		filepath.Join("internal", "application", "application_test.go"): projectApplicationTest,
@@ -140,6 +143,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	}
 	if options.DryRun {
 		fmt.Fprintf(out, "Would create Spine application in %s\n%s", dir, diff)
+		printDryRunHash(out, baseHash)
 		return 0
 	}
 	fmt.Fprintf(out, "Created Spine application in %s\n\nNext steps:\n  cd %s\n  go mod tidy\n  go run .\n", dir, name.Route)

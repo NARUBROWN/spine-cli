@@ -450,6 +450,8 @@ func (i *contractInspector) resolveConstructorDependencies() {
 }
 
 type staticHandlerSignature struct {
+	httpSource    *layoutSource
+	httpFields    *ast.FieldList
 	schemaSource  string
 	parameters    []handlerParameter
 	returns       []string
@@ -459,7 +461,10 @@ type staticHandlerSignature struct {
 
 func (i *contractInspector) resolveHandlerSignatures() {
 	signatures := map[string][]staticHandlerSignature{}
+	handlerSources := layoutSources{}
 	collect := func(path string, file *ast.File, fset *token.FileSet) {
+		source := &layoutSource{Path: path, File: file, Fset: fset, Package: filepath.ToSlash(filepath.Dir(path))}
+		handlerSources[path] = source
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
 			if !ok || function.Recv == nil || len(function.Recv.List) == 0 {
@@ -478,6 +483,8 @@ func (i *contractInspector) resolveHandlerSignatures() {
 				}
 			}
 			signature := staticHandlerSignature{
+				httpSource:    source,
+				httpFields:    function.Type.Params,
 				schemaSource:  fset.Position(function.Pos()).Filename,
 				parameters:    fieldParameters(fset, function.Type.Params),
 				returns:       fieldTypes(fset, function.Type.Results),
@@ -519,12 +526,15 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		})
 	}
 
+	bindings := newHTTPBindingCatalog(i.module, handlerSources)
 	for index := range i.contract.HTTP {
 		route := &i.contract.HTTP[index]
 		matches := signatures[route.Handler]
 		if len(matches) == 1 {
 			route.schemaSource = matches[0].schemaSource
-			route.Parameters = bindHTTPParameters(matches[0].parameters, route.Path)
+			parameters, diagnostics := bindings.parameters(matches[0].httpSource, matches[0].httpFields, route.Path, route.Handler)
+			route.Parameters = parameters
+			i.contract.Diagnostics = append(i.contract.Diagnostics, diagnostics...)
 			route.Returns = matches[0].returns
 			pathKeys := contractPathKeys(route.Path)
 			boundPathCount := 0
@@ -641,34 +651,6 @@ func fieldTypes(fset *token.FileSet, fields *ast.FieldList) []string {
 		}
 		for index := 0; index < count; index++ {
 			result = append(result, expressionText(fset, field.Type))
-		}
-	}
-	return result
-}
-
-func bindHTTPParameters(parameters []handlerParameter, path string) []handlerParameter {
-	result := append([]handlerParameter(nil), parameters...)
-	keys := contractPathKeys(path)
-	pathIndex := 0
-	for index := range result {
-		parameter := &result[index]
-		switch {
-		case parameter.Type == "context.Context" || parameter.Type == "spine.Ctx" || strings.HasSuffix(parameter.Type, "ExecutionContext"):
-			parameter.Binding = "context"
-		case strings.HasPrefix(parameter.Type, "path."):
-			parameter.Binding = "path"
-			if pathIndex < len(keys) {
-				parameter.Key = keys[pathIndex]
-				pathIndex++
-			}
-		case strings.HasPrefix(parameter.Type, "query."):
-			parameter.Binding = "query"
-		case strings.HasPrefix(parameter.Type, "header."):
-			parameter.Binding = "header"
-		case strings.HasPrefix(parameter.Type, "*"):
-			parameter.Binding = "body"
-		default:
-			parameter.Binding = "value"
 		}
 	}
 	return result

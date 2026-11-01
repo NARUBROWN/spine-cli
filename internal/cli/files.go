@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,10 @@ type writeOptions struct {
 	DryRun  bool
 	Force   bool
 	IfMatch string
+}
+
+func printDryRunHash(out io.Writer, baseHash string) {
+	fmt.Fprintf(out, "\nBase hash: %s\nApply the same command without --dry-run and with --if-match %s\n", baseHash, baseHash)
 }
 
 type plannedChange struct {

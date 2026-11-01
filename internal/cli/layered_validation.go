@@ -31,6 +31,13 @@ func (p *layeredPlanner) validateGraphs() error {
 			return fmt.Errorf("%s: %s (%s)", diagnostic.Code, diagnostic.Message, diagnostic.Source)
 		}
 	}
+	inspector.resolveHandlerSignatures()
+	for _, diagnostic := range inspector.contract.Diagnostics {
+		// 메시지 생성기는 미구현 골격을 허용하되 HTTP 인자 계약은 적용 전에 확인합니다.
+		if diagnostic.Severity == "error" && strings.HasPrefix(diagnostic.Code, "HTTP_") {
+			return fmt.Errorf("%s: %s. %s", diagnostic.Code, diagnostic.Message, diagnostic.Hint)
+		}
+	}
 	signatures := p.Sources.constructorSignatures(p.Module)
 	graph := map[string][]string{}
 	providers := map[string]string{}

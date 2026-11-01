@@ -13,7 +13,7 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 ## 권장 환경과 설치
 
 - 권장 Go 버전: 1.27.3
-- 새 프로젝트가 사용하는 Spine 버전: v0.5.1
+- 새 프로젝트가 사용하는 Spine 버전: v0.5.2
 
 ```sh
 go install github.com/NARUBROWN/spine-cli@v0.2.0
@@ -75,6 +75,9 @@ spine g controller admin/user --depends src/service:UserService
 묶을 수도 있습니다. 그룹은 역할마다 독립적으로 정하며 실행 위치는 생성 경로에 영향을 주지 않습니다.
 CLI는 그룹을 애그리거트로 해석하지 않습니다.
 
+`spine g route --help`처럼 생성기별 도움말을 확인할 수 있습니다. `--help`와 `-h`는
+프로젝트 설정을 읽거나 파일을 생성하지 않습니다.
+
 `--depends`는 모듈 기준 패키지 경로와 타입을 받습니다. 여러 의존성은 옵션을 반복해서 지정합니다.
 CLI는 실제 타입과 단일 공개 생성자를 확인하고 import와 생성자 인자와 application 등록을 연결합니다.
 서로 다른 패키지의 동명 타입도 구분합니다. domain과 DTO는 DI에 등록하지 않습니다.
@@ -90,6 +93,12 @@ spine g route get-user --method GET --path /users/:id \
 
 `Get`은 경로의 `id`를 받는 핸들러여야 합니다. 예를 들어 Spine의 `path.Int` 매개변수를 사용할 수
 있습니다. CLI는 메서드 존재와 경로 바인딩과 기존 경로 충돌을 확인합니다.
+
+HTTP 요청 DTO는 `Create(req *CreateProductRequest)`처럼 구조체 포인터로 받습니다.
+값 DTO나 기본 resolver가 처리하지 못하는 인자는 경로 생성과 계약 검사에서 오류로 진단합니다.
+Spine wrapper도 포인터로 받으면 본문 DTO로 해석되며, 경로 인자는 `path.Int`처럼 값으로 받습니다.
+외부 타입이나 사용자 정의 resolver의 지원 여부를 소스만으로 확인할 수 없으면 분석 불완전으로
+표시합니다. 이는 실제 HTTP 요청을 실행한 결과와 구분됩니다.
 
 `spine g resource account/user`는 같은 그룹의 domain, repository, service, controller 생성을
 조합합니다. DTO와 HTTP 경로는 별도로 추가합니다. 생성자는 기본적으로 application에 등록하며,
@@ -197,6 +206,8 @@ spine g resource orders --if-match <base_hash> --json
 ```
 
 JSON dry-run에는 모든 변경 파일과 diff와 SHA-256, `base_hash`가 포함됩니다.
+일반 dry-run도 `Base hash:`와 `--if-match` 적용 안내를 출력합니다. 검토한 명령에서
+`--dry-run`을 제거하고 출력된 해시를 `--if-match`에 전달하면 같은 계획을 적용할 수 있습니다.
 새 구조의 `g`는 대상 파일뿐 아니라 분석한 Go 소스와 모듈 파일과 `spine.toml`, 생성할 내용도
 해시에 포함합니다. 소스의 직접적인 `os.Getenv("이름")` 호출이 참조하는 환경 값도 변경 검사에
 포함하며 값 자체는 출력하지 않습니다. 검토 후 입력이나 계획이 달라지면 `--if-match` 적용을 중단합니다.
