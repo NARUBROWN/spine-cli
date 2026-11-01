@@ -42,6 +42,7 @@ type contractRegistration struct {
 }
 
 type httpRegistration struct {
+	schemaSource string
 	Method       string             `json:"method"`
 	Path         string             `json:"path"`
 	Handler      string             `json:"handler"`
@@ -52,11 +53,12 @@ type httpRegistration struct {
 }
 
 type namedRegistration struct {
-	Name       string             `json:"name"`
-	Handler    string             `json:"handler"`
-	Parameters []handlerParameter `json:"parameters,omitempty"`
-	Returns    []string           `json:"returns,omitempty"`
-	Source     string             `json:"source"`
+	schemaSource string
+	Name         string             `json:"name"`
+	Handler      string             `json:"handler"`
+	Parameters   []handlerParameter `json:"parameters,omitempty"`
+	Returns      []string           `json:"returns,omitempty"`
+	Source       string             `json:"source"`
 }
 
 type handlerParameter struct {
@@ -248,6 +250,7 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 		}
 		importPath := imports[pkg.Name]
 		if importPath == "" || !strings.HasPrefix(importPath, i.module+"/") {
+			i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "EXTERNAL_REGISTRATION_UNRESOLVED", Message: "static inspection cannot resolve Register(app) outside the current module: " + expressionText(fset, call.Fun), Source: source})
 			return true
 		}
 		registrationCall = true
@@ -447,6 +450,7 @@ func (i *contractInspector) resolveConstructorDependencies() {
 }
 
 type staticHandlerSignature struct {
+	schemaSource  string
 	parameters    []handlerParameter
 	returns       []string
 	source        string
@@ -474,6 +478,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 				}
 			}
 			signature := staticHandlerSignature{
+				schemaSource:  fset.Position(function.Pos()).Filename,
 				parameters:    fieldParameters(fset, function.Type.Params),
 				returns:       fieldTypes(fset, function.Type.Results),
 				source:        relativeSource(fset.Position(function.Pos())),
@@ -518,6 +523,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		route := &i.contract.HTTP[index]
 		matches := signatures[route.Handler]
 		if len(matches) == 1 {
+			route.schemaSource = matches[0].schemaSource
 			route.Parameters = bindHTTPParameters(matches[0].parameters, route.Path)
 			route.Returns = matches[0].returns
 			pathKeys := contractPathKeys(route.Path)
@@ -540,6 +546,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		registration := &i.contract.Consumers[index]
 		matches := signatures[registration.Handler]
 		if len(matches) == 1 {
+			registration.schemaSource = matches[0].schemaSource
 			registration.Parameters = bindMessageParameters(matches[0].parameters, "consumer")
 			registration.Returns = matches[0].returns
 			if matches[0].unimplemented {
@@ -555,6 +562,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		registration := &i.contract.WebSockets[index]
 		matches := signatures[registration.Handler]
 		if len(matches) == 1 {
+			registration.schemaSource = matches[0].schemaSource
 			registration.Parameters = bindMessageParameters(matches[0].parameters, "websocket")
 			registration.Returns = matches[0].returns
 			if matches[0].unimplemented {

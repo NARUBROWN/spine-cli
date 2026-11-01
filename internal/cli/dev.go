@@ -11,9 +11,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -117,19 +117,27 @@ func runDev(args []string, out, errOut io.Writer) int {
 			fmt.Fprintln(errOut, message)
 		}
 	}
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	config, err := loadProjectConfig()
 	if err != nil {
 		fail("configuration_failed", err.Error())
 		return 1
 	}
-	last, err := sourceState(".")
+	last, err := applicationSourceState(ctx, ".", config)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0
+		}
 		fail("source_scan_failed", err.Error())
 		return 1
 	}
 	emit("build_started", "Building application...", map[string]any{"initial": true})
-	binary, binaryDir, cached, err := cachedDevBinary(config, last, processErr)
+	binary, binaryDir, cached, err := cachedDevBinaryContext(ctx, config, last, processErr)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0
+		}
 		fail("build_failed", fmt.Sprintf("initial development build failed: %v", err))
 		return 1
 	}
@@ -147,10 +155,9 @@ func runDev(args []string, out, errOut io.Writer) int {
 	processDone := process.done
 	defer func() { stopDevProcess(process, false) }()
 
-	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stopSignals()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	lastConfigError := ""
 	emit("watching", "Spine development server is watching application sources.", map[string]any{})
 	for {
 		select {
@@ -169,8 +176,20 @@ func runDev(args []string, out, errOut io.Writer) int {
 			process = nil
 			processDone = nil
 		case <-ticker.C:
-			next, stateErr := sourceState(".")
+			updatedConfig, configErr := loadProjectConfig()
+			if configErr != nil {
+				if configErr.Error() != lastConfigError {
+					lastConfigError = configErr.Error()
+					fail("configuration_failed", lastConfigError)
+				}
+				continue
+			}
+			lastConfigError = ""
+			next, stateErr := applicationSourceState(ctx, ".", updatedConfig)
 			if stateErr != nil {
+				if ctx.Err() != nil {
+					return 0
+				}
 				fail("source_scan_failed", stateErr.Error())
 				continue
 			}
@@ -180,12 +199,19 @@ func runDev(args []string, out, errOut io.Writer) int {
 			last = next
 			emit("change_detected", "Application source change detected.", map[string]any{"source_hash": next})
 			emit("build_started", "Building changed application...", map[string]any{"initial": false})
-			newBinary, newBinaryDir, rebuiltCached, buildErr := cachedDevBinary(config, next, processErr)
+			newBinary, newBinaryDir, rebuiltCached, buildErr := cachedDevBinaryContext(ctx, updatedConfig, next, processErr)
 			if buildErr != nil {
+				if ctx.Err() != nil {
+					return 0
+				}
 				fail("build_failed", "Build failed; the previous application process is unchanged.")
 				continue
 			}
 			emit("build_succeeded", "Changed application build succeeded.", map[string]any{"initial": false, "cached": rebuiltCached})
+			if ctx.Err() != nil {
+				return 0
+			}
+			config = updatedConfig
 			stopDevProcess(process, false)
 			process, err = startDevProcess(newBinary, newBinaryDir, config, processOut, processErr)
 			if err != nil {
@@ -216,7 +242,7 @@ func buildDevBinary(config projectConfig, errOut io.Writer) (string, string, err
 	return binary, directory, nil
 }
 
-func cachedDevBinary(config projectConfig, sourceDigest string, errOut io.Writer) (string, string, bool, error) {
+func cachedDevBinaryContext(ctx context.Context, config projectConfig, sourceDigest string, errOut io.Writer) (string, string, bool, error) {
 	userCache, err := os.UserCacheDir()
 	if err != nil {
 		return "", "", false, fmt.Errorf("could not locate user cache directory: %w", err)
@@ -226,10 +252,14 @@ func cachedDevBinary(config projectConfig, sourceDigest string, errOut io.Writer
 		return "", "", false, err
 	}
 	cacheRoot := filepath.Join(userCache, "spine", "dev")
-	return cachedDevBinaryAt(cacheRoot, projectRoot, config, sourceDigest, errOut)
+	return cachedDevBinaryAtContext(ctx, cacheRoot, projectRoot, config, sourceDigest, errOut)
 }
 
 func cachedDevBinaryAt(cacheRoot, projectRoot string, config projectConfig, sourceDigest string, errOut io.Writer) (string, string, bool, error) {
+	return cachedDevBinaryAtContext(context.Background(), cacheRoot, projectRoot, config, sourceDigest, errOut)
+}
+
+func cachedDevBinaryAtContext(ctx context.Context, cacheRoot, projectRoot string, config projectConfig, sourceDigest string, errOut io.Writer) (string, string, bool, error) {
 	key := devCacheKey(config, sourceDigest, projectRoot)
 	directory := filepath.Join(cacheRoot, key)
 	binary := devBinaryPath(directory, runtime.GOOS)
@@ -249,7 +279,7 @@ func cachedDevBinaryAt(cacheRoot, projectRoot string, config projectConfig, sour
 		return "", "", false, err
 	}
 	stagingBinary := devBinaryPath(staging, runtime.GOOS)
-	cmd := exec.Command("go", "build", "-o", stagingBinary, config.Entrypoint)
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", stagingBinary, config.Entrypoint)
 	cmd.Stdout, cmd.Stderr = errOut, errOut
 	if err := cmd.Run(); err != nil {
 		_ = os.RemoveAll(staging)
@@ -348,9 +378,7 @@ func stopDevProcess(process *devProcess, removeBinary bool) {
 
 func terminateDevProcess(process *os.Process, goos string) error {
 	if devTerminationUsesKill(goos) {
-		// Windows does not implement os.Interrupt for arbitrary child
-		// processes. Kill immediately instead of paying the 3-second
-		// graceful-shutdown timeout on every development rebuild.
+		// Windows에서는 임의의 자식 프로세스에 os.Interrupt를 보낼 수 없어 즉시 종료합니다.
 		return process.Kill()
 	}
 	return process.Signal(os.Interrupt)
@@ -358,42 +386,4 @@ func terminateDevProcess(process *os.Process, goos string) error {
 
 func devTerminationUsesKill(goos string) bool {
 	return goos == "windows"
-}
-
-func sourceState(root string) (string, error) {
-	var paths []string
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == "bin" || entry.Name() == ".gocache" || entry.Name() == ".gomodcache" || strings.HasPrefix(entry.Name(), ".spine")) {
-			return filepath.SkipDir
-		}
-		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".spine") {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		paths = append(paths, filepath.ToSlash(relative))
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	sort.Strings(paths)
-	digest := sha256.New()
-	for _, relative := range paths {
-		contents, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
-		if readErr != nil {
-			return "", readErr
-		}
-		fmt.Fprintf(digest, "%d:%s\n%d:", len(relative), relative, len(contents))
-		if _, writeErr := digest.Write(contents); writeErr != nil {
-			return "", writeErr
-		}
-		digest.Write([]byte{'\n'})
-	}
-	return fmt.Sprintf("%x", digest.Sum(nil)), nil
 }

@@ -93,6 +93,10 @@ func currentCommandSchema() commandSchema {
 		if c.Name == "new" {
 			c.Options["layout"] = optionDefinition{Type: "string", Enum: []string{layeredLayout, "legacy"}, Description: "New projects default to layered-v1; legacy preserves the previous generation rules"}
 		}
+		switch c.Name {
+		case "run", "test", "check", "build":
+			c.Options = map[string]optionDefinition{"help": {Type: "boolean", Description: "Show command help without executing; other command-specific options are rejected"}}
+		}
 	}
 	return commandSchema{SchemaVersion: commandSchemaVersion, CLIVersion: version, Protocol: protocolSchemaVersion, GlobalOptions: map[string]optionDefinition{"root": {Type: "string", Description: "Run the command from an explicit project directory"}}, Commands: commands, GenerationRoles: generationRoles(), Layouts: []string{layeredLayout, "legacy"}}
 }
