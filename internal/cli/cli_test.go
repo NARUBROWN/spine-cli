@@ -19,7 +19,7 @@ func TestRunHelp(t *testing.T) {
 	if code := Run([]string{"help"}, &out, &errOut); code != 0 {
 		t.Fatalf("code = %d", code)
 	}
-	if !strings.Contains(out.String(), "spine-cli new") {
+	if !strings.Contains(out.String(), "spine new") {
 		t.Fatal("help did not include new command")
 	}
 }
@@ -29,7 +29,7 @@ func TestRunVersionUsesProgramName(t *testing.T) {
 	if code := Run([]string{"version"}, &out, &errOut); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, errOut.String())
 	}
-	if out.String() != "spine-cli 0.4.0\n" {
+	if out.String() != "spine-cli 0.4.1\n" {
 		t.Fatalf("unexpected version output: %q", out.String())
 	}
 }

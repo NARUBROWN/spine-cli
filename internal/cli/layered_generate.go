@@ -25,12 +25,12 @@ type layeredRequest struct {
 func parseLayeredRequest(args []string) (layeredRequest, error) {
 	r := layeredRequest{Register: true}
 	if len(args) < 2 {
-		return r, fmt.Errorf("usage: spine-cli g <domain|dto|repository|service|controller|resource|route> <[group/]name> [options]")
+		return r, fmt.Errorf("usage: spine g <domain|dto|repository|service|controller|resource|route> <[group/]name> [options]")
 	}
 	r.Kind = args[0]
 	_, roleOK := roleFor(r.Kind)
 	if !roleOK && r.Kind != "resource" && r.Kind != "route" && r.Kind != "consumer" && r.Kind != "websocket" {
-		return r, fmt.Errorf("generator %q is unavailable in %s; use a supported role from spine-cli schema --json", r.Kind, layeredLayout)
+		return r, fmt.Errorf("generator %q is unavailable in %s; use a supported role from spine schema --json", r.Kind, layeredLayout)
 	}
 	var err error
 	r.Name, err = parseGenerationName(args[1])

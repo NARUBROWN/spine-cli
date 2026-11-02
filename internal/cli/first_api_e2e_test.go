@@ -11,8 +11,8 @@ import (
 )
 
 func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "spine-cli")
-	build := exec.Command("go", "build", "-o", binary, ".")
+	binary := filepath.Join(t.TempDir(), "spine")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/spine")
 	build.Dir = filepath.Join("..", "..")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v %s", err, output)
@@ -47,8 +47,8 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 		t.Fatal("generated guide lacks complete Go handler")
 	}
 	for _, line := range strings.Split(guide, "\n") {
-		if strings.HasPrefix(line, "spine-cli g dto ") || strings.HasPrefix(line, "spine-cli g controller ") {
-			apply(project, strings.Fields(strings.TrimPrefix(line, "spine-cli "))...)
+		if strings.HasPrefix(line, "spine g dto ") || strings.HasPrefix(line, "spine g controller ") {
+			apply(project, strings.Fields(strings.TrimPrefix(line, "spine "))...)
 		}
 	}
 	controller := filepath.Join(project, "src/controller/api/product_controller.go")
@@ -58,8 +58,8 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 		t.Fatalf("format guide: %v %s", err, output)
 	}
 	for _, line := range strings.Split(guide, "\n") {
-		if strings.HasPrefix(line, "spine-cli g route ") {
-			apply(project, strings.Fields(strings.TrimPrefix(line, "spine-cli "))...)
+		if strings.HasPrefix(line, "spine g route ") {
+			apply(project, strings.Fields(strings.TrimPrefix(line, "spine "))...)
 		}
 	}
 	writeE2EFile(t, filepath.Join(project, "internal/application/guide_test.go"), firstAPIGuideHTTPTest)

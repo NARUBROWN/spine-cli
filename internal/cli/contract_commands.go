@@ -28,7 +28,7 @@ type semanticContract struct {
 
 func runContract(args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(errOut, "usage: spine-cli contract <check|snapshot|diff|export|probe>")
+		fmt.Fprintln(errOut, "usage: spine contract <check|snapshot|diff|export|probe>")
 		return 1
 	}
 	switch args[0] {
@@ -120,7 +120,7 @@ func runContractDiff(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	if expected.SchemaVersion != contractSchemaVersion {
-		fmt.Fprintf(errOut, "unsupported contract snapshot schema %q; expected %q. Review the current contract and regenerate with spine-cli contract snapshot --force\n", expected.SchemaVersion, contractSchemaVersion)
+		fmt.Fprintf(errOut, "unsupported contract snapshot schema %q; expected %q. Review the current contract and regenerate with spine contract snapshot --force\n", expected.SchemaVersion, contractSchemaVersion)
 		return 1
 	}
 	current, err := inspectApplication()
@@ -291,7 +291,7 @@ func runExplain(args []string, out, errOut io.Writer) int {
 	}
 	args = filtered
 	if len(args) < 2 {
-		fmt.Fprintln(errOut, "usage: spine-cli explain <http|consumer|websocket> <name> [path] [--json]")
+		fmt.Fprintln(errOut, "usage: spine explain <http|consumer|websocket> <name> [path] [--json]")
 		return 1
 	}
 	contract, err := inspectApplication()
@@ -302,7 +302,7 @@ func runExplain(args []string, out, errOut io.Writer) int {
 	switch args[0] {
 	case "http":
 		if len(args) != 3 {
-			fmt.Fprintln(errOut, "usage: spine-cli explain http <method> <path>")
+			fmt.Fprintln(errOut, "usage: spine explain http <method> <path>")
 			return 1
 		}
 		method, path := strings.ToUpper(args[1]), args[2]
@@ -319,13 +319,13 @@ func runExplain(args []string, out, errOut io.Writer) int {
 		return 1
 	case "consumer":
 		if len(args) != 2 {
-			fmt.Fprintln(errOut, "usage: spine-cli explain consumer <topic>")
+			fmt.Fprintln(errOut, "usage: spine explain consumer <topic>")
 			return 1
 		}
 		return explainNamedRegistration("consumer", args[1], contract.Consumers, jsonOutput, out, errOut)
 	case "websocket":
 		if len(args) != 2 {
-			fmt.Fprintln(errOut, "usage: spine-cli explain websocket <path>")
+			fmt.Fprintln(errOut, "usage: spine explain websocket <path>")
 			return 1
 		}
 		return explainNamedRegistration("WebSocket", args[1], contract.WebSockets, jsonOutput, out, errOut)

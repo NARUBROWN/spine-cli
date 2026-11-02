@@ -189,8 +189,8 @@ func runContext(args []string, out, errOut io.Writer) int {
 		Capabilities:  currentCapabilities(),
 		Doctor:        doctor,
 		NextActions: []nextAction{
-			{Command: "spine-cli contract check --root " + quoteCommandArgument(absoluteRoot) + " --json", Reason: "Validate the static execution contract before changing code", Safe: true},
-			{Command: "spine-cli verify --root " + quoteCommandArgument(absoluteRoot) + " --json", Reason: "Run local verification after changes", Safe: false},
+			{Command: "spine contract check --root " + quoteCommandArgument(absoluteRoot) + " --json", Reason: "Validate the static execution contract before changing code", Safe: true},
+			{Command: "spine verify --root " + quoteCommandArgument(absoluteRoot) + " --json", Reason: "Run local verification after changes", Safe: false},
 		},
 		EvidenceBoundary: []string{"project source and local toolchain only", "external databases, brokers, listeners, and deployed behavior were not observed"},
 	}

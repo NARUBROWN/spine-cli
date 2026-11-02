@@ -52,7 +52,7 @@ func TestUpdateHelpAndUsageHaveNoProjectSideEffects(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	for _, args := range [][]string{{"update", "--help"}, {"update", "-h", "--root", "missing"}, {"update", "--help", "--root", "missing", "--json"}} {
 		var out, errOut bytes.Buffer
-		if code := Run(args, &out, &errOut); code != 0 || !strings.Contains(out.String(), "spine-cli update") {
+		if code := Run(args, &out, &errOut); code != 0 || !strings.Contains(out.String(), "spine update") {
 			t.Fatalf("help %v: %d %s %s", args, code, out.String(), errOut.String())
 		}
 	}
