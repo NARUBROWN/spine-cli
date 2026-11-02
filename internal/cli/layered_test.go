@@ -139,7 +139,7 @@ func TestLayeredExplicitRoutesValidateHandlersAndRemainIdempotent(t *testing.T) 
 	layeredGenerate(t, "controller", "admin/user")
 	path := "src/controller/admin/user_controller.go"
 	source, _ := os.ReadFile(path)
-	source = append(source, []byte("\nfunc (c *UserController) Get() string { return \"ok\" }\n")...)
+	source = append(source, []byte("\nfunc (c *UserController) Get() error { return nil }\n")...)
 	if err := os.WriteFile(path, source, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestLayeredAliasedPathTypesAndCompositionRouteConflicts(t *testing.T) {
 	path := "src/controller/member_controller.go"
 	source, _ := os.ReadFile(path)
 	updated := strings.Replace(string(source), "package controller", "package controller\nimport routepath \"github.com/NARUBROWN/spine/pkg/path\"", 1)
-	updated += "\nfunc (c MemberController) Get(id routepath.Int) string { return \"ok\" }\n"
+	updated += "\nfunc (c MemberController) Get(id routepath.Int) error { return nil }\n"
 	writeE2EFile(t, path, updated)
 	layeredGenerate(t, "route", "member", "--method", "GET", "--path", "/members/:id", "--handler", "src/controller:MemberController.Get")
 	contract, err := inspectApplication()

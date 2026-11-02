@@ -215,14 +215,17 @@ func runLayeredGenerate(args []string, config projectConfig, out, errOut io.Writ
 		files = append(files, c.Path)
 	}
 	registered := p.Register
+	details := p.details(r)
 	if r.JSON {
-		return encodeIndentedJSON(map[string]any{"layout": layeredLayout, "kind": r.Kind, "name": r.Name.Name.Type, "group": r.Name.Group, "roles": generationRoles(), "files": files, "registered": registered, "dry_run": r.Options.DryRun, "base_hash": baseHash, "inputs_hash": inputHash, "changes": plan, "diff": diff}, out, errOut)
+		return encodeIndentedJSON(map[string]any{"layout": layeredLayout, "kind": r.Kind, "name": r.Name.Name.Type, "group": r.Name.Group, "roles": generationRoles(), "files": files, "registered": registered, "dry_run": r.Options.DryRun, "base_hash": baseHash, "inputs_hash": inputHash, "changes": plan, "diff": diff, "types": details.Types, "registrations": details.Registrations, "routes": details.Routes}, out, errOut)
 	}
 	if r.Options.DryRun {
 		fmt.Fprintf(out, "Would generate %s %s (%s)\n%s", r.Kind, r.Name.Name.Type, layeredLayout, diff)
 		printDryRunHash(out, baseHash)
 	} else {
 		fmt.Fprintf(out, "Generated %s %s (%s)\n", r.Kind, r.Name.Name.Type, layeredLayout)
+		printGeneratedFiles(out, plan)
+		printGenerationDetails(out, details)
 	}
 	return 0
 }

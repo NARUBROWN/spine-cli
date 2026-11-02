@@ -12,8 +12,9 @@ type httpTypeDeclaration struct {
 }
 
 type httpBindingCatalog struct {
-	module string
-	types  map[string]httpTypeDeclaration
+	module       string
+	types        map[string]httpTypeDeclaration
+	errorMethods map[string]bool
 }
 
 type httpBindingShape struct {
@@ -23,7 +24,7 @@ type httpBindingShape struct {
 
 // HTTP 검증과 route 생성은 동일한 소스 기반 resolver 지원 규칙을 사용합니다.
 func newHTTPBindingCatalog(module string, sources layoutSources) *httpBindingCatalog {
-	catalog := &httpBindingCatalog{module: module, types: map[string]httpTypeDeclaration{}}
+	catalog := &httpBindingCatalog{module: module, types: map[string]httpTypeDeclaration{}, errorMethods: map[string]bool{}}
 	for _, source := range sources.sortedFiles() {
 		for _, declaration := range source.File.Decls {
 			group, ok := declaration.(*ast.GenDecl)
@@ -35,6 +36,17 @@ func newHTTPBindingCatalog(module string, sources layoutSources) *httpBindingCat
 				key := modulePackage(module, source.Package) + ":" + spec.Name.Name
 				catalog.types[key] = httpTypeDeclaration{source, spec}
 			}
+		}
+	}
+	for _, source := range sources.sortedFiles() {
+		for _, node := range source.File.Decls {
+			function, ok := node.(*ast.FuncDecl)
+			if !ok || function.Recv == nil || len(function.Recv.List) != 1 || function.Name.Name != "Error" || len(fieldTypes(source.Fset, function.Type.Params)) != 0 {
+				continue
+			}
+			results := function.Type.Results
+			valid := results != nil && len(results.List) == 1 && len(fieldTypes(source.Fset, results)) == 1 && catalog.stringReturnBody(source, results.List[0].Type, map[string]bool{}) == "string"
+			catalog.errorMethods[catalog.errorReceiverKey(source, function.Recv.List[0].Type, map[string]bool{})] = valid
 		}
 	}
 	return catalog

@@ -23,7 +23,7 @@ func httpBindingProject(t *testing.T, layout, imports, declarations, parameters,
 	if err := os.MkdirAll("handlers", 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeE2EFile(t, "handlers/controller.go", "package handlers\n"+imports+"\n"+declarations+"\ntype Controller struct{}\nfunc NewController() *Controller { return &Controller{} }\nfunc (*Controller) Get("+parameters+") string { return \"ok\" }\n")
+	writeE2EFile(t, "handlers/controller.go", "package handlers\n"+imports+"\n"+declarations+"\ntype Controller struct{}\nfunc NewController() *Controller { return &Controller{} }\nfunc (*Controller) Get("+parameters+") error { return nil }\n")
 	source, _ := os.ReadFile("internal/application/application.go")
 	source = bytes.Replace(source, []byte("import ("), []byte("import (\nprobe \"example.com/todo/handlers\""), 1)
 	source = bytes.Replace(source, []byte("app := platform.New()"), []byte("app := platform.New()\napp.Constructor(probe.NewController)\napp.Route(\"POST\", \""+path+"\", (*probe.Controller).Get)"), 1)
@@ -90,7 +90,7 @@ func TestCrossPackageDTOBindingsResolveTypesInTheirOwnFiles(t *testing.T) {
 	path := "src/controller/inventory_controller.go"
 	source, _ := os.ReadFile(path)
 	text := strings.Replace(string(source), "package controller", "package controller\nimport dto \"example.com/todo/src/dto/inventory\"", 1)
-	text += "\nfunc (*InventoryController) Create(req dto.Request) string { return \"ok\" }\n"
+	text += "\nfunc (*InventoryController) Create(req dto.Request) error { return nil }\n"
 	writeE2EFile(t, path, text)
 	args := []string{"route", "inventory", "--method", "POST", "--path", "/products", "--handler", "src/controller:InventoryController.Create"}
 	beforeRoute, _ := os.ReadFile(layeredRoutePath)

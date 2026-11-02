@@ -328,6 +328,7 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(out, "Generated %s %q in %s\n", kind, name.Type, base)
+	printGeneratedFiles(out, plan)
 	if kind == "resource" && register {
 		fmt.Fprintf(out, "Registered the resource route module in the application composition root: %s.Register(app)\n", name.Package)
 	} else if kind == "resource" {

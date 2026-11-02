@@ -122,7 +122,7 @@ func runVerify(args []string, out, errOut io.Writer) int {
 		if diagnostic.Severity == "error" || (warningsAsErrors && diagnostic.Severity == "warning") {
 			writer = errOut
 		}
-		fmt.Fprintf(writer, "[%s] %s: %s (%s)\n", diagnostic.Severity, diagnostic.Code, diagnostic.Message, diagnostic.Source)
+		printContractDiagnostic(writer, diagnostic, "")
 	}
 	if !report.Valid {
 		return 1

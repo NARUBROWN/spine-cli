@@ -16,7 +16,7 @@
 - `spine-cli version`과 `spine version` 출력: `spine-cli 0.2.0`
 - Go module: `github.com/NARUBROWN/spine-cli`
 - 이 저장소와 생성 프로젝트의 Go 호환 기준: `1.25.5`
-- 권장·검증 Go 버전: `1.27.3`
+- 이번 로컬 검증 Go 버전: `1.26.0`
 - 새 프로젝트의 개발 레시피: `echo-dev-ded538a25193`
 - Spine: `github.com/NARUBROWN/spine v0.5.3-0.20261101161224-490135eda06f`
 - Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform v0.0.0-20261101230311-ded538a25193`
@@ -271,6 +271,7 @@ go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go m
 
 기존 생성 파일에 go.sum과 `platform = "echo"` 설정이 추가된다. 기본 health와 역할별 경로,
 `BuildApplication → Validate → Run`, SPINE_PORT는 유지한다. legacy는 health를 composition에 선언한다.
+생성 README는 기본 실행을 spine dev부터 안내하고, skip-install에만 수동 tidy를 안내한다. layered-v1 README에는 DTO부터 핸들러, 오류 응답과 route/curl까지 이어지는 첫 API 예제가 포함된다.
 JSON `result`의 project, module, layout, directory, files, dry_run, base_hash, changes와 diff를 유지하며
 platform, recipe, stability, install_skipped, selected_modules, stages와 execution_boundary를 추가한다.
 실패 시 failed_stage와 cause를 반환한다. new의 일반/JSON 종료코드는 2 사용법, 3 전제조건 및 다운로드,
@@ -279,6 +280,11 @@ platform, recipe, stability, install_skipped, selected_modules, stages와 execut
 `new --help`, `g --help`, `g <kind> --help`와 `-h`는 프로젝트를 읽거나 파일을 쓰기 전에 출력한다.
 
 ## 8. 생성기 공통 계약
+
+layered-v1의 완료 출력은 파일별 Created/Updated/Unchanged, 실제 package/path:Type 참조, 생성자와 module 등록 위치, HTTP method/path/handler를 보여 준다. JSON에는 기존 필드를 유지하면서 types, registrations, routes를 추가한다. --no-register에서는 등록을 수행했다고 표시하지 않는다.
+개별 help는 프로젝트를 읽지 않고 역할별 경로, 적용 가능한 옵션과 예제를 제공한다. domain/DTO help에는 DI 등록 옵션을 표시하지 않는다.
+
+HTTP 성공 반환은 httpx.Response[T], httpx.Binary, httpx.Redirect 및 포인터 형태를 사용한다. error도 허용한다. raw DTO/slice/string은 기본 성공 반환 핸들러가 처리하지 못하므로 route 계획과 계약 gate에서 source/hint와 함께 진단한다. 타입 별칭과 새로 정의한 타입의 런타임 식별자를 구분하며, 알 수 없는 타입은 미해결로 표시한다. plain contract check/verify/inspect도 수정 힌트를 출력한다. 이는 실제 응답값이나 JSON 직렬화 실행을 증명하지 않는다.
 
 이 절의 기본 규칙은 `layout = "layered-v1"`이다. legacy 차이는 8.6절을 참고한다.
 
@@ -554,6 +560,9 @@ completeness는 유지되지만 `--warnings-as-errors`에서는 validation이 �
 - `DEFERRED_REGISTRATION_UNRESOLVED`
 
 HTTP 계약 불확실성/충돌:
+
+- `HTTP_RETURN_TYPE_UNSUPPORTED`: 알려진 기본 HTTP 성공 반환 규칙에 맞지 않음. httpx.Response[T]/Binary/Redirect 또는 error를 사용한다.
+- `HTTP_RETURN_TYPE_UNRESOLVED`: 동적 인터페이스나 외부 타입 등의 실제 반환 처리를 정적으로 확인하지 못함.
 
 - `HTTP_ROUTE_ARGUMENTS_INVALID`
 - `HTTP_ROUTE_DYNAMIC`

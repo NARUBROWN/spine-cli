@@ -69,13 +69,13 @@ func TestLayeredGeneratedProjectEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source = append(source, []byte("\nfunc (c ReportController) Get() string { return \"report\" }\n")...)
+	source = append(source, []byte("\nfunc (c ReportController) Get() error { return nil }\n")...)
 	source = []byte(strings.Replace(string(source), "package admin", `package admin
 import (
  query "github.com/NARUBROWN/spine/pkg/path"
  path "github.com/NARUBROWN/spine/pkg/query"
 )`, 1))
-	source = append(source, []byte("\nfunc (c *ReportController) Find(id query.Int, values path.Values) string { return \"report\" }\n")...)
+	source = append(source, []byte("\nfunc (c *ReportController) Find(id query.Int, values path.Values) error { return nil }\n")...)
 	source, err = format.Source(source)
 	if err != nil {
 		t.Fatal(err)

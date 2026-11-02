@@ -48,7 +48,7 @@ curl http://localhost:8080/health
 현재 개발 브랜치의 `new`는 Echo 플랫폼 연결과 의존성 설치, 정적 계약 검사와 빌드를
 완료한 뒤 프로젝트를 생성합니다. 서버는 `spine dev`로 시작합니다. 설치 과정에서는
 애플리케이션 초기화, 테스트나 listener를 실행하지 않습니다. 위 설치 예시의 v0.2.0 릴리스에는
-이 플랫폼 통합이 아직 포함되지 않았습니다.
+이 플랫폼 통합과 아래 DX 개선이 아직 포함되지 않았습니다.
 
 파일만 생성하려면 `spine new todo-api --skip-install`을 사용하고, 생성 후 `go mod tidy`를
 실행하세요. `--platform echo`는 기본 플랫폼을 명시합니다. 설치 포함 `--dry-run`은 정확한
@@ -58,6 +58,14 @@ curl http://localhost:8080/health
 
 새 프로젝트에는 명시적인 `BuildApplication` composition root, `app.Validate`,
 `GET /health`, `spine.toml`이 포함됩니다.
+
+## 첫 업무 API
+
+[DTO 생성부터 핸들러, 오류 응답, route 등록과 curl 확인까지의 예제](internal/cli/first_api.md)를 따라 POST /products를 만들 수 있습니다. 생성된 앱 README에도 실제 모듈 경로가 반영된 예제가 포함됩니다.
+
+HTTP 성공 응답은 `httpx.Response[T]`, `httpx.Binary`, `httpx.Redirect`로 반환합니다.
+DTO, slice와 string을 직접 반환하지 않고 `httpx.Response[T].Body`에 넣습니다.
+본문 DTO는 포인터로 받고 실패는 `error`로 반환합니다. 알려진 미지원 반환형은 route 생성과 계약 검사에서 파일 위치와 수정 방법을 안내합니다.
 
 ## 생성기
 
@@ -92,6 +100,7 @@ CLI는 그룹을 애그리거트로 해석하지 않습니다.
 
 `--depends`는 모듈 기준 패키지 경로와 타입을 받습니다. 여러 의존성은 옵션을 반복해서 지정합니다.
 CLI는 실제 타입과 단일 공개 생성자를 확인하고 import와 생성자 인자와 application 등록을 연결합니다.
+완료 출력에는 생성/수정한 파일, 실제 타입 참조와 등록 위치가 표시됩니다. JSON에는 types, registrations와 routes가 추가됩니다.
 서로 다른 패키지의 동명 타입도 구분합니다. domain과 DTO는 DI에 등록하지 않습니다.
 repository에는 DB 연결이나 CRUD 구현을 추가하지 않습니다.
 

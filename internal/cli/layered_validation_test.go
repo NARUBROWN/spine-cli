@@ -51,7 +51,7 @@ func TestLayeredRejectsSurplusPathParameters(t *testing.T) {
 	layeredGenerate(t, "controller", "reader")
 	controller, _ := os.ReadFile("src/controller/reader_controller.go")
 	source := strings.Replace(string(controller), "package controller", "package controller\nimport \"github.com/NARUBROWN/spine/pkg/path\"", 1)
-	source += "\nfunc (c *ReaderController) Get(first path.Int, second path.Int) string { return \"ok\" }\n"
+	source += "\nfunc (c *ReaderController) Get(first path.Int, second path.Int) error { return nil }\n"
 	writeE2EFile(t, "src/controller/reader_controller.go", source)
 	before, _ := os.ReadFile(layeredRoutePath)
 	var out, errOut bytes.Buffer
@@ -85,7 +85,7 @@ import (
  query "github.com/NARUBROWN/spine/pkg/path"
  path "github.com/NARUBROWN/spine/pkg/query"
 )`, 1)
-	source += "\nfunc (c *ReaderController) Get(id query.Int, name path.Values) string { return \"ok\" }\n"
+	source += "\nfunc (c *ReaderController) Get(id query.Int, name path.Values) error { return nil }\n"
 	writeE2EFile(t, "src/controller/reader_controller.go", source)
 	layeredGenerate(t, "route", "reader", "--method", "GET", "--path", "/readers/:id", "--handler", "src/controller:ReaderController.Get")
 	contract, err := inspectApplication()
@@ -125,7 +125,7 @@ func TestLayeredRouteGenerationIgnoresInactiveExistingRegistration(t *testing.T)
 	layeredProject(t)
 	layeredGenerate(t, "controller", "reader")
 	controller, _ := os.ReadFile("src/controller/reader_controller.go")
-	writeE2EFile(t, "src/controller/reader_controller.go", string(controller)+"\nfunc (*ReaderController) Get() string { return \"ok\" }\n")
+	writeE2EFile(t, "src/controller/reader_controller.go", string(controller)+"\nfunc (*ReaderController) Get() error { return nil }\n")
 	route, _ := os.ReadFile(layeredRoutePath)
 	route = bytes.Replace(route, []byte("return nil"), []byte("if \"disabled\" == \"enabled\" { app.Route(\"GET\", \"/readers\", (*controller.ReaderController).Get) }; return nil"), 1)
 	writeE2EFile(t, layeredRoutePath, string(route))

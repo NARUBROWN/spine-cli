@@ -457,6 +457,7 @@ func (i *contractInspector) resolveConstructorDependencies() {
 type staticHandlerSignature struct {
 	httpSource    *layoutSource
 	httpFields    *ast.FieldList
+	httpResults   *ast.FieldList
 	schemaSource  string
 	parameters    []handlerParameter
 	returns       []string
@@ -490,6 +491,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			signature := staticHandlerSignature{
 				httpSource:    source,
 				httpFields:    function.Type.Params,
+				httpResults:   function.Type.Results,
 				schemaSource:  fset.Position(function.Pos()).Filename,
 				parameters:    fieldParameters(fset, function.Type.Params),
 				returns:       fieldTypes(fset, function.Type.Results),
@@ -541,6 +543,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			route.Parameters = parameters
 			i.contract.Diagnostics = append(i.contract.Diagnostics, diagnostics...)
 			route.Returns = matches[0].returns
+			i.contract.Diagnostics = append(i.contract.Diagnostics, bindings.returns(matches[0].httpSource, matches[0].httpResults, route.Handler)...)
 			pathKeys := contractPathKeys(route.Path)
 			boundPathCount := 0
 			for _, parameter := range route.Parameters {
@@ -1081,7 +1084,7 @@ func runInspect(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(out, "  config %s = %s (%s)\n", setting.Path, setting.Value, setting.Source)
 	}
 	for _, diagnostic := range contract.Diagnostics {
-		fmt.Fprintf(out, "  [%s] %s: %s (%s)\n", diagnostic.Severity, diagnostic.Code, diagnostic.Message, diagnostic.Source)
+		printContractDiagnostic(out, diagnostic, "  ")
 	}
 	return 0
 }
