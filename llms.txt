@@ -12,15 +12,15 @@
 - 프로젝트와 제품 이름: `spine-cli`
 - 루트 경로로 설치되는 실행 파일과 명령: `spine-cli`
 - `cmd/spine` 경로로 설치되는 실행 파일과 명령: `spine`
-- 현재 CLI 버전: `0.2.0`
-- `spine-cli version`과 `spine version` 출력: `spine-cli 0.2.0`
+- 현재 CLI 버전: `0.3.0`
+- `spine-cli version`과 `spine version` 출력: `spine-cli 0.3.0`
 - Go module: `github.com/NARUBROWN/spine-cli`
 - 이 저장소와 생성 프로젝트의 Go 호환 기준: `1.25.5`
 - 이번 로컬 검증 Go 버전: `1.26.0`
 - 새 프로젝트의 개발 레시피: `echo-dev-ded538a25193`
 - Spine: `github.com/NARUBROWN/spine v0.5.3-0.20261101161224-490135eda06f`
 - Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform v0.0.0-20261101230311-ded538a25193`
-- 위 플랫폼 통합은 개발 브랜치 동작이며 v0.2.0 릴리스에는 포함되지 않는다.
+- Echo 플랫폼 설치, 프로젝트 의존성 갱신과 HTTP 반환형 진단은 CLI v0.3.0에서 제공한다.
 - 라이선스: MIT
 
 버전을 추측하지 않는다. 현재 checkout에서는 `internal/cli/cli.go`의 `version`, `go.mod`,
@@ -99,7 +99,7 @@ spine update --root <project-directory> --if-match <base_hash> --json
 - result의 stages/failed_stage/cause도 확인한다. 평문과 JSON 모두 사용법 2, 전제조건/취소 3, 충돌 4, 검증 실패 5를 사용한다.
 - 단일 모듈만 지원한다. workspace, 사용자 지정 GOFLAGS, vendor, local replace, symlink 입력은 먼저 해소한다.
 - dry-run은 프로젝트를 반영하지 않지만 네트워크와 Go 캐시를 사용할 수 있다.
-- 현재 개발 브랜치 기능이며 v0.2.0 릴리스에는 포함되지 않는다.
+- CLI v0.3.0부터 제공한다.
 
 갱신 성공은 정적 계약과 컴파일 증거다. 이후 contract check/verify와 필요한 실제 HTTP 및
 외부 인프라 검증을 별도로 수행한다.

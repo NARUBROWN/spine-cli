@@ -18,17 +18,17 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 - Echo 플랫폼: `v0.0.0-20261101230311-ded538a25193` (Echo v5.4.4)
 
 ```sh
-go install github.com/NARUBROWN/spine-cli@v0.2.0
+go install github.com/NARUBROWN/spine-cli@v0.3.0
 spine-cli version
-# spine-cli 0.2.0
+# spine-cli 0.3.0
 ```
 
 짧은 `spine` 명령을 사용하려면 기존 `cmd/spine` 경로로 설치합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.2.0
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.3.0
 spine version
-# spine-cli 0.2.0
+# spine-cli 0.3.0
 ```
 
 ## 빠른 시작
@@ -45,10 +45,9 @@ spine dev
 curl http://localhost:8080/health
 ```
 
-현재 개발 브랜치의 `new`는 Echo 플랫폼 연결과 의존성 설치, 정적 계약 검사와 빌드를
+`new`는 Echo 플랫폼 연결과 의존성 설치, 정적 계약 검사와 빌드를
 완료한 뒤 프로젝트를 생성합니다. 서버는 `spine dev`로 시작합니다. 설치 과정에서는
-애플리케이션 초기화, 테스트나 listener를 실행하지 않습니다. 위 설치 예시의 v0.2.0 릴리스에는
-이 플랫폼 통합과 아래 DX 개선이 아직 포함되지 않았습니다.
+애플리케이션 초기화, 테스트나 listener를 실행하지 않습니다.
 
 파일만 생성하려면 `spine new todo-api --skip-install`을 사용하고, 생성 후 `go mod tidy`를
 실행하세요. `--platform echo`는 기본 플랫폼을 명시합니다. 설치 포함 `--dry-run`은 정확한
@@ -61,9 +60,8 @@ curl http://localhost:8080/health
 
 ## 프로젝트 의존성 갱신
 
-현재 개발 브랜치에서는 기존 Echo 프로젝트에 `spine update`를 사용할 수 있습니다.
+기존 Echo 프로젝트의 의존성은 `spine update`로 갱신할 수 있습니다.
 이 명령은 현재 CLI에 포함된 검증 레시피로 Spine, Echo 플랫폼과 Echo를 함께 갱신합니다.
-릴리스 v0.2.0에는 아직 포함되지 않았습니다.
 
 ```sh
 spine update --dry-run

@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 // Run은 Spine CLI 명령을 실행하고 요청한 출력 형식으로 결과를 전달합니다.
 func Run(args []string, out, errOut io.Writer) int {
