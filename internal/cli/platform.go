@@ -16,11 +16,11 @@ import (
 
 const (
 	echoPlatformPath     = "github.com/NARUBROWN/spine-echo-platform"
-	echoPlatformVersion  = "v0.0.0-20261101230311-ded538a25193"
-	platformSpineVersion = "v0.5.3-0.20261101161224-490135eda06f"
+	echoPlatformVersion  = "v0.1.0"
+	platformSpineVersion = "v0.6.0"
 	platformEchoVersion  = "v5.4.4"
-	httpAdapterContract  = "spine.http-adapter/v1"
-	echoRecipe           = "echo-dev-ded538a25193"
+	httpAdapterContract  = "spine.http-adapter/v2"
+	echoRecipe           = "echo-v0.1.0-spine-v0.6.0"
 )
 
 type selectedModule struct {

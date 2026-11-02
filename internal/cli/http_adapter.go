@@ -6,6 +6,8 @@ import (
 	"go/token"
 	"os"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 type httpAdapterSelection struct {
@@ -57,6 +59,13 @@ func (i *contractInspector) inspectHTTPAdapter(config projectConfig, file *ast.F
 		a.Provider, a.Selection = "echo", "legacy-implicit"
 	} else {
 		a.ExpectedContract = httpAdapterContract
+		coreVersion := selectedModuleVersion(a.SelectedModules, spineImportPath)
+		if semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.6.0") < 0 {
+			a.ExpectedContract = "spine.http-adapter/v1"
+		}
+		if _, removed := importedCall(assignment.Rhs[0], importPathsByAlias(file), spineImportPath, "NewWithHTTPAdapter"); removed && a.ExpectedContract == "spine.http-adapter/v2" {
+			add("HTTP_ADAPTER_API_REMOVED", "Spine v0.6.0 removed NewWithHTTPAdapter; use spine.New(spine.WithHTTPAdapter(platform.NewFactory()))")
+		}
 		if selection == "echo" {
 			a.Provider, a.Selection, a.CanonicalFactory = "echo", "explicit", echoPlatformPath+".NewFactory"
 			if selectedModuleVersion(a.SelectedModules, echoPlatformPath) == "" && err == nil {
@@ -79,7 +88,11 @@ func (i *contractInspector) inspectHTTPAdapter(config projectConfig, file *ast.F
 	}
 	for _, item := range i.contract.Configuration {
 		if strings.HasPrefix(item.Path, "http_adapter.native_hooks") && (a.Enabled == nil || *a.Enabled) {
-			a.RequiredCapabilities = append(a.RequiredCapabilities, "native-hooks")
+			if a.ExpectedContract == "spine.http-adapter/v2" {
+				add("HTTP_NATIVE_HOOK_API_REMOVED", "Spine v0.6.0 removed App.Transport; configure Echo through platform.WithEcho(func(*echo.Echo))")
+			} else {
+				a.RequiredCapabilities = append(a.RequiredCapabilities, "native-hooks")
+			}
 			break
 		}
 	}

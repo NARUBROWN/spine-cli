@@ -84,11 +84,10 @@ import (
  "net/http/httptest"
  "strings"
  "testing"
- "github.com/NARUBROWN/spine"
 )
 func TestDocumentedProductAPI(t *testing.T) {
  app,options,err:=BuildApplication();if err!=nil {t.Fatal(err)}
- prepared,err:=spine.Prepare(context.Background(),app,options);if err!=nil {t.Fatal(err)}
+ prepared,err:=app.Prepare(context.Background(),options);if err!=nil {t.Fatal(err)}
  defer prepared.Close(context.Background())
  server:=httptest.NewServer(prepared.Handler());defer server.Close()
  for _,scenario:=range []struct {body string;status int}{

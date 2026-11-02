@@ -12,15 +12,16 @@
 - 프로젝트와 제품 이름: `spine-cli`
 - 루트 경로로 설치되는 실행 파일과 명령: `spine-cli`
 - `cmd/spine` 경로로 설치되는 실행 파일과 명령: `spine`
-- 현재 CLI 버전: `0.3.0`
-- `spine-cli version`과 `spine version` 출력: `spine-cli 0.3.0`
+- 현재 CLI 버전: `0.4.0`
+- `spine-cli version`과 `spine version` 출력: `spine-cli 0.4.0`
 - Go module: `github.com/NARUBROWN/spine-cli`
 - 이 저장소와 생성 프로젝트의 Go 호환 기준: `1.25.5`
 - 이번 로컬 검증 Go 버전: `1.26.0`
-- 새 프로젝트의 개발 레시피: `echo-dev-ded538a25193`
-- Spine: `github.com/NARUBROWN/spine v0.5.3-0.20261101161224-490135eda06f`
-- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform v0.0.0-20261101230311-ded538a25193`
+- 새 프로젝트의 검증 레시피: `echo-v0.1.0-spine-v0.6.0`
+- Spine: `github.com/NARUBROWN/spine v0.6.0`
+- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform v0.1.0`
 - Echo 플랫폼 설치, 프로젝트 의존성 갱신과 HTTP 반환형 진단은 CLI v0.3.0에서 제공한다.
+- CLI v0.4.0은 위 v0.6.0/v0.1.0 공개 조합과 adapter v2 계약을 지원한다. v0.3.0 태그는 이전 v1 레시피를 사용한다.
 - 라이선스: MIT
 
 버전을 추측하지 않는다. 현재 checkout에서는 `internal/cli/cli.go`의 `version`, `go.mod`,
@@ -534,7 +535,10 @@ func BuildApplication() (spine.App, boot.Options, error) {
 `spine inspect`는 `spine.contract/v1alpha2`, `analysis_mode:"static-source"` 계약을 만든다.
 `http_adapter`는 HTTP 활성 상태, provider, selection, canonical_factory, expected_contract,
 selected_modules, required_capabilities, resolution과 source를 제공한다. 별칭을 포함한 플랫폼 New,
-Option, WithHTTPAdapter 및 NewWithHTTPAdapter 구성을 인식한다. snapshot은 동등한 생성식과
+Option과 WithHTTPAdapter 구성을 인식한다. platform.WithEcho 옵션은 factory 선택으로 인식하지만 콜백을 실행하거나 native 경로를 계약에 포함하지 않는다.
+선택한 Spine이 v0.6.0 이상이면 제거된 NewWithHTTPAdapter와 App.Transport를 진단한다.
+리스너 없는 준비는 app.Prepare(ctx, options)를 사용하며, 이전 spine.Prepare 호출은 앱 테스트에서도 전환한다.
+http_adapter.expected_contract는 실제 선택 코어 버전에 따라 v1 또는 v2를 표시한다. snapshot은 동등한 생성식과
 소스 위치를 의미 차이로 보지 않으며 모듈 버전과 필요한 기능의 변경은 비교한다.
 HTTP_ADAPTER_MISSING, HTTP_ADAPTER_UNRESOLVED, HTTP_CONFIGURATION_UNRESOLVED 및
 MODULE_GRAPH_UNAVAILABLE 진단이 있으면 분석을 완전하다고 주장하지 않는다.

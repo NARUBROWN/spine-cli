@@ -13,22 +13,24 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 ## 권장 환경과 설치
 
 - 최소 Go 버전: 1.25.5
-- 새 프로젝트의 플랫폼: Echo 개발 레시피 `echo-dev-ded538a25193`
-- Spine: `v0.5.3-0.20261101161224-490135eda06f`
-- Echo 플랫폼: `v0.0.0-20261101230311-ded538a25193` (Echo v5.4.4)
+- 새 프로젝트의 플랫폼: Echo 레시피 `echo-v0.1.0-spine-v0.6.0`
+- Spine: `v0.6.0`
+- Echo 플랫폼: `v0.1.0` (Echo v5.4.4)
+
+CLI v0.4.0은 위 공개 버전 조합과 HTTP 어댑터 v2 계약을 지원합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli@v0.3.0
+go install github.com/NARUBROWN/spine-cli@v0.4.0
 spine-cli version
-# spine-cli 0.3.0
+# spine-cli 0.4.0
 ```
 
 짧은 `spine` 명령을 사용하려면 기존 `cmd/spine` 경로로 설치합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.3.0
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.0
 spine version
-# spine-cli 0.3.0
+# spine-cli 0.4.0
 ```
 
 ## 빠른 시작
@@ -178,8 +180,10 @@ legacy에서만 지원하며, 새 구조에 CRUD 생성 기능을 추가하지 �
 ## 실행 계약
 
 `platform.New()`, `spine.New(platform.Option())`,
-`spine.New(spine.WithHTTPAdapter(platform.NewFactory()))`와
-`spine.NewWithHTTPAdapter(platform.NewFactory())`를 같은 Echo 선택으로 인식합니다.
+`spine.New(spine.WithHTTPAdapter(platform.NewFactory()))`를 같은 Echo 선택으로 인식합니다.
+`platform.WithEcho(func(*echo.Echo))`를 전달하는 플랫폼 생성 옵션도 인식하지만 콜백이나 native 경로는 실행하거나 분석하지 않습니다.
+Spine v0.6.0에서 제거된 `NewWithHTTPAdapter`와 `App.Transport`는 새 생성식과 `WithEcho`로 바꾸도록 진단합니다.
+리스너 없이 앱을 준비하는 테스트는 `app.Prepare(ctx, options)`를 사용합니다.
 `inspect`의 `http_adapter`는 소스에서 확인한 선택과 오프라인 모듈 그래프의 실제 버전을
 보여줍니다. 런타임 factory를 실행해 관찰한 결과는 아닙니다. 새 커널에서 HTTP를 활성화하고
 factory를 빠뜨리면 `HTTP_ADAPTER_MISSING`으로 진단합니다. 기존 v0.5.2 앱은 내장 Echo를

@@ -105,11 +105,10 @@ import (
  "net/http"
  "net/http/httptest"
  "testing"
- "github.com/NARUBROWN/spine"
 )
 func TestUpdatedRecipeHTTP(t *testing.T) {
  app, options, err := BuildApplication(); if err != nil { t.Fatal(err) }
- prepared, err := spine.Prepare(context.Background(), app, options); if err != nil { t.Fatal(err) }
+ prepared, err := app.Prepare(context.Background(), options); if err != nil { t.Fatal(err) }
  defer prepared.Close(context.Background())
  server := httptest.NewServer(prepared.Handler()); defer server.Close()
  response, err := http.Get(server.URL+"/health"); if err != nil { t.Fatal(err) }

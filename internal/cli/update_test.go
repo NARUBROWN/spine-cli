@@ -30,8 +30,8 @@ func TestUpdateRequirementsPreserveProjectPolicy(t *testing.T) {
 
 func TestUpdateRefusesDowngradesAndUnverifiedReplacements(t *testing.T) {
 	for _, test := range []struct{ name, requirements, suffix, module, want string }{
-		{"spine-newer", spineImportPath + " v0.5.3", "", "example.com/shop", "newer than recipe"},
-		{"platform-newer", spineImportPath + " v0.5.2\n" + echoPlatformPath + " v0.0.0-20261102000000-aaaaaaaaaaaa", "", "example.com/shop", "newer than recipe"},
+		{"spine-newer", spineImportPath + " v0.7.0", "", "example.com/shop", "newer than recipe"},
+		{"platform-newer", spineImportPath + " v0.5.2\n" + echoPlatformPath + " v0.2.0", "", "example.com/shop", "newer than recipe"},
 		{"echo-newer", spineImportPath + " v0.5.2\ngithub.com/labstack/echo/v5 v5.4.5", "", "example.com/shop", "newer than recipe"},
 		{"local-replace", spineImportPath + " v0.5.2", "replace example.com/local => ../local", "example.com/shop", "local replace"},
 		{"core-replace", spineImportPath + " v0.5.2", "replace " + spineImportPath + " => example.com/fork v0.5.2", "example.com/shop", "verified public recipe"},
