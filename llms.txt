@@ -548,7 +548,7 @@ HTTP_ADAPTER_MISSING, HTTP_ADAPTER_UNRESOLVED, HTTP_CONFIGURATION_UNRESOLVED 및
 MODULE_GRAPH_UNAVAILABLE 진단이 있으면 분석을 완전하다고 주장하지 않는다.
 doctor의 http_adapter와 context의 doctor.http_adapter 및 contract.http_adapter에도 같은 선택 정보를 제공한다.
 모듈 조회는 네트워크와 toolchain 다운로드 없이 임시 모듈 사본에서 수행한다.
-필요한 정보가 캐시에 없다면 go mod tidy 후 다시 검사한다. 기존 v0.5.2의 내장 Echo는
+필요한 정보가 캐시에 없다면 go mod tidy와 go mod download all로 전체 모듈 메타데이터를 준비한 뒤 다시 검사한다. 기존 v0.5.2의 내장 Echo는
 legacy-implicit으로 인식하고 HTTP 비활성 worker는 factory를 요구하지 않는다.
 
 수집 범위:

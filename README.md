@@ -102,6 +102,8 @@ spine update --root ./shop-api --if-match <base_hash> --json
 
 [DTO 생성부터 핸들러, 오류 응답, route 등록과 curl 확인까지의 예제](internal/cli/first_api.md)를 따라 POST /products를 만들 수 있습니다. 생성된 앱 README에도 실제 모듈 경로가 반영된 예제가 포함됩니다.
 
+의존성을 직접 추가하거나 변경한 뒤에는 `go mod tidy`와 `go mod download all`을 실행하세요. 정적 계약 검사의 모듈 분석은 네트워크에 연결하지 않으므로 전체 모듈 메타데이터가 캐시에 필요합니다. `MODULE_GRAPH_UNAVAILABLE`이 발생하면 두 명령으로 캐시를 준비한 뒤 다시 검사합니다.
+
 HTTP 성공 응답은 `httpx.Response[T]`, `httpx.Binary`, `httpx.Redirect`로 반환합니다.
 DTO, slice와 string을 직접 반환하지 않고 `httpx.Response[T].Body`에 넣습니다.
 본문 DTO는 포인터로 받고 실패는 `error`로 반환합니다. 알려진 미지원 반환형은 route 생성과 계약 검사에서 파일 위치와 수정 방법을 안내합니다.
