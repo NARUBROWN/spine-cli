@@ -83,7 +83,7 @@ func runVerify(args []string, out, errOut io.Writer) int {
 		} else if argument == "--json" {
 			jsonOutput = true
 		} else {
-			fmt.Fprintln(errOut, "usage: spine verify [--warnings-as-errors] [--json]")
+			fmt.Fprintln(errOut, "usage: spine-cli verify [--warnings-as-errors] [--json]")
 			return 1
 		}
 	}
@@ -199,7 +199,7 @@ func runBuild(out, errOut io.Writer) int {
 func projectName() (string, error) {
 	f, err := os.Open("go.mod")
 	if err != nil {
-		return "", fmt.Errorf("spine build must run from a Go module: %w", err)
+		return "", fmt.Errorf("spine-cli build must run from a Go module: %w", err)
 	}
 	defer f.Close()
 	for scanner := bufio.NewScanner(f); scanner.Scan(); {
@@ -213,17 +213,17 @@ func projectName() (string, error) {
 
 func runCompletion(args []string, out, errOut io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintln(errOut, "usage: spine completion <powershell|bash|zsh>")
+		fmt.Fprintln(errOut, "usage: spine-cli completion <powershell|bash|zsh>")
 		return 1
 	}
 	commands := "new update generate g dev run test check inspect explain verify contract doctor capabilities schema context build completion help version"
 	switch args[0] {
 	case "powershell":
-		fmt.Fprintf(out, "Register-ArgumentCompleter -Native -CommandName spine -ScriptBlock { param($wordToComplete) '%s'.Split(' ') | Where-Object { $_ -like \"$wordToComplete*\" } }\n", commands)
+		fmt.Fprintf(out, "Register-ArgumentCompleter -Native -CommandName spine-cli -ScriptBlock { param($wordToComplete) '%s'.Split(' ') | Where-Object { $_ -like \"$wordToComplete*\" } }\n", commands)
 	case "bash":
-		fmt.Fprintf(out, "complete -W '%s' spine\n", commands)
+		fmt.Fprintf(out, "complete -W '%s' spine-cli\n", commands)
 	case "zsh":
-		fmt.Fprintf(out, "#compdef spine\n_arguments '1: :(%s)'\n", commands)
+		fmt.Fprintf(out, "#compdef spine-cli\n_arguments '1: :(%s)'\n", commands)
 	default:
 		fmt.Fprintf(errOut, "unsupported shell: %s\n", args[0])
 		return 1

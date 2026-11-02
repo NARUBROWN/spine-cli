@@ -160,7 +160,7 @@ func classifyProtocolError(message string, exitCode int) *protocolError {
 	switch exitCode {
 	case 2:
 		code = "USAGE_ERROR"
-		hint = "Run `spine schema --json` to inspect valid arguments and options."
+		hint = "Run `spine-cli schema --json` to inspect valid arguments and options."
 	case 4:
 		code = "CONFLICT"
 		hint = "Create a new dry-run plan and retry only after reviewing the changed files."
@@ -169,7 +169,7 @@ func classifyProtocolError(message string, exitCode int) *protocolError {
 		hint = "Inspect the error details before retrying."
 	case 5:
 		code = "VALIDATION_FAILED"
-		hint = "Run `spine context --json` and inspect contract diagnostics."
+		hint = "Run `spine-cli context --json` and inspect contract diagnostics."
 	}
 	return &protocolError{Code: code, Message: message, Retryable: exitCode != 10, Hint: hint}
 }

@@ -54,7 +54,7 @@ func projectRoot() (string, error) {
 		}
 		parent := filepath.Dir(directory)
 		if parent == directory {
-			return "", fmt.Errorf("spine generate must run inside a Go module")
+			return "", fmt.Errorf("spine-cli generate must run inside a Go module")
 		}
 		directory = parent
 	}

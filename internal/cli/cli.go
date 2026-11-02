@@ -94,11 +94,11 @@ func runCommand(args []string, out, errOut io.Writer) int {
 	switch args[0] {
 	case "run", "test", "check", "build":
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-			fmt.Fprintf(out, "Usage: spine %s [--root <directory>]\n\nThis command accepts no command-specific options. Use go test directly for Go test filters.\n", args[0])
+			fmt.Fprintf(out, "Usage: spine-cli %s [--root <directory>]\n\nThis command accepts no command-specific options. Use go test directly for Go test filters.\n", args[0])
 			return 0
 		}
 		if len(args) > 1 {
-			fmt.Fprintf(errOut, "unknown option or argument for %s: %s\nUsage: spine %s [--root <directory>]\n", args[0], args[1], args[0])
+			fmt.Fprintf(errOut, "unknown option or argument for %s: %s\nUsage: spine-cli %s [--root <directory>]\n", args[0], args[1], args[0])
 			return 1
 		}
 	}
@@ -155,19 +155,19 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, `Spine CLI - scaffold explicit, execution-centric Spine applications.
 
 Usage:
-  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
-  spine update [--dry-run] [--if-match <hash>] [--json]
-  spine g domain <[group/]name> [--field name:type]
-  spine g dto <[group/]name> [--field name:type]
-  spine g repository <[group/]name>
-  spine g service <[group/]name> [--depends package/path:Type]
-  spine g controller <[group/]name> [--depends package/path:Type]
-  spine g route <name> --method GET --path /users --handler package/path:Type.Method
-  spine g resource <[group/]name> [--no-register]
-  spine generate consumer <name> --topic <topic> --field name:string
-  spine generate websocket <name> --path </path> --field message:string
-  spine schema [--json]
-  spine context [--json]
+  spine-cli new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
+  spine-cli update [--dry-run] [--if-match <hash>] [--json]
+  spine-cli g domain <[group/]name> [--field name:type]
+  spine-cli g dto <[group/]name> [--field name:type]
+  spine-cli g repository <[group/]name>
+  spine-cli g service <[group/]name> [--depends package/path:Type]
+  spine-cli g controller <[group/]name> [--depends package/path:Type]
+  spine-cli g route <name> --method GET --path /users --handler package/path:Type.Method
+  spine-cli g resource <[group/]name> [--no-register]
+  spine-cli generate consumer <name> --topic <topic> --field name:string
+  spine-cli generate websocket <name> --path </path> --field message:string
+  spine-cli schema [--json]
+  spine-cli context [--json]
 
 Layout:
   New projects use layered-v1 role roots with optional nested groups.
@@ -177,27 +177,27 @@ Global options:
   --root <directory>  Run from an explicit project directory.
 
 Aliases:
-  spine g resource <name>
+  spine-cli g resource <name>
 
 Examples:
-  spine new todo-api --module github.com/acme/todo-api
+  spine-cli new todo-api --module github.com/acme/todo-api
   cd todo-api
-  spine update --dry-run
-  spine g resource users
-  spine g consumer orders --topic order.created --field order_id:int64
-  spine g websocket chat --path /ws/chat --field message:string
-  spine dev --events jsonl
-  spine inspect
-  spine explain http GET /health
-  spine verify
-  spine contract check --json
-  spine contract snapshot
-  spine contract diff
-  spine contract probe
-  spine doctor
-  spine capabilities --json
-  spine schema --json
-  spine context --json
-  spine check
+  spine-cli update --dry-run
+  spine-cli g resource users
+  spine-cli g consumer orders --topic order.created --field order_id:int64
+  spine-cli g websocket chat --path /ws/chat --field message:string
+  spine-cli dev --events jsonl
+  spine-cli inspect
+  spine-cli explain http GET /health
+  spine-cli verify
+  spine-cli contract check --json
+  spine-cli contract snapshot
+  spine-cli contract diff
+  spine-cli contract probe
+  spine-cli doctor
+  spine-cli capabilities --json
+  spine-cli schema --json
+  spine-cli context --json
+  spine-cli check
   go run .`)
 }

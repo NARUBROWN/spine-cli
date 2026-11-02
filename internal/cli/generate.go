@@ -40,7 +40,7 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 		}
 	}
 	if len(args) < 2 {
-		fmt.Fprintln(errOut, "usage: spine generate <resource|slice|consumer|websocket|controller|service|repository> <name> [options]")
+		fmt.Fprintln(errOut, "usage: spine-cli generate <resource|slice|consumer|websocket|controller|service|repository> <name> [options]")
 		return 1
 	}
 	name, err := parseResourceName(args[1])

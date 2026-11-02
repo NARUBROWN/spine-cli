@@ -15,12 +15,12 @@ import (
 
 func buildUpdateCLI(t *testing.T) string {
 	t.Helper()
-	name := "spine"
+	name := "spine-cli"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
 	binary := filepath.Join(t.TempDir(), name)
-	command := exec.Command("go", "build", "-o", binary, "./cmd/spine")
+	command := exec.Command("go", "build", "-o", binary, ".")
 	command.Dir = filepath.Join("..", "..")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v %s", err, output)
