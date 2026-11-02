@@ -92,7 +92,13 @@ func TestPlatformCompositionFormsAndAdapterDiagnostics(t *testing.T) {
 		{"platform", "p.New()", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
 		{"option", "s.New(p.Option())", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
 		{"factory-option", "s.New(s.WithHTTPAdapter(p.NewFactory()))", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
-		{"factory", "s.NewWithHTTPAdapter(p.NewFactory())", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
+		{"platform-native", "p.New(p.WithEcho(func(*echo.Echo) {}))", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
+		{"option-native", "s.New(p.Option(p.WithEcho(func(*echo.Echo) {})))", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
+		{"factory-native", "s.New(s.WithHTTPAdapter(p.NewFactory(p.WithEcho(func(*echo.Echo) {}))))", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
+		{"unknown-platform-option", "p.New(customOption())", "boot.Options{HTTP:&boot.HTTPOptions{}}", "HTTP_ADAPTER_UNRESOLVED"},
+		{"unknown-factory-option", "s.New(s.WithHTTPAdapter(p.NewFactory(customOption())))", "boot.Options{HTTP:&boot.HTTPOptions{}}", "HTTP_ADAPTER_UNRESOLVED"},
+		{"expanded-options", "p.New(options...)", "boot.Options{HTTP:&boot.HTTPOptions{}}", "HTTP_ADAPTER_UNRESOLVED"},
+		{"removed-factory", "s.NewWithHTTPAdapter(p.NewFactory())", "boot.Options{HTTP:&boot.HTTPOptions{}}", "HTTP_ADAPTER_API_REMOVED"},
 		{"missing", "s.New()", "boot.Options{HTTP:&boot.HTTPOptions{}}", "HTTP_ADAPTER_MISSING"},
 		{"unknown-factory", "s.NewWithHTTPAdapter(customFactory())", "boot.Options{HTTP:&boot.HTTPOptions{}}", "HTTP_ADAPTER_UNRESOLVED"},
 		{"unknown-option", "s.New(customOption())", "boot.Options{HTTP:&boot.HTTPOptions{}}", "HTTP_ADAPTER_UNRESOLVED"},
@@ -110,7 +116,7 @@ func TestPlatformCompositionFormsAndAdapterDiagnostics(t *testing.T) {
 			}
 			path := "internal/application/application.go"
 			source := `package application
-import (s "github.com/NARUBROWN/spine"; p "github.com/NARUBROWN/spine-echo-platform"; "github.com/NARUBROWN/spine/pkg/boot")
+import (s "github.com/NARUBROWN/spine"; p "github.com/NARUBROWN/spine-echo-platform"; "github.com/NARUBROWN/spine/pkg/boot"; "github.com/labstack/echo/v5")
 func BuildApplication() (s.App, boot.Options, error) { app := ` + scenario.expression + `; return app, ` + scenario.options + `, nil }
 `
 			writeE2EFile(t, path, source)

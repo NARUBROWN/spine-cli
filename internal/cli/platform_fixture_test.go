@@ -10,7 +10,9 @@ import (
  "testing"
  "time"
  "github.com/gorilla/websocket"
- "github.com/NARUBROWN/spine"
+ platform "github.com/NARUBROWN/spine-echo-platform"
+ "github.com/NARUBROWN/spine/pkg/httpx"
+ "github.com/labstack/echo/v5"
  "github.com/NARUBROWN/spine/pkg/ws"
 )
 type platformSocket struct{}
@@ -59,12 +61,19 @@ func TestPlatformWebSocketAndPort(t *testing.T) {
  if err != nil { t.Fatalf("shutdown left listener open: %v", err) }
  rebound.Close()
 }
+type preparedHealthController struct{}
+func (*preparedHealthController) Get() httpx.Response[map[string]string] { return httpx.Response[map[string]string]{Body:map[string]string{"status":"ok"}} }
 func TestPreparedHandlerAndExternalListenerOwnership(t *testing.T) {
- app, options, err := BuildApplication()
+ _, options, err := BuildApplication()
  if err != nil { t.Fatal(err) }
  hookCalled := false
- app.Transport(func(any) { hookCalled = true })
- prepared, err := spine.Prepare(context.Background(), app, options)
+ app := platform.New(platform.WithEcho(func(e *echo.Echo) {
+  hookCalled = true
+  e.GET("/native",func(c *echo.Context) error { return c.String(200,"native") })
+ }))
+ app.Constructor(func() *preparedHealthController { return &preparedHealthController{} })
+ app.Route("GET","/health",(*preparedHealthController).Get)
+ prepared, err := app.Prepare(context.Background(), options)
  if err != nil { t.Fatal(err) }
  ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
  defer cancel()
@@ -73,6 +82,9 @@ func TestPreparedHandlerAndExternalListenerOwnership(t *testing.T) {
  response := httptest.NewRecorder()
  prepared.Handler().ServeHTTP(response, httptest.NewRequest("GET", "/health", nil))
  if response.Code != 200 { t.Fatalf("prepared handler status %d", response.Code) }
+ native := httptest.NewRecorder()
+ prepared.Handler().ServeHTTP(native,httptest.NewRequest("GET","/native",nil))
+ if native.Code != 200 || native.Body.String()!="native" { t.Fatalf("native route status %d body %q",native.Code,native.Body.String()) }
  server := httptest.NewServer(prepared.Handler())
  defer server.Close()
  if err := prepared.Close(ctx); err != nil { t.Fatal(err) }

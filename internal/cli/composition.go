@@ -36,7 +36,7 @@ func applicationAssignment(statement ast.Stmt, file *ast.File) (string, bool) {
 
 func adapterSelection(expression ast.Expr, imports map[string]string) string {
 	if call, ok := importedCall(expression, imports, echoPlatformPath, "New"); ok {
-		if len(call.Args) == 0 {
+		if !call.Ellipsis.IsValid() && echoOptions(call.Args, imports) {
 			return "echo"
 		}
 		return "unresolved"
@@ -48,12 +48,12 @@ func adapterSelection(expression ast.Expr, imports map[string]string) string {
 		return "unresolved"
 	}
 	call, ok := importedCall(expression, imports, spineImportPath, "New")
-	if !ok {
+	if !ok || call.Ellipsis.IsValid() {
 		return "unresolved"
 	}
 	selection := "missing"
 	for _, argument := range call.Args {
-		if option, ok := importedCall(argument, imports, echoPlatformPath, "Option"); ok && len(option.Args) == 0 {
+		if option, ok := importedCall(argument, imports, echoPlatformPath, "Option"); ok && !option.Ellipsis.IsValid() && echoOptions(option.Args, imports) {
 			selection = "echo"
 			continue
 		}
@@ -69,5 +69,17 @@ func adapterSelection(expression ast.Expr, imports map[string]string) string {
 
 func echoFactory(expression ast.Expr, imports map[string]string) bool {
 	call, ok := importedCall(expression, imports, echoPlatformPath, "NewFactory")
-	return ok && len(call.Args) == 0
+	return ok && !call.Ellipsis.IsValid() && echoOptions(call.Args, imports)
+}
+
+// WithEcho는 Echo 설정만 추가하므로 알려진 옵션의 인자나 콜백은 실행하지 않습니다.
+// 임의 옵션과 가변 인자 목록은 기존과 같이 미해결로 남깁니다.
+func echoOptions(arguments []ast.Expr, imports map[string]string) bool {
+	for _, argument := range arguments {
+		option, ok := importedCall(argument, imports, echoPlatformPath, "WithEcho")
+		if !ok || len(option.Args) != 1 || option.Ellipsis.IsValid() {
+			return false
+		}
+	}
+	return true
 }
