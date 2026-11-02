@@ -11,18 +11,18 @@ import (
 func TestLayeredRejectsInactiveDependencyProviders(t *testing.T) {
 	layeredProject(t)
 	layeredGenerate(t, "repository", "reader", "--no-register")
-	writeE2EFile(t, "database/repository/reader_repository.go", `package repository
+	writeE2EFile(t, "src/repository/reader_repository.go", `package repository
 type Database struct{}
 func NewDatabase() *Database { return &Database{} }
 type ReaderRepository struct{}
 func NewReaderRepository(db *Database) *ReaderRepository { return &ReaderRepository{} }
 `)
 	composition, _ := os.ReadFile("internal/application/application.go")
-	composition = bytes.Replace(composition, []byte("import ("), []byte("import (\nrepository \"example.com/todo/database/repository\""), 1)
+	composition = bytes.Replace(composition, []byte("import ("), []byte("import (\nrepository \"example.com/todo/src/repository\""), 1)
 	composition = bytes.Replace(composition, []byte("app := platform.New()"), []byte("app := platform.New()\nif \"disabled\" == \"enabled\" { app.Constructor(repository.NewDatabase) }"), 1)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	var out, errOut bytes.Buffer
-	if code := runGenerate([]string{"service", "reader", "--depends", "database/repository:ReaderRepository"}, &out, &errOut); code == 0 {
+	if code := runGenerate([]string{"service", "reader", "--depends", "src/repository:ReaderRepository"}, &out, &errOut); code == 0 {
 		t.Fatal("inactive provider satisfied a required dependency")
 	}
 	after, _ := os.ReadFile("internal/application/application.go")
@@ -67,11 +67,11 @@ func TestLayeredRejectsSurplusPathParameters(t *testing.T) {
 func TestLayeredRegistrationConvertsBlankImportsToNamedImports(t *testing.T) {
 	layeredProject(t)
 	composition, _ := os.ReadFile("internal/application/application.go")
-	composition = bytes.Replace(composition, []byte("import ("), []byte("import (\n_ \"example.com/todo/database/repository\""), 1)
+	composition = bytes.Replace(composition, []byte("import ("), []byte("import (\n_ \"example.com/todo/src/repository\""), 1)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	layeredGenerate(t, "repository", "reader")
 	after, _ := os.ReadFile("internal/application/application.go")
-	if bytes.Contains(after, []byte("_.NewReaderRepository")) || bytes.Contains(after, []byte("_ \"example.com/todo/database/repository\"")) {
+	if bytes.Contains(after, []byte("_.NewReaderRepository")) || bytes.Contains(after, []byte("_ \"example.com/todo/src/repository\"")) {
 		t.Fatalf("blank import was used as a package name: %s", after)
 	}
 }
@@ -140,7 +140,7 @@ func TestLayeredGenerationActivatesAnInactiveConstructor(t *testing.T) {
 	layeredProject(t)
 	layeredGenerate(t, "repository", "reader", "--no-register")
 	composition, _ := os.ReadFile("internal/application/application.go")
-	composition = bytes.Replace(composition, []byte("import ("), []byte("import (\nrepository \"example.com/todo/database/repository\""), 1)
+	composition = bytes.Replace(composition, []byte("import ("), []byte("import (\nrepository \"example.com/todo/src/repository\""), 1)
 	composition = bytes.Replace(composition, []byte("app := platform.New()"), []byte("app := platform.New()\nif \"disabled\" == \"enabled\" { app.Constructor(repository.NewReaderRepository) }"), 1)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	layeredGenerate(t, "repository", "reader")
@@ -149,7 +149,7 @@ func TestLayeredGenerationActivatesAnInactiveConstructor(t *testing.T) {
 		t.Fatal(err, contract.Diagnostics)
 	}
 	for _, constructor := range contract.Constructors {
-		if constructor.Target == "example.com/todo/database/repository.NewReaderRepository" {
+		if constructor.Target == "example.com/todo/src/repository.NewReaderRepository" {
 			return
 		}
 	}

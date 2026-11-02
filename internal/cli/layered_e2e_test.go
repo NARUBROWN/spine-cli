@@ -54,7 +54,7 @@ func TestLayeredGeneratedProjectEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compositionText := strings.Replace(string(composition), "import (", "import (\n_ \"example.com/todo/database/repository/account\"", 1)
+	compositionText := strings.Replace(string(composition), "import (", "import (\n_ \"example.com/todo/src/repository/account\"", 1)
 	compositionText = strings.Replace(compositionText, "app := platform.New()", "app := platform.New()\nif \"disabled\" == \"enabled\" { app.Route(\"GET\", \"/health\", (*controller.HealthController).Get) }", 1)
 	writeE2EFile(t, compositionPath, compositionText)
 	for _, group := range []string{"account/user", "admin/user"} {
@@ -62,7 +62,7 @@ func TestLayeredGeneratedProjectEndToEnd(t *testing.T) {
 	}
 	apply(project, "g", "domain", "profile", "--field", "id:int64", "--field", "name:string")
 	apply(project, "g", "dto", "account/create-user-request", "--field", "name:string")
-	apply(project, "g", "service", "report", "--depends", "database/repository/account:UserRepository", "--depends", "database/repository/admin:UserRepository")
+	apply(project, "g", "service", "report", "--depends", "src/repository/account:UserRepository", "--depends", "src/repository/admin:UserRepository")
 	apply(project, "g", "controller", "admin/report", "--depends", "src/service:ReportService")
 	controller := filepath.Join(project, "src/controller/admin/report_controller.go")
 	source, err := os.ReadFile(controller)
@@ -88,7 +88,7 @@ import (
 	for _, group := range []string{"commerce/account/user", "identity/account/user"} {
 		apply(project, "g", "repository", group)
 	}
-	apply(project, "g", "service", "audit", "--depends", "database/repository/commerce/account:UserRepository", "--depends", "database/repository/identity/account:UserRepository")
+	apply(project, "g", "service", "audit", "--depends", "src/repository/commerce/account:UserRepository", "--depends", "src/repository/identity/account:UserRepository")
 	for _, group := range []string{"account", "admin"} {
 		apply(project, "g", "consumer", group+"/order", "--topic", group+".order.created", "--field", "order_id:int64")
 		path := filepath.Join(project, "src/consumer", group, "order/order_handler.go")

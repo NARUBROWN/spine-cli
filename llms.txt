@@ -78,6 +78,32 @@ schema/capabilities 확인
 있다. CLI는 지정한 디렉터리로 이동해 명령을 수행한 뒤 호출자의 원래 working directory로
 복귀한다.
 
+## 프로젝트 의존성 갱신
+
+`spine update`는 프로젝트 의존성 갱신이다. CLI self-update나 소스 마이그레이션이 아니다.
+현재 CLI에 포함된 Echo 레시피의 Spine, Echo 플랫폼과 Echo 버전을 함께 선택하며,
+최신 버전 문자열을 개별적으로 조회해 섞거나 현재 버전을 낮추지 않는다.
+
+```sh
+spine update --root <project-directory> --dry-run --json
+spine update --root <project-directory> --if-match <base_hash> --json
+```
+
+- 임시 복사본에 소스와 embed 자산을 보존하고 go.mod 요구 버전을 갱신한다.
+- go mod tidy, 선택 모듈 조합, 정적 계약, spine.toml entrypoint 빌드를 검사한다.
+- 애플리케이션 초기화, 테스트와 listener를 실행하지 않는다.
+- 원본 입력과 관련 등록 환경값을 다시 해시한 뒤 go.mod/go.sum만 반영한다.
+- 실패 시 원본을 유지하며, 게시 중 실패는 공통 파일 계획의 rollback으로 복원한다.
+- result의 previous_requirements는 갱신 전 go.mod의 require이고, selected_modules는 갱신 후 Go가 선택한 버전이다.
+- result의 changes/diff/base_hash/inputs_hash를 검토한다. update_available은 파일 변경 여부이고, updated는 실제 반영 여부다.
+- result의 stages/failed_stage/cause도 확인한다. 평문과 JSON 모두 사용법 2, 전제조건/취소 3, 충돌 4, 검증 실패 5를 사용한다.
+- 단일 모듈만 지원한다. workspace, 사용자 지정 GOFLAGS, vendor, local replace, symlink 입력은 먼저 해소한다.
+- dry-run은 프로젝트를 반영하지 않지만 네트워크와 Go 캐시를 사용할 수 있다.
+- 현재 개발 브랜치 기능이며 v0.2.0 릴리스에는 포함되지 않는다.
+
+갱신 성공은 정적 계약과 컴파일 증거다. 이후 contract check/verify와 필요한 실제 HTTP 및
+외부 인프라 검증을 별도로 수행한다.
+
 ## 4. 기계 판독 결과 프로토콜
 
 ### 4.1 JSON envelope
@@ -125,6 +151,7 @@ Agent는 다음 순서로 해석한다.
 ### 4.2 JSON 지원 명령
 
 - `new`
+- `update`
 - `generate`, `g`
 - `inspect`
 - `explain`
@@ -315,7 +342,7 @@ spine generate|g <domain|dto|repository|service|controller|resource|route|consum
 | 역할 | 기본 경로 | 생성 내용 |
 | --- | --- | --- |
 | domain | `database/domain/` | 명시한 필드만 있는 타입 |
-| repository | `database/repository/` | 구조체와 생성자 |
+| repository | `src/repository/` | 구조체와 생성자 |
 | DTO | `src/dto/` | JSON 태그가 있는 타입 |
 | service | `src/service/` | 구조체와 생성자 |
 | controller | `src/controller/` | 구조체와 생성자 |
@@ -345,7 +372,7 @@ domain은 태그를 추가하지 않고 DTO는 명시한 필드에 JSON 태그�
 
 ```sh
 spine g repository account/user
-spine g service user --depends database/repository/account:UserRepository
+spine g service user --depends src/repository/account:UserRepository
 spine g controller admin/user --depends src/service:UserService
 ```
 
@@ -390,7 +417,7 @@ spine g resource account/user
 
 ```text
 database/domain/account/user.go
-database/repository/account/user_repository.go
+src/repository/account/user_repository.go
 src/service/account/user_service.go
 src/controller/account/user_controller.go
 ```

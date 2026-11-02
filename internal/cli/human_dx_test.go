@@ -14,7 +14,7 @@ func TestLayeredCompletionShowsActualPathsReferencesAndRegistration(t *testing.T
 	if code := runGenerate([]string{"repository", "warehouse/catalog"}, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
-	for _, fragment := range []string{"Created database/repository/warehouse/catalog_repository.go", "Type reference: database/repository/warehouse:CatalogRepository", "Registration (constructor): database/repository/warehouse:NewCatalogRepository -> internal/application/application.go"} {
+	for _, fragment := range []string{"Created src/repository/warehouse/catalog_repository.go", "Type reference: src/repository/warehouse:CatalogRepository", "Registration (constructor): src/repository/warehouse:NewCatalogRepository -> internal/application/application.go"} {
 		if !strings.Contains(out.String(), fragment) {
 			t.Fatalf("completion lacks %q: %s", fragment, out.String())
 		}
@@ -32,7 +32,7 @@ func TestLayeredCompletionShowsActualPathsReferencesAndRegistration(t *testing.T
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Types) != 1 || result.Types[0].Reference != "database/repository/warehouse:CatalogRepository" || len(result.Registrations) != 1 {
+	if len(result.Types) != 1 || result.Types[0].Reference != "src/repository/warehouse:CatalogRepository" || len(result.Registrations) != 1 {
 		t.Fatalf("JSON details missing: %s", out.String())
 	}
 	for _, change := range result.Changes {

@@ -13,10 +13,10 @@ const version = "0.2.0"
 func Run(args []string, out, errOut io.Writer) int {
 	normalizedArgs, jsonOutput := normalizeJSONArguments(args)
 	commandArgs, root, rootErr := extractRootArgument(normalizedArgs)
-	newCommand := commandWithoutRoot(normalizedArgs) == "new"
+	transactionCommand := commandWithoutRoot(normalizedArgs) == "new" || commandWithoutRoot(normalizedArgs) == "update"
 	if rootErr != nil {
 		code := 1
-		if newCommand {
+		if transactionCommand {
 			code = 2
 		}
 		if jsonOutput {
@@ -24,6 +24,16 @@ func Run(args []string, out, errOut io.Writer) int {
 		}
 		fmt.Fprintln(errOut, rootErr)
 		return code
+	}
+	if len(commandArgs) > 0 && commandArgs[0] == "update" {
+		var help bytes.Buffer
+		if updateHelp(commandArgs[1:], &help) {
+			if jsonOutput {
+				return writeProtocolResult(commandArgs, 0, help.Bytes(), "", out, errOut)
+			}
+			fmt.Fprint(out, help.String())
+			return 0
+		}
 	}
 	if len(commandArgs) > 0 && (commandArgs[0] == "new" || commandArgs[0] == "g" || commandArgs[0] == "generate") {
 		command := commandArgs[0]
@@ -48,7 +58,7 @@ func Run(args []string, out, errOut io.Writer) int {
 		}
 		if err := os.Chdir(root); err != nil {
 			code := 1
-			if newCommand {
+			if transactionCommand {
 				code = 3
 			}
 			if jsonOutput {
@@ -102,6 +112,8 @@ func runCommand(args []string, out, errOut io.Writer) int {
 		return 0
 	case "new":
 		return runNew(args[1:], out, errOut)
+	case "update":
+		return runUpdate(args[1:], out, errOut)
 	case "generate", "g":
 		return runGenerate(args[1:], out, errOut)
 	case "dev":
@@ -144,6 +156,7 @@ func printHelp(w io.Writer) {
 
 Usage:
   spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
+  spine update [--dry-run] [--if-match <hash>] [--json]
   spine g domain <[group/]name> [--field name:type]
   spine g dto <[group/]name> [--field name:type]
   spine g repository <[group/]name>
@@ -169,6 +182,7 @@ Aliases:
 Examples:
   spine new todo-api --module github.com/acme/todo-api
   cd todo-api
+  spine update --dry-run
   spine g resource users
   spine g consumer orders --topic order.created --field order_id:int64
   spine g websocket chat --path /ws/chat --field message:string

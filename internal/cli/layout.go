@@ -33,7 +33,7 @@ func componentRoles() []generationRole {
 	return []generationRole{
 		{"domain", "database/domain", "", false},
 		{"dto", "src/dto", "", false},
-		{"repository", "database/repository", "Repository", true},
+		{"repository", "src/repository", "Repository", true},
 		{"service", "src/service", "Service", true},
 		{"controller", "src/controller", "Controller", true},
 	}

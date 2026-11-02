@@ -82,7 +82,7 @@ func generatorRegisters(kind string) bool {
 
 func printGeneratorGuide(kind string, out io.Writer) {
 	if kind == "" {
-		fmt.Fprintln(out, "\nlayered-v1 기본 경로: domain=database/domain, repository=database/repository, dto=src/dto, service=src/service, controller=src/controller, route=src/route/route.go.\n그룹은 역할마다 독립적으로 선택합니다. g <kind> --help에서 예제를 확인하세요.\n\n예:\n  spine g domain account/user --field id:int64\n  spine g repository account/user\n  spine g route get-user --method GET --path /users/:id --handler src/controller/account:UserController.Get")
+		fmt.Fprintln(out, "\nlayered-v1 기본 경로: domain=database/domain, repository=src/repository, dto=src/dto, service=src/service, controller=src/controller, route=src/route/route.go.\n그룹은 역할마다 독립적으로 선택합니다. g <kind> --help에서 예제를 확인하세요.\n\n예:\n  spine g domain account/user --field id:int64\n  spine g repository account/user\n  spine g route get-user --method GET --path /users/:id --handler src/controller/account:UserController.Get")
 		return
 	}
 	examples := []string{}
@@ -103,7 +103,7 @@ func printGeneratorGuide(kind string, out io.Writer) {
 	case "repository":
 		examples = []string{"spine g repository user", "spine g repository account/user"}
 	case "service":
-		examples = []string{"spine g service user", "spine g service account/user --depends database/repository/account:UserRepository"}
+		examples = []string{"spine g service user", "spine g service account/user --depends src/repository/account:UserRepository"}
 	case "controller":
 		fmt.Fprintln(out, "controller는 구조체와 생성자를 만듭니다. 메서드를 작성한 뒤 g route로 HTTP 경로를 등록합니다.\n성공 응답은 httpx.Response[T], httpx.Binary, httpx.Redirect를 사용하고 실패는 error로 반환합니다.")
 		examples = []string{"spine g controller user", "spine g controller admin/user --depends src/service/account:UserService"}

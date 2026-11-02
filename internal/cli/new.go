@@ -91,14 +91,23 @@ Minimum Go version: 1.25.5.
     spine dev
     curl http://localhost:8080/health
 
+## Update dependencies
+
+    spine update --dry-run
+    spine update
+
+Spine과 Echo 플랫폼을 현재 CLI의 검증된 버전 조합으로 갱신합니다.
+임시 복사본에서 정적 계약과 빌드를 검사한 뒤 go.mod와 go.sum을 반영합니다.
+업무 소스와 CLI 실행 파일은 이 명령으로 갱신하지 않습니다.
+
 ## Generate a resource
 
     spine g domain account/user
     spine g repository account/user
-    spine g service user --depends database/repository/account:UserRepository
+    spine g service user --depends src/repository/account:UserRepository
     spine g controller admin/user --depends src/service:UserService
 
-domain은 database/domain, repository는 database/repository에 생성합니다.
+domain은 database/domain, repository는 src/repository에 생성합니다.
 DTO, service, controller는 각각 src/dto, src/service, src/controller에 생성합니다.
 이름 앞에 선택적인 하위 경로를 붙일 수 있으며, 각 역할에서 독립적으로 그룹을 정합니다.
 controller 생성만으로 HTTP 경로가 등록되지는 않습니다.
@@ -115,6 +124,9 @@ const legacyProjectReadme = `# Spine application
 
     spine dev
     curl http://localhost:8080/health
+
+의존성을 갱신하려면 spine update --dry-run으로 변경을 확인한 뒤 spine update를 실행합니다.
+현재 CLI의 Echo 레시피를 사용하며, 시작 코드의 API 변경은 직접 적용해야 합니다.
 
 기존 생성기 규칙에 따라 resource는 src/<name>에 생성하고 GET 경로를 등록합니다.
 개별 구성 요소의 --depends는 같은 패키지의 파일 이름을 받습니다.
