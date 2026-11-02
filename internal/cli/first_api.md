@@ -3,7 +3,7 @@
 이 예제는 이름과 수량을 검사하고 JSON을 반환하는 `POST /products`를 만듭니다. 데이터 저장은 포함하지 않습니다. 기본 `layered-v1` 앱에서 실행합니다.
 
 ```sh
-spine-cli new shop-api --module example.com/shop
+spine new shop-api --module example.com/shop
 cd shop-api
 ```
 
@@ -14,9 +14,9 @@ cd shop-api
 프로젝트 루트에서 실행합니다. 직접 적용하는 예제이며, 변경을 먼저 보려면 같은 명령에 `--dry-run`을 붙입니다.
 
 ```sh
-spine-cli g dto api/create-product-request --field name:string --field quantity:int
-spine-cli g dto api/product-response --field name:string --field quantity:int
-spine-cli g controller api/product
+spine g dto api/create-product-request --field name:string --field quantity:int
+spine g dto api/product-response --field name:string --field quantity:int
+spine g controller api/product
 ```
 
 요청과 응답 DTO는 `src/dto/api/`에, controller는 `src/controller/api/product_controller.go`에 생성됩니다. 생성자는 application에 등록됩니다.
@@ -60,9 +60,9 @@ func (*ProductController) Create(req *dto.CreateProductRequest) (httpx.Response[
 
 ```sh
 gofmt -w src/controller/api/product_controller.go
-spine-cli g route create-product --method POST --path /products --handler src/controller/api:ProductController.Create
-spine-cli contract check
-spine-cli verify
+spine g route create-product --method POST --path /products --handler src/controller/api:ProductController.Create
+spine contract check
+spine verify
 ```
 
 route는 `src/route/route.go`에 추가됩니다. contract check는 정적 계약을 검사하고 verify는 정적 검사와 Go 검증을 실행합니다. 실제 HTTP 요청은 다음 단계에서 별도로 확인합니다.
@@ -70,7 +70,7 @@ route는 `src/route/route.go`에 추가됩니다. contract check는 정적 계�
 ## 4. 서버 실행과 응답 확인
 
 ```sh
-spine-cli dev
+spine dev
 ```
 
 다른 터미널에서 실행합니다. `spine.toml`의 port를 바꿨다면 아래 주소도 바꿉니다.

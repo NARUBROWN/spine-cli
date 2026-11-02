@@ -67,7 +67,7 @@ func TestRoleHelpExplainsPathsExamplesAndSupportedOptions(t *testing.T) {
 		if handled, code := generationHelp("generate", []string{kind, "--help"}, &out, &errOut); !handled || code != 0 {
 			t.Fatal(errOut.String())
 		}
-		if !strings.Contains(out.String(), "spine-cli g "+kind+" ") || !strings.Contains(out.String(), "예:") {
+		if !strings.Contains(out.String(), "spine g "+kind+" ") || !strings.Contains(out.String(), "예:") {
 			t.Fatal(out.String())
 		}
 		if (kind == "domain" || kind == "dto") && strings.Contains(out.String(), "--register") {

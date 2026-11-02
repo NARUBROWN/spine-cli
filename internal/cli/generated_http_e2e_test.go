@@ -10,8 +10,8 @@ import (
 )
 
 func TestGeneratedProjectsHandleHTTPInputErrors(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "spine-cli")
-	build := exec.Command("go", "build", "-o", binary, ".")
+	binary := filepath.Join(t.TempDir(), "spine")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/spine")
 	build.Dir = filepath.Join("..", "..")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v %s", err, output)

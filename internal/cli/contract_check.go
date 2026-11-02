@@ -93,7 +93,7 @@ func buildContractCheckReport(contract applicationContract, warningsAsErrors boo
 			diagnostic.Hint = "Make the registration explicit in the composition root and run the contract check again."
 		}
 		if len(diagnostic.NextActions) == 0 {
-			diagnostic.NextActions = []nextAction{{Command: "spine-cli inspect --json", Reason: "Inspect the complete static evidence and source location", Safe: true}, {Command: "spine-cli contract check --json", Reason: "Revalidate after correcting the source", Safe: true}}
+			diagnostic.NextActions = []nextAction{{Command: "spine inspect --json", Reason: "Inspect the complete static evidence and source location", Safe: true}, {Command: "spine contract check --json", Reason: "Revalidate after correcting the source", Safe: true}}
 		}
 		if strings.Contains(diagnostic.Code, "NOT_IMPLEMENTED") {
 			diagnostic.Hint = "Implement the generated handler and remove its explicit not-implemented sentinel."

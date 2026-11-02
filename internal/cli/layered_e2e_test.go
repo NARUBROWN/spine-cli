@@ -16,12 +16,12 @@ func TestLayeredGeneratedProjectEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := "spine-cli"
+	name := "spine"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
 	binary := filepath.Join(t.TempDir(), name)
-	build := exec.Command("go", "build", "-o", binary, ".")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/spine")
 	build.Dir = repository
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("CLI build: %v\n%s", err, output)

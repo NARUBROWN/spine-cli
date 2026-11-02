@@ -9,15 +9,15 @@
 
 기존 앱이나 초기 CLI 생성 프로젝트를 현재 버전에 맞출 때는
 [버전별 마이그레이션 가이드](./migration/)에서 대상 버전에 맞는 문서를 먼저 읽는다.
-`spine-cli update`는 의존성만 갱신하므로 설정·소스·레이아웃 변경은 가이드에 따라 별도로 수행한다.
+`spine update`는 의존성만 갱신하므로 설정·소스·레이아웃 변경은 가이드에 따라 별도로 수행한다.
 
 ## 1. 식별 정보와 기준 버전
 
 - 프로젝트와 제품 이름: `spine-cli`
-- 루트 경로로 설치되는 실행 파일과 명령: `spine-cli`
-- 선택적 호환 진입점 `cmd/spine`으로 설치되는 실행 파일과 명령: `spine`
-- 현재 CLI 버전: `0.4.0`
-- 기본 명령 `spine-cli version` 출력: `spine-cli 0.4.0`
+- 공식 설치 진입점: `github.com/NARUBROWN/spine-cli/cmd/spine`
+- 실행 파일과 호출 명령: `spine`
+- 현재 소스의 CLI 버전: `0.4.1`
+- `spine version` 출력: `spine-cli 0.4.1`
 - Go module: `github.com/NARUBROWN/spine-cli`
 - 이 저장소와 생성 프로젝트의 Go 호환 기준: `1.25.5`
 - 이번 로컬 검증 Go 버전: `1.26.0`
@@ -29,15 +29,15 @@
 - 라이선스: MIT
 
 버전을 추측하지 않는다. 현재 checkout에서는 `internal/cli/cli.go`의 `version`, `go.mod`,
-`internal/cli/new.go`의 project template을 함께 확인한다. 일반 설치 명령은 `go install github.com/NARUBROWN/spine-cli@latest`를 사용한다.
+`internal/cli/new.go`의 project template을 함께 확인한다. 일반 설치 명령은 `go install github.com/NARUBROWN/spine-cli/cmd/spine@latest`를 사용한다.
 CI와 버전별 마이그레이션 문서는 재현을 위해 명시한 버전을 유지한다. 설치한 CLI의 실제 버전과
 선택된 레시피는 version, schema/capabilities와 생성된 go.mod로 확인한다.
 
 ## 2. Agent가 반드시 지킬 규칙
 
-1. 명령과 옵션을 기억에 의존하지 말고 먼저 `spine-cli schema --json`으로 발견한다.
-2. 구현 여부와 한계는 `spine-cli capabilities --json`으로 확인한다.
-3. 프로젝트 작업은 `spine-cli context --root <project-directory> --json`으로 시작한다.
+1. 명령과 옵션을 기억에 의존하지 말고 먼저 `spine schema --json`으로 발견한다.
+2. 구현 여부와 한계는 `spine capabilities --json`으로 확인한다.
+3. 프로젝트 작업은 `spine context --root <project-directory> --json`으로 시작한다.
 4. JSON 응답은 항상 바깥 `spine.cli-result/v1` envelope를 먼저 읽고 실제 payload는
    `result`에서 꺼낸다.
 5. `inspect`의 성공을 검증 통과로 해석하지 않는다. `analysis_complete`, diagnostics를 확인하고
@@ -54,9 +54,9 @@ CI와 버전별 마이그레이션 문서는 재현을 위해 명시한 버전�
 ## 3. 권장 시작 순서
 
 ```sh
-spine-cli schema --json
-spine-cli capabilities --json
-spine-cli context --root <project-directory> --json
+spine schema --json
+spine capabilities --json
+spine context --root <project-directory> --json
 ```
 
 `context`는 config, capability, offline doctor, 정적 계약, evidence boundary와 다음 행동을 한 번에
@@ -86,13 +86,13 @@ schema/capabilities 확인
 
 ## 프로젝트 의존성 갱신
 
-`spine-cli update`는 프로젝트 의존성 갱신이다. CLI self-update나 소스 마이그레이션이 아니다.
+`spine update`는 프로젝트 의존성 갱신이다. CLI self-update나 소스 마이그레이션이 아니다.
 현재 CLI에 포함된 Echo 레시피의 Spine, Echo 플랫폼과 Echo 버전을 함께 선택하며,
 최신 버전 문자열을 개별적으로 조회해 섞거나 현재 버전을 낮추지 않는다.
 
 ```sh
-spine-cli update --root <project-directory> --dry-run --json
-spine-cli update --root <project-directory> --if-match <base_hash> --json
+spine update --root <project-directory> --dry-run --json
+spine update --root <project-directory> --if-match <base_hash> --json
 ```
 
 - 임시 복사본에 소스와 embed 자산을 보존하고 go.mod 요구 버전을 갱신한다.
@@ -185,7 +185,7 @@ Agent는 다음 순서로 해석한다.
 | Code | 의미 | 일반적인 다음 행동 |
 | --- | --- | --- |
 | `0` | 성공 | `result` 처리 |
-| `2` | 사용법 오류 | `spine-cli schema --json`으로 인자·옵션 재확인 |
+| `2` | 사용법 오류 | `spine schema --json`으로 인자·옵션 재확인 |
 | `3` | 사전조건 또는 일반 실행 실패 | config, cwd, 파일, toolchain 확인 |
 | `4` | 기존 파일, generation lock, stale plan 충돌 | 새 dry-run을 만들고 diff 재검토 |
 | `5` | 계약 또는 검증 실패 | `context`, contract diagnostics, stage 결과 확인 |
@@ -275,7 +275,7 @@ layout = "layered-v1"
 ## 7. 새 프로젝트 생성
 
 ```text
-spine-cli new <project>
+spine new <project>
   [--module <module-path>]
   [--layout <layered-v1|legacy>]
   [--platform echo]
@@ -289,10 +289,10 @@ spine-cli new <project>
 `--module` 생략 시 `github.com/your-org/<project>`를 사용한다. 기본 layout은 layered-v1이다.
 `new`는 `platform.New()`로 Echo를 연결하고 고정된 공개 모듈 레시피를 설치한다.
 `go mod tidy`, 선택 버전 확인, 정적 계약 검사와 entrypoint 빌드가 성공하면 새 디렉터리를 게시한다.
-서버, Prepare, 사용자 테스트와 listener는 실행하지 않는다. 기본 생성 후에는 `spine-cli dev`로 실행한다.
+서버, Prepare, 사용자 테스트와 listener는 실행하지 않는다. 기본 생성 후에는 `spine dev`로 실행한다.
 
 `--skip-install`은 플랫폼 코드, go.mod, spine.toml과 기존 프로젝트 파일만 생성한다.
-go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go mod tidy`와 `spine-cli dev`다.
+go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go mod tidy`와 `spine dev`다.
 기본 dry-run은 임시 프로젝트에서 네트워크와 Go 캐시를 사용할 수 있다.
 `--skip-install --dry-run`은 Go 명령 없이 오프라인으로 계획한다. 목적지 파일은 둘 다 변경하지 않는다.
 
@@ -304,7 +304,7 @@ go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go m
 
 기존 생성 파일에 go.sum과 `platform = "echo"` 설정이 추가된다. 기본 health와 역할별 경로,
 `BuildApplication → Validate → Run`, SPINE_PORT는 유지한다. legacy는 health를 composition에 선언한다.
-생성 README는 기본 실행을 spine-cli dev부터 안내하고, skip-install에만 수동 tidy를 안내한다. layered-v1 README에는 DTO부터 핸들러, 오류 응답과 route/curl까지 이어지는 첫 API 예제가 포함된다.
+생성 README는 기본 실행을 spine dev부터 안내하고, skip-install에만 수동 tidy를 안내한다. layered-v1 README에는 DTO부터 핸들러, 오류 응답과 route/curl까지 이어지는 첫 API 예제가 포함된다.
 JSON `result`의 project, module, layout, directory, files, dry_run, base_hash, changes와 diff를 유지하며
 platform, recipe, stability, install_skipped, selected_modules, stages와 execution_boundary를 추가한다.
 실패 시 failed_stage와 cause를 반환한다. new의 일반/JSON 종료코드는 2 사용법, 3 전제조건 및 다운로드,
@@ -322,7 +322,7 @@ HTTP 성공 반환은 httpx.Response[T], httpx.Binary, httpx.Redirect 및 포인
 이 절의 기본 규칙은 `layout = "layered-v1"`이다. legacy 차이는 8.6절을 참고한다.
 
 ```text
-spine-cli generate|g <domain|dto|repository|service|controller|resource|route|consumer|websocket> <[group/]name>
+spine generate|g <domain|dto|repository|service|controller|resource|route|consumer|websocket> <[group/]name>
   [--register|--no-register]
   [--dry-run]
   [--force]
@@ -355,15 +355,15 @@ spine-cli generate|g <domain|dto|repository|service|controller|resource|route|co
 | route | `src/route/route.go` | HTTP 등록 |
 | application | `internal/application/` | 생성자와 Register 호출 연결 |
 
-`spine-cli schema --json`의 `generation_roles`와 `spine-cli context --json`의 `generation_roles`는
+`spine schema --json`의 `generation_roles`와 `spine context --json`의 `generation_roles`는
 같은 정의를 사용한다. context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
 `role`, `group`, `package`, `type`으로 현재 구성 요소를 찾는다. `package`는 모듈 경로까지 포함한다.
 route와 application은 고정 연결 위치이며 composition은 설정의 `composition`을 따른다.
 
 ```sh
-spine-cli g domain user
-spine-cli g domain account/user --field id:int64 --field name:string
-spine-cli g dto commerce/account/create-user-request --field name:string
+spine g domain user
+spine g domain account/user --field id:int64 --field name:string
+spine g dto commerce/account/create-user-request --field name:string
 ```
 
 첫 명령은 `database/domain/user.go`, 두 번째는 `database/domain/account/user.go`를 생성한다.
@@ -377,9 +377,9 @@ domain은 태그를 추가하지 않고 DTO는 명시한 필드에 JSON 태그�
 ### 8.2 repository, service, controller와 의존성
 
 ```sh
-spine-cli g repository account/user
-spine-cli g service user --depends src/repository/account:UserRepository
-spine-cli g controller admin/user --depends src/service:UserService
+spine g repository account/user
+spine g service user --depends src/repository/account:UserRepository
+spine g controller admin/user --depends src/service:UserService
 ```
 
 `--depends`는 `<모듈 기준 패키지 경로>:<공개 타입>`이다. 여러 의존성은 옵션을 반복한다.
@@ -399,7 +399,7 @@ CRUD를 추가하지 않는다. controller에 임의의 HTTP 메서드나 경로
 핸들러를 먼저 구현한 뒤 메서드와 경로와 실제 메서드 참조를 지정한다.
 
 ```sh
-spine-cli g route get-user --method GET --path /users/:id \
+spine g route get-user --method GET --path /users/:id \
   --handler src/controller/admin:UserController.Get
 ```
 
@@ -416,7 +416,7 @@ spine-cli g route get-user --method GET --path /users/:id \
 ### 8.4 resource
 
 ```sh
-spine-cli g resource account/user
+spine g resource account/user
 ```
 
 같은 그룹을 전달해 domain, repository, service, controller의 개별 계획을 조합한다.
@@ -434,8 +434,8 @@ DI에 등록하지 않는다. DTO와 HTTP 경로는 명시적으로 추가한다
 ### 8.5 consumer와 WebSocket
 
 ```sh
-spine-cli g consumer account/order --topic order.created --field order_id:int64
-spine-cli g websocket chat --path /ws/chat --field message:string
+spine g consumer account/order --topic order.created --field order_id:int64
+spine g websocket chat --path /ws/chat --field message:string
 ```
 
 각각 `src/consumer/account/order/`, `src/websocket/chat/`에 typed payload와 handler와
@@ -537,7 +537,7 @@ func BuildApplication() (spine.App, boot.Options, error) {
 
 ## 11. 정적 실행 계약
 
-`spine-cli inspect`는 `spine.contract/v1alpha2`, `analysis_mode:"static-source"` 계약을 만든다.
+`spine inspect`는 `spine.contract/v1alpha2`, `analysis_mode:"static-source"` 계약을 만든다.
 `http_adapter`는 HTTP 활성 상태, provider, selection, canonical_factory, expected_contract,
 selected_modules, required_capabilities, resolution과 source를 제공한다. 별칭을 포함한 플랫폼 New,
 Option과 WithHTTPAdapter 구성을 인식한다. platform.WithEcho 옵션은 factory 선택으로 인식하지만 콜백을 실행하거나 native 경로를 계약에 포함하지 않는다.
@@ -581,8 +581,8 @@ exit 0과 envelope `ok:true`일 수 있다. 다음을 반드시 별도로 확인
 
 실제 gate:
 
-- `spine-cli contract check [--warnings-as-errors]`
-- `spine-cli verify [--warnings-as-errors]`
+- `spine contract check [--warnings-as-errors]`
+- `spine verify [--warnings-as-errors]`
 
 `analysis_complete`는 error diagnostic이 하나라도 있으면 `false`다. warning만 있으면 기본
 completeness는 유지되지만 `--warnings-as-errors`에서는 validation이 실패한다.
@@ -674,10 +674,10 @@ Message 정적 binding:
 ### 12.1 inspect와 explain
 
 ```sh
-spine-cli inspect --root <project-directory> --json
-spine-cli explain http GET /orders/:id --root <project-directory> --json
-spine-cli explain consumer order.created --root <project-directory> --json
-spine-cli explain websocket /ws/orders --root <project-directory> --json
+spine inspect --root <project-directory> --json
+spine explain http GET /orders/:id --root <project-directory> --json
+spine explain consumer order.created --root <project-directory> --json
+spine explain websocket /ws/orders --root <project-directory> --json
 ```
 
 HTTP explain 순서:
@@ -695,8 +695,8 @@ HTTP explain 순서:
 ### 12.2 contract check와 verify
 
 ```sh
-spine-cli contract check --warnings-as-errors --json
-spine-cli verify --warnings-as-errors --json
+spine contract check --warnings-as-errors --json
+spine verify --warnings-as-errors --json
 ```
 
 `contract check`는 completeness, error/warning count, diagnostics와 evidence boundary를 반환한다.
@@ -714,12 +714,12 @@ race detector와 `git diff --check`도 포함하지 않는다.
 ### 12.3 snapshot과 semantic diff
 
 ```sh
-spine-cli contract snapshot
-spine-cli contract snapshot --output contracts/api.json
-spine-cli contract snapshot --force
+spine contract snapshot
+spine contract snapshot --output contracts/api.json
+spine contract snapshot --force
 
-spine-cli contract diff
-spine-cli contract diff --against contracts/api.json --json
+spine contract diff
+spine contract diff --against contracts/api.json --json
 ```
 
 - 기본 snapshot path: `spine.contract.json`
@@ -735,8 +735,8 @@ spine-cli contract diff --against contracts/api.json --json
 ### 12.4 OpenAPI와 AsyncAPI export
 
 ```sh
-spine-cli contract export --format openapi --output openapi.json
-spine-cli contract export --format asyncapi --output asyncapi.json
+spine contract export --format openapi --output openapi.json
+spine contract export --format asyncapi --output asyncapi.json
 ```
 
 `--output`을 생략하면 document를 stdout으로 직접 출력할 수 있다. 기존 output file을 교체하려면
@@ -767,7 +767,7 @@ AsyncAPI 3.1 export:
 ### 12.5 partial runtime probe
 
 ```sh
-spine-cli contract probe --root <project-directory> --json
+spine contract probe --root <project-directory> --json
 ```
 
 probe는 다음을 실제 실행한다.
@@ -811,11 +811,11 @@ Database, broker, listener, deployment E2E: not run.
 ```
 
 `doctor`도 `scope:"offline"`이다. Go toolchain, config, module, entrypoint, composition, Spine dependency,
-static contract만 확인한다. `spine-cli doctor --connect`는 아직 구현되지 않았고 명시적으로 실패한다.
+static contract만 확인한다. `spine doctor --connect`는 아직 구현되지 않았고 명시적으로 실패한다.
 
 ## 14. capabilities와 명시적 non-goals
 
-`spine-cli capabilities --json`을 매 실행에서 현재 근거로 사용한다. 현재 명시적으로 미구현인 주요 기능:
+`spine capabilities --json`을 매 실행에서 현재 근거로 사용한다. 현재 명시적으로 미구현인 주요 기능:
 
 - Kafka generator
 - RabbitMQ generator
@@ -842,8 +842,8 @@ development-only다. 아직 없는 기능을 generated comment, README, automati
 ### 15.1 dev
 
 ```sh
-spine-cli dev
-spine-cli dev --events jsonl
+spine dev
+spine dev --events jsonl
 ```
 
 동작:
@@ -879,14 +879,14 @@ JSON Lines parser로 읽을 수 있다. 주요 event:
 
 ### 15.2 run과 build
 
-- `spine-cli run`은 매번 `go build`를 호출하고 Go 자체의 빌드 캐시를 사용한다.
+- `spine run`은 매번 `go build`를 호출하고 Go 자체의 빌드 캐시를 사용한다.
   로컬 replace와 workspace 의존성은 Go가 다시 검증하며, `ENV=production`, `SPINE_PORT`를 전달한다.
-- `spine-cli build`는 config entrypoint를 `bin/<go.mod module basename>`에 직접 빌드한다.
-- `spine-cli test`는 `go test ./...`만 실행한다.
-- `spine-cli check`는 gofmt 상태를 검사한 뒤 `go vet ./...`, `go test ./...`를 실행한다.
+- `spine build`는 config entrypoint를 `bin/<go.mod module basename>`에 직접 빌드한다.
+- `spine test`는 `go test ./...`만 실행한다.
+- `spine check`는 gofmt 상태를 검사한 뒤 `go vet ./...`, `go test ./...`를 실행한다.
 - check는 gofmt을 적용하지 않는다.
 - `run`, `test`, `check`, `build`의 `--help`와 `-h`는 앱이나 Go 검사를 실행하지 않는다.
-  그 밖의 명령별 인자는 지원하지 않으며 오류로 처리한다. `spine-cli test -run`을 조용히 무시하지 않는다.
+  그 밖의 명령별 인자는 지원하지 않으며 오류로 처리한다. `spine test -run`을 조용히 무시하지 않는다.
   테스트 필터는 `go test ./... -run <이름>`으로 직접 실행한다.
 
 ## 16. 저장소를 수정하는 Agent용 source map
@@ -951,8 +951,8 @@ git diff --check
 
 검증 결과를 과장하지 않는다.
 
-- `spine-cli verify`에는 race detector와 `git diff --check`가 포함되지 않는다.
-- repository E2E는 CLI build, `spine-cli new`, generators, `go mod tidy`, contract check/verify,
+- `spine verify`에는 race detector와 `git diff --check`가 포함되지 않는다.
+- repository E2E는 CLI build, `spine new`, generators, `go mod tidy`, contract check/verify,
   runtime build cache, JSONL dev process를 실행한다.
 - E2E의 `go mod tidy`와 Go build는 network/module cache가 필요할 수 있다.
 - sandbox의 DNS, network, user cache 권한으로 실패하면 code regression과 환경 제한을 구분한다.
@@ -964,7 +964,7 @@ git diff --check
 
 ### `USAGE_ERROR`
 
-- `spine-cli schema --json`을 다시 읽는다.
+- `spine schema --json`을 다시 읽는다.
 - canonical command와 option을 사용한다.
 - JSON 미지원 command에는 `--json`을 붙이지 않는다.
 
@@ -1001,34 +1001,34 @@ git diff --check
 ### 기존 프로젝트를 변경 없이 이해하기
 
 ```sh
-spine-cli schema --json
-spine-cli capabilities --json
-spine-cli context --root <project-directory> --json
-spine-cli inspect --root <project-directory> --json
+spine schema --json
+spine capabilities --json
+spine context --root <project-directory> --json
+spine inspect --root <project-directory> --json
 ```
 
 ### 안전하게 resource 생성하기
 
 ```sh
-spine-cli g resource order --root <project-directory> --dry-run --json
+spine g resource order --root <project-directory> --dry-run --json
 # result.changes, result.diff, result.base_hash를 검토한다.
-spine-cli g resource order --root <project-directory> --if-match <base_hash> --json
-spine-cli contract check --root <project-directory> --json
-spine-cli verify --root <project-directory> --json
+spine g resource order --root <project-directory> --if-match <base_hash> --json
+spine contract check --root <project-directory> --json
+spine verify --root <project-directory> --json
 ```
 
 ### 계약 drift를 CI에서 차단하기
 
 ```sh
-spine-cli contract check --root <project-directory> --warnings-as-errors --json
-spine-cli contract diff --root <project-directory> --against spine.contract.json --json
-spine-cli verify --root <project-directory> --warnings-as-errors --json
+spine contract check --root <project-directory> --warnings-as-errors --json
+spine contract diff --root <project-directory> --against spine.contract.json --json
+spine verify --root <project-directory> --warnings-as-errors --json
 ```
 
 ### Agent-friendly development stream 읽기
 
 ```sh
-spine-cli dev --root <project-directory> --events jsonl
+spine dev --root <project-directory> --events jsonl
 ```
 
 `process_started`를 readiness로 사용하지 말고, 실제 HTTP listener가 범위라면 별도 health request를

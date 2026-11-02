@@ -87,7 +87,7 @@ func runDev(args []string, out, errOut io.Writer) int {
 	eventMode := ""
 	for index := 0; index < len(args); index++ {
 		if args[index] != "--events" || index+1 >= len(args) || args[index+1] != "jsonl" || eventMode != "" {
-			fmt.Fprintln(errOut, "usage: spine-cli dev [--events jsonl]")
+			fmt.Fprintln(errOut, "usage: spine dev [--events jsonl]")
 			return 1
 		}
 		eventMode = "jsonl"
