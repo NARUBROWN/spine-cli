@@ -63,10 +63,15 @@ func (*Controller) Wrapped(req *path.Int) httpx.Response[map[string]int64] {
  return httpx.Response[map[string]int64]{Body: map[string]int64{"value":req.Value}}
 }
 func (*Controller) Fail() error { return errors.New("internal fixture failure") }
+type TextResponse = httpx.Response[string]
+func (*Controller) Text() TextResponse { return TextResponse{Body:"alias text"} }
+func (*Controller) Download() *httpx.Binary { return &httpx.Binary{ContentType:"application/octet-stream",Data:[]byte("binary data")} }
+func (*Controller) Redirect() httpx.Redirect { return httpx.Redirect{Location:"/health"} }
+
 `)
 			if layout == layeredLayout {
 				for _, route := range []struct{ name, method, path, handler string }{
-					{"create", "POST", "/products", "Create"}, {"detail", "GET", "/products/:id", "Detail"}, {"wrapper", "POST", "/wrapper", "Wrapped"}, {"fail", "GET", "/failure", "Fail"},
+					{"create", "POST", "/products", "Create"}, {"detail", "GET", "/products/:id", "Detail"}, {"wrapper", "POST", "/wrapper", "Wrapped"}, {"fail", "GET", "/failure", "Fail"}, {"text", "GET", "/text", "Text"}, {"download", "GET", "/download", "Download"}, {"redirect", "GET", "/redirect", "Redirect"},
 				} {
 					apply(project, "g", "route", route.name, "--method", route.method, "--path", route.path, "--handler", "handlers:Controller."+route.handler)
 				}
@@ -79,7 +84,10 @@ func (*Controller) Fail() error { return errors.New("internal fixture failure") 
  app.Route("POST", "/products", (*handlers.Controller).Create)
  app.Route("GET", "/products/:id", (*handlers.Controller).Detail)
  app.Route("POST", "/wrapper", (*handlers.Controller).Wrapped)
- app.Route("GET", "/failure", (*handlers.Controller).Fail)`, 1)
+ app.Route("GET", "/failure", (*handlers.Controller).Fail)
+ app.Route("GET", "/text", (*handlers.Controller).Text)
+ app.Route("GET", "/download", (*handlers.Controller).Download)
+ app.Route("GET", "/redirect", (*handlers.Controller).Redirect)`, 1)
 				writeE2EFile(t, path, text)
 			}
 			writeE2EFile(t, filepath.Join(project, "internal", "application", "http_test.go"), generatedHTTPInputTest)
@@ -133,7 +141,7 @@ func TestDefaultHTTPInputErrors(t *testing.T) {
   case <-time.After(5*time.Second): t.Error("HTTP fixture did not stop")
   }
  }()
- client := &http.Client{Timeout: time.Second}
+ client := &http.Client{Timeout: time.Second, CheckRedirect:func(*http.Request,[]*http.Request)error{return http.ErrUseLastResponse}}
  base := "http://"+address
  deadline := time.Now().Add(10*time.Second)
  for {
@@ -151,6 +159,9 @@ func TestDefaultHTTPInputErrors(t *testing.T) {
   {"invalid integer path", "GET", "/products/not-an-int", "", 400, ""},
   {"wrapper pointer body", "POST", "/wrapper", "{\"Value\":2}", 200, "\"value\":2"},
   {"internal error", "GET", "/failure", "", 500, ""},
+  {"response alias", "GET", "/text", "", 200, "alias text"},
+  {"binary pointer", "GET", "/download", "", 200, "binary data"},
+  {"redirect", "GET", "/redirect", "", 302, ""},
  } {
   t.Run(test.name, func(t *testing.T) {
    request, err := http.NewRequest(test.method, base+test.path, strings.NewReader(test.body))

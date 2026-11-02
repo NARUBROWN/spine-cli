@@ -68,7 +68,7 @@ func supportsJSONProtocol(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "new", "generate", "g", "inspect", "explain", "verify", "doctor", "capabilities", "schema", "context":
+	case "new", "update", "generate", "g", "inspect", "explain", "verify", "doctor", "capabilities", "schema", "context":
 		return true
 	case "contract":
 		if len(args) < 2 {
@@ -132,7 +132,7 @@ func protocolExitCode(args []string, commandCode int, stderr string, stdout []by
 	if commandCode == 0 {
 		return 0
 	}
-	if commandWithoutRoot(args) == "new" {
+	if commandWithoutRoot(args) == "new" || commandWithoutRoot(args) == "update" {
 		return commandCode
 	}
 	lower := strings.ToLower(stderr)

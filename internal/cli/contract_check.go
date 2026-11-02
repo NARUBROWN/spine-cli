@@ -51,7 +51,7 @@ func runContractCheck(args []string, out, errOut io.Writer) int {
 		}
 	} else {
 		for _, diagnostic := range report.Diagnostics {
-			fmt.Fprintf(out, "[%s] %s: %s (%s)\n", diagnostic.Severity, diagnostic.Code, diagnostic.Message, diagnostic.Source)
+			printContractDiagnostic(out, diagnostic, "")
 		}
 		status := "passed"
 		if !report.Valid {
@@ -109,4 +109,11 @@ func buildContractCheckReport(contract applicationContract, warningsAsErrors boo
 	}
 	report.Valid = report.ErrorCount == 0 && (!warningsAsErrors || report.WarningCount == 0)
 	return report
+}
+
+func printContractDiagnostic(out io.Writer, diagnostic contractDiagnostic, indent string) {
+	fmt.Fprintf(out, "%s[%s] %s: %s (%s)\n", indent, diagnostic.Severity, diagnostic.Code, diagnostic.Message, diagnostic.Source)
+	if diagnostic.Hint != "" {
+		fmt.Fprintf(out, "%s  Hint: %s\n", indent, diagnostic.Hint)
+	}
 }

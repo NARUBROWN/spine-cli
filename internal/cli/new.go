@@ -1,5 +1,13 @@
 package cli
 
+import (
+	_ "embed"
+	"strings"
+)
+
+//go:embed first_api.md
+var firstAPIGuide string
+
 const projectMain = `package main
 
 import (
@@ -70,44 +78,55 @@ func TestBuildApplicationIsValid(t *testing.T) {
 }
 `
 
-const projectReadme = `# Spine application
+var projectReadme = `# Spine application
 
 Generated with Spine CLI.
 
 Minimum Go version: 1.25.5.
 
-Echo 플랫폼 개발 레시피를 사용합니다. --skip-install로 생성했다면 먼저 go mod tidy를 실행하세요.
+기본 new는 Echo 플랫폼 설치와 빌드까지 마쳤습니다. --skip-install로 생성했다면 먼저 go mod tidy를 실행하세요.
 
 ## Run
 
-    go mod tidy
     spine dev
     curl http://localhost:8080/health
+
+## Update dependencies
+
+    spine update --dry-run
+    spine update
+
+Spine과 Echo 플랫폼을 현재 CLI의 검증된 버전 조합으로 갱신합니다.
+임시 복사본에서 정적 계약과 빌드를 검사한 뒤 go.mod와 go.sum을 반영합니다.
+업무 소스와 CLI 실행 파일은 이 명령으로 갱신하지 않습니다.
 
 ## Generate a resource
 
     spine g domain account/user
     spine g repository account/user
-    spine g service user --depends database/repository/account:UserRepository
+    spine g service user --depends src/repository/account:UserRepository
     spine g controller admin/user --depends src/service:UserService
 
-domain은 database/domain, repository는 database/repository에 생성합니다.
+domain은 database/domain, repository는 src/repository에 생성합니다.
 DTO, service, controller는 각각 src/dto, src/service, src/controller에 생성합니다.
 이름 앞에 선택적인 하위 경로를 붙일 수 있으며, 각 역할에서 독립적으로 그룹을 정합니다.
 controller 생성만으로 HTTP 경로가 등록되지는 않습니다.
 기존 핸들러를 등록하려면 spine g route 명령에 method, path, handler를 명시합니다.
-생성 전에 --dry-run --json으로 계획을 확인하고 --if-match로 같은 계획을 적용합니다.
+직접 생성하거나 --dry-run으로 변경을 먼저 확인할 수 있습니다. 자동화에서는 --dry-run --json과 --if-match로 검토한 계획을 적용합니다.
 
 Module: {{MODULE}}
-`
+` + generatedFirstAPIGuide()
 
 const legacyProjectReadme = `# Spine application
 
-이 프로젝트는 layout = "legacy"를 사용합니다.
+이 프로젝트는 layout = "legacy"를 사용합니다. 기본 new는 플랫폼 설치를 완료했습니다.
+--skip-install로 생성한 경우에만 먼저 go mod tidy를 실행합니다.
 
-    go mod tidy
     spine dev
     curl http://localhost:8080/health
+
+의존성을 갱신하려면 spine update --dry-run으로 변경을 확인한 뒤 spine update를 실행합니다.
+현재 CLI의 Echo 레시피를 사용하며, 시작 코드의 API 변경은 직접 적용해야 합니다.
 
 기존 생성기 규칙에 따라 resource는 src/<name>에 생성하고 GET 경로를 등록합니다.
 개별 구성 요소의 --depends는 같은 패키지의 파일 이름을 받습니다.
@@ -163,3 +182,8 @@ func Register(app spine.App) error {
  return nil
 }
 `
+
+func generatedFirstAPIGuide() string {
+	_, guide, _ := strings.Cut(firstAPIGuide, "<!-- existing-project -->")
+	return "\n# 첫 HTTP API 만들기\n\n이름과 수량을 검사하고 JSON을 반환하는 POST /products 예제입니다.\n" + strings.ReplaceAll(guide, "example.com/shop", "{{MODULE}}")
+}

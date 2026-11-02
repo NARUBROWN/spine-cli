@@ -240,19 +240,20 @@ func rollbackFileChanges(paths []string, backups map[string]fileBackup) error {
 			continue
 		}
 		tmpPath := tmp.Name()
-		if err := tmp.Chmod(backup.mode.Perm()); err == nil {
-			_, err = tmp.Write(backup.contents)
+		restoreErr := tmp.Chmod(backup.mode.Perm())
+		if restoreErr == nil {
+			_, restoreErr = tmp.Write(backup.contents)
 		}
 		closeErr := tmp.Close()
-		if err == nil && closeErr == nil {
+		if restoreErr == nil && closeErr == nil {
 			if renameErr := os.Rename(tmpPath, path); renameErr != nil {
 				failures = append(failures, fmt.Sprintf("restore %s: %v", path, renameErr))
 				_ = os.Remove(tmpPath)
 			}
 		} else {
 			_ = os.Remove(tmpPath)
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("write backup %s: %v", path, err))
+			if restoreErr != nil {
+				failures = append(failures, fmt.Sprintf("write backup %s: %v", path, restoreErr))
 			} else {
 				failures = append(failures, fmt.Sprintf("close backup %s: %v", path, closeErr))
 			}

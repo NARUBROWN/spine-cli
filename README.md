@@ -48,7 +48,7 @@ curl http://localhost:8080/health
 현재 개발 브랜치의 `new`는 Echo 플랫폼 연결과 의존성 설치, 정적 계약 검사와 빌드를
 완료한 뒤 프로젝트를 생성합니다. 서버는 `spine dev`로 시작합니다. 설치 과정에서는
 애플리케이션 초기화, 테스트나 listener를 실행하지 않습니다. 위 설치 예시의 v0.2.0 릴리스에는
-이 플랫폼 통합이 아직 포함되지 않았습니다.
+이 플랫폼 통합과 아래 DX 개선이 아직 포함되지 않았습니다.
 
 파일만 생성하려면 `spine new todo-api --skip-install`을 사용하고, 생성 후 `go mod tidy`를
 실행하세요. `--platform echo`는 기본 플랫폼을 명시합니다. 설치 포함 `--dry-run`은 정확한
@@ -59,6 +59,51 @@ curl http://localhost:8080/health
 새 프로젝트에는 명시적인 `BuildApplication` composition root, `app.Validate`,
 `GET /health`, `spine.toml`이 포함됩니다.
 
+## 프로젝트 의존성 갱신
+
+현재 개발 브랜치에서는 기존 Echo 프로젝트에 `spine update`를 사용할 수 있습니다.
+이 명령은 현재 CLI에 포함된 검증 레시피로 Spine, Echo 플랫폼과 Echo를 함께 갱신합니다.
+릴리스 v0.2.0에는 아직 포함되지 않았습니다.
+
+```sh
+spine update --dry-run
+spine update
+```
+
+완료 출력에는 이전 require 버전과 갱신 후 실제 선택 버전, 변경 파일과 검사 결과가 표시됩니다.
+이미 같은 의존성 파일이면 다시 쓰지 않습니다. 레시피보다 새로운 버전은 낮추지 않으므로,
+그 경우에는 해당 버전을 지원하는 CLI를 먼저 설치해야 합니다. CLI 실행 파일의 버전은
+이 명령으로 바뀌지 않습니다.
+
+임시 프로젝트 복사본에서 `go mod tidy`, 모듈 호환성 검사, 정적 계약 검사와 설정된
+entrypoint 빌드를 실행합니다. 성공한 뒤 `go.mod`와 `go.sum`을 반영하며, 실패하거나
+검사 도중 원본 입력이 바뀌면 반영하지 않습니다. 이 과정에서 애플리케이션 초기화,
+테스트와 서버는 실행하지 않습니다. 갱신 후에는 `spine verify`와 실제 API 요청을 별도로 확인하세요.
+`go mod tidy`에 따라 간접 의존성과 체크섬도 바뀔 수 있습니다.
+
+자동화에서는 다음과 같이 정확한 diff와 입력 hash를 검토해 적용합니다.
+
+```sh
+spine update --root ./shop-api --dry-run --json
+spine update --root ./shop-api --if-match <base_hash> --json
+```
+
+`--dry-run`도 네트워크와 Go 캐시를 사용할 수 있으며, 프로젝트 파일은 바꾸지 않습니다.
+업무 소스와 `spine.toml`은 유지합니다. 이전 시작 API가 새 모듈과 맞지 않으면 진단을 확인해
+소스를 먼저 수정한 뒤 다시 실행합니다. 소스나 디렉터리 구조를 자동으로 마이그레이션하지 않습니다.
+
+지원 범위는 단일 Go 모듈의 기본 빌드입니다. 활성 workspace는 `GOWORK=off`로 분리하고,
+사용자 지정 GOFLAGS, vendor, local replace와 symlink 입력은 별도로 처리해야 합니다.
+저장된 Go 설정의 GOFLAGS를 명시적으로 해제할 때는 `GOFLAGS=' '`를 사용할 수 있습니다.
+
+## 첫 업무 API
+
+[DTO 생성부터 핸들러, 오류 응답, route 등록과 curl 확인까지의 예제](internal/cli/first_api.md)를 따라 POST /products를 만들 수 있습니다. 생성된 앱 README에도 실제 모듈 경로가 반영된 예제가 포함됩니다.
+
+HTTP 성공 응답은 `httpx.Response[T]`, `httpx.Binary`, `httpx.Redirect`로 반환합니다.
+DTO, slice와 string을 직접 반환하지 않고 `httpx.Response[T].Body`에 넣습니다.
+본문 DTO는 포인터로 받고 실패는 `error`로 반환합니다. 알려진 미지원 반환형은 route 생성과 계약 검사에서 파일 위치와 수정 방법을 안내합니다.
+
 ## 생성기
 
 새 프로젝트는 `layout = "layered-v1"`을 사용합니다. 역할별 기본 경로 아래에 파일을 바로
@@ -67,7 +112,7 @@ curl http://localhost:8080/health
 | 역할 | 기본 경로 | 생성 내용 |
 | --- | --- | --- |
 | domain | `database/domain/` | 명시한 필드만 포함하는 타입 |
-| repository | `database/repository/` | 구조체와 생성자 |
+| repository | `src/repository/` | 구조체와 생성자 |
 | DTO | `src/dto/` | JSON 태그가 있는 타입 |
 | service | `src/service/` | 구조체와 생성자 |
 | controller | `src/controller/` | 구조체와 생성자 |
@@ -78,7 +123,7 @@ curl http://localhost:8080/health
 spine g domain account/user --field id:int64 --field name:string
 spine g dto account/create-user-request --field name:string
 spine g repository account/user
-spine g service user --depends database/repository/account:UserRepository
+spine g service user --depends src/repository/account:UserRepository
 spine g controller admin/user --depends src/service:UserService
 ```
 
@@ -92,6 +137,7 @@ CLI는 그룹을 애그리거트로 해석하지 않습니다.
 
 `--depends`는 모듈 기준 패키지 경로와 타입을 받습니다. 여러 의존성은 옵션을 반복해서 지정합니다.
 CLI는 실제 타입과 단일 공개 생성자를 확인하고 import와 생성자 인자와 application 등록을 연결합니다.
+완료 출력에는 생성/수정한 파일, 실제 타입 참조와 등록 위치가 표시됩니다. JSON에는 types, registrations와 routes가 추가됩니다.
 서로 다른 패키지의 동명 타입도 구분합니다. domain과 DTO는 DI에 등록하지 않습니다.
 repository에는 DB 연결이나 CRUD 구현을 추가하지 않습니다.
 

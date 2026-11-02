@@ -30,6 +30,26 @@ func installEchoProject(ctx context.Context, staging string, files map[string]st
 		}
 	}
 	stages[0].Status = "passed"
+	modules, failure := verifyEchoProject(ctx, staging, ".", stages)
+	if failure != nil {
+		return modules, failure
+	}
+	for _, path := range []string{"go.mod", "go.sum"} {
+		contents, err := os.ReadFile(filepath.Join(staging, path))
+		if err != nil {
+			return failed(10, "dependencies", err)
+		}
+		files[path] = string(contents)
+	}
+	return modules, nil
+}
+
+// new와 update가 같은 의존성 조합과 정적 계약 및 빌드 기준을 사용합니다.
+func verifyEchoProject(ctx context.Context, staging, entrypoint string, stages []installationStage) ([]selectedModule, *installationFailure) {
+	modules := []selectedModule{}
+	failed := func(code int, stage string, cause error) ([]selectedModule, *installationFailure) {
+		return modules, &installationFailure{code, stage, cause}
+	}
 	if _, err := platformGo(ctx, staging, false, "mod", "tidy"); err != nil {
 		return failed(3, "dependencies", err)
 	}
@@ -52,16 +72,9 @@ func installEchoProject(ctx context.Context, staging string, files map[string]st
 		return failed(5, "contract", fmt.Errorf("static contract validation failed: %s", diagnostics))
 	}
 	stages[3].Status = "passed"
-	if _, err := platformGo(ctx, staging, false, "build", "-o", filepath.Join(filepath.Dir(staging), "application.bin"), "."); err != nil {
+	if _, err := platformGo(ctx, staging, false, "build", "-o", filepath.Join(filepath.Dir(staging), "application.bin"), entrypoint); err != nil {
 		return failed(5, "build", err)
 	}
 	stages[4].Status = "passed"
-	for _, path := range []string{"go.mod", "go.sum"} {
-		contents, err := os.ReadFile(filepath.Join(staging, path))
-		if err != nil {
-			return failed(10, "dependencies", err)
-		}
-		files[path] = string(contents)
-	}
 	return modules, nil
 }

@@ -104,7 +104,7 @@ func TestLayeredQualifiedDependenciesAndDuplicateTypeNames(t *testing.T) {
 	layeredProject(t)
 	layeredGenerate(t, "repository", "account/user")
 	layeredGenerate(t, "repository", "admin/user")
-	layeredGenerate(t, "service", "user", "--depends", "database/repository/account:UserRepository", "--depends", "database/repository/admin:UserRepository")
+	layeredGenerate(t, "service", "user", "--depends", "src/repository/account:UserRepository", "--depends", "src/repository/admin:UserRepository")
 	layeredGenerate(t, "controller", "admin/user", "--depends", "src/service:UserService")
 	controller, _ := os.ReadFile("src/controller/admin/user_controller.go")
 	if strings.Contains(string(controller), "func (c *UserController) Get") {
@@ -118,7 +118,7 @@ func TestLayeredQualifiedDependenciesAndDuplicateTypeNames(t *testing.T) {
 	for _, ctor := range contract.Constructors {
 		found[ctor.Target] = true
 	}
-	for _, key := range []string{"example.com/todo/database/repository/account.NewUserRepository", "example.com/todo/database/repository/admin.NewUserRepository"} {
+	for _, key := range []string{"example.com/todo/src/repository/account.NewUserRepository", "example.com/todo/src/repository/admin.NewUserRepository"} {
 		if !found[key] {
 			t.Fatalf("constructor identity lost: %v", found)
 		}
@@ -139,7 +139,7 @@ func TestLayeredExplicitRoutesValidateHandlersAndRemainIdempotent(t *testing.T) 
 	layeredGenerate(t, "controller", "admin/user")
 	path := "src/controller/admin/user_controller.go"
 	source, _ := os.ReadFile(path)
-	source = append(source, []byte("\nfunc (c *UserController) Get() string { return \"ok\" }\n")...)
+	source = append(source, []byte("\nfunc (c *UserController) Get() error { return nil }\n")...)
 	if err := os.WriteFile(path, source, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestLayeredExplicitRoutesValidateHandlersAndRemainIdempotent(t *testing.T) 
 func TestLayeredResourceMatchesIndividualGenerators(t *testing.T) {
 	layeredProject(t)
 	layeredGenerate(t, "resource", "commerce/account/user")
-	paths := []string{"database/domain/commerce/account/user.go", "database/repository/commerce/account/user_repository.go", "src/service/commerce/account/user_service.go", "src/controller/commerce/account/user_controller.go", "internal/application/application.go"}
+	paths := []string{"database/domain/commerce/account/user.go", "src/repository/commerce/account/user_repository.go", "src/service/commerce/account/user_service.go", "src/controller/commerce/account/user_controller.go", "internal/application/application.go"}
 	before := map[string]string{}
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
@@ -186,7 +186,7 @@ func TestLayeredResourceMatchesIndividualGenerators(t *testing.T) {
 	}
 	layeredGenerate(t, "domain", "commerce/account/user")
 	layeredGenerate(t, "repository", "commerce/account/user")
-	layeredGenerate(t, "service", "commerce/account/user", "--depends", "database/repository/commerce/account:UserRepository")
+	layeredGenerate(t, "service", "commerce/account/user", "--depends", "src/repository/commerce/account:UserRepository")
 	layeredGenerate(t, "controller", "commerce/account/user", "--depends", "src/service/commerce/account:UserService")
 	for _, path := range paths {
 		data, _ := os.ReadFile(path)
@@ -204,18 +204,18 @@ func TestLayeredIfMatchIncludesInputsAndProposedContents(t *testing.T) {
 	layeredProject(t)
 	layeredGenerate(t, "repository", "account/user")
 	var out, errOut bytes.Buffer
-	args := []string{"service", "user", "--depends", "database/repository/account:UserRepository", "--dry-run", "--json"}
+	args := []string{"service", "user", "--depends", "src/repository/account:UserRepository", "--dry-run", "--json"}
 	if code := runGenerate(args, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
 	var plan map[string]any
 	_ = json.Unmarshal(out.Bytes(), &plan)
-	path := "database/repository/account/user_repository.go"
+	path := "src/repository/account/user_repository.go"
 	source, _ := os.ReadFile(path)
 	_ = os.WriteFile(path, append(source, []byte("\n// 입력이 바뀌었습니다.\n")...), 0o644)
 	out.Reset()
 	errOut.Reset()
-	if code := runGenerate([]string{"service", "user", "--depends", "database/repository/account:UserRepository", "--if-match", plan["base_hash"].(string)}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "changed since dry-run") {
+	if code := runGenerate([]string{"service", "user", "--depends", "src/repository/account:UserRepository", "--if-match", plan["base_hash"].(string)}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "changed since dry-run") {
 		t.Fatalf("changed dependency accepted: %s", errOut.String())
 	}
 	if _, err := os.Stat("src/service/user_service.go"); !os.IsNotExist(err) {
@@ -260,7 +260,7 @@ func TestLayeredRejectsUnsafePathsPackageConflictsAndDataInjection(t *testing.T)
 
 func TestLayeredInterfaceAndValueDependencies(t *testing.T) {
 	layeredProject(t)
-	_ = os.MkdirAll("database/repository", 0o755)
+	_ = os.MkdirAll("src/repository", 0o755)
 	source := `package repository
 type Reader interface { Read() string }
 type record struct{}
@@ -269,8 +269,8 @@ func NewReader() Reader { return record{} }
 type Value struct{}
 func NewValue() Value { return Value{} }
 `
-	_ = os.WriteFile("database/repository/reader.go", []byte(source), 0o644)
-	layeredGenerate(t, "service", "report", "--depends", "database/repository:Reader", "--depends", "database/repository:Value")
+	_ = os.WriteFile("src/repository/reader.go", []byte(source), 0o644)
+	layeredGenerate(t, "service", "report", "--depends", "src/repository:Reader", "--depends", "src/repository:Value")
 	generated, _ := os.ReadFile("src/service/report_service.go")
 	if strings.Contains(string(generated), "*repository.Reader") || strings.Contains(string(generated), "*repository.Value") {
 		t.Fatalf("interface/value changed to pointer: %s", generated)
@@ -346,7 +346,7 @@ func TestLayeredAliasedPathTypesAndCompositionRouteConflicts(t *testing.T) {
 	path := "src/controller/member_controller.go"
 	source, _ := os.ReadFile(path)
 	updated := strings.Replace(string(source), "package controller", "package controller\nimport routepath \"github.com/NARUBROWN/spine/pkg/path\"", 1)
-	updated += "\nfunc (c MemberController) Get(id routepath.Int) string { return \"ok\" }\n"
+	updated += "\nfunc (c MemberController) Get(id routepath.Int) error { return nil }\n"
 	writeE2EFile(t, path, updated)
 	layeredGenerate(t, "route", "member", "--method", "GET", "--path", "/members/:id", "--handler", "src/controller:MemberController.Get")
 	contract, err := inspectApplication()
