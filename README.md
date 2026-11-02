@@ -19,6 +19,8 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 
 CLI v0.4.0은 위 공개 버전 조합과 HTTP 어댑터 v2 계약을 지원합니다.
 
+기존 앱이나 초기 CLI로 만든 프로젝트는 [v0.4.0 호환 워크스페이스 마이그레이션 가이드](migration/v0.4.0.md)를 참고하세요. LLM 에이전트가 설정, 제거된 API, 생성 규칙과 검증 절차를 따라갈 수 있도록 정리했습니다.
+
 ```sh
 go install github.com/NARUBROWN/spine-cli@v0.4.0
 spine-cli version
