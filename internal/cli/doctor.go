@@ -33,7 +33,7 @@ func runDoctor(args []string, out, errOut io.Writer) int {
 		case "--json":
 			jsonOutput = true
 		case "--connect":
-			fmt.Fprintln(errOut, "spine doctor --connect is not implemented; the current doctor intentionally provides offline evidence only")
+			fmt.Fprintln(errOut, "spine-cli doctor --connect is not implemented; the current doctor intentionally provides offline evidence only")
 			return 1
 		default:
 			fmt.Fprintf(errOut, "unknown option: %s\n", argument)

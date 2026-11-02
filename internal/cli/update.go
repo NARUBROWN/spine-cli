@@ -24,8 +24,8 @@ type updateOptions struct {
 func updateHelp(args []string, out io.Writer) bool {
 	for i, arg := range args {
 		if (arg == "--help" || arg == "-h") && (i == 0 || args[i-1] != "--if-match") {
-			fmt.Fprintln(out, "Usage: spine update [--dry-run] [--if-match <hash>] [--json] [--root <directory>]")
-			fmt.Fprintln(out, "\n기존 프로젝트의 Spine과 Echo 플랫폼 의존성을 이 CLI의 검증된 레시피로 갱신합니다.\n임시 복사본에서 의존성 해석, 정적 계약 검사와 빌드를 완료한 뒤 go.mod와 go.sum을 반영합니다.\n--dry-run도 네트워크와 Go 캐시를 사용할 수 있지만 프로젝트 파일은 바꾸지 않습니다.\n현재 레시피보다 새로운 버전은 낮추지 않습니다. CLI 실행 파일과 업무 소스는 갱신하지 않습니다.\n\n예:\n  spine update\n  spine update --dry-run\n  spine update --root ./shop-api --dry-run --json")
+			fmt.Fprintln(out, "Usage: spine-cli update [--dry-run] [--if-match <hash>] [--json] [--root <directory>]")
+			fmt.Fprintln(out, "\n기존 프로젝트의 Spine과 Echo 플랫폼 의존성을 이 CLI의 검증된 레시피로 갱신합니다.\n임시 복사본에서 의존성 해석, 정적 계약 검사와 빌드를 완료한 뒤 go.mod와 go.sum을 반영합니다.\n--dry-run도 네트워크와 Go 캐시를 사용할 수 있지만 프로젝트 파일은 바꾸지 않습니다.\n현재 레시피보다 새로운 버전은 낮추지 않습니다. CLI 실행 파일과 업무 소스는 갱신하지 않습니다.\n\n예:\n  spine-cli update\n  spine-cli update --dry-run\n  spine-cli update --root ./shop-api --dry-run --json")
 			return true
 		}
 	}
@@ -148,7 +148,7 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	}
 	root, err := projectRoot()
 	if err != nil {
-		return finish(3, "snapshot", fmt.Errorf("spine update must run inside an existing Go module: %w", err))
+		return finish(3, "snapshot", fmt.Errorf("spine-cli update must run inside an existing Go module: %w", err))
 	}
 	previousDirectory, err := os.Getwd()
 	if err != nil {
@@ -296,7 +296,7 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 		}
 		fmt.Fprintln(out, "Dependencies, static contract and build verified in a temporary copy.")
 		if !options.Write.DryRun {
-			fmt.Fprintln(out, "Next steps:\n  spine verify\n  spine dev")
+			fmt.Fprintln(out, "Next steps:\n  spine-cli verify\n  spine-cli dev")
 		}
 	}
 	return finish(0, "", nil)

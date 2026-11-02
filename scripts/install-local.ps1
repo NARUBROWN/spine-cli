@@ -3,7 +3,7 @@
 Builds and installs the local development version of Spine CLI.
 
 .DESCRIPTION
-The executable is written to bin\spine.exe in this repository. Run this
+The executable is written to bin\spine-cli.exe in this repository. Run this
 script again after changing the CLI source.
 #>
 
@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $outputDirectory = Join-Path $repositoryRoot "bin"
-$outputPath = Join-Path $outputDirectory "spine.exe"
+$outputPath = Join-Path $outputDirectory "spine-cli.exe"
 $developmentCommandPath = Join-Path $outputDirectory "spine-dev.exe"
 
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
@@ -23,7 +23,7 @@ $env:GOMODCACHE = Join-Path $repositoryRoot ".gomodcache"
 
 Push-Location $repositoryRoot
 try {
-    go build -o $outputPath ./cmd/spine
+    go build -o $outputPath .
     Copy-Item -Force $outputPath $developmentCommandPath
 }
 finally {

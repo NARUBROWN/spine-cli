@@ -31,7 +31,7 @@ func TestCLIEndToEndAgentGenerationAndRuntimeCache(t *testing.T) {
 		binaryName += ".exe"
 	}
 	binary := filepath.Join(t.TempDir(), binaryName)
-	build := exec.Command("go", "build", "-o", binary, "./cmd/spine")
+	build := exec.Command("go", "build", "-o", binary, ".")
 	build.Dir = repositoryRoot
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)

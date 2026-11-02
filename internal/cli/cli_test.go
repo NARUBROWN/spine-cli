@@ -19,7 +19,7 @@ func TestRunHelp(t *testing.T) {
 	if code := Run([]string{"help"}, &out, &errOut); code != 0 {
 		t.Fatalf("code = %d", code)
 	}
-	if !strings.Contains(out.String(), "spine new") {
+	if !strings.Contains(out.String(), "spine-cli new") {
 		t.Fatal("help did not include new command")
 	}
 }
