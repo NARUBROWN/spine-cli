@@ -13,26 +13,24 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 ## 권장 환경과 설치
 
 - 최소 Go 버전: 1.25.5
-- 새 프로젝트의 플랫폼: Echo 레시피 `echo-v0.1.0-spine-v0.6.0`
-- Spine: `v0.6.0`
-- Echo 플랫폼: `v0.1.0` (Echo v5.4.4)
+- 기본 HTTP 플랫폼: Echo
+- Spine, Echo 플랫폼과 Echo 버전은 설치한 CLI에 포함된 검증 레시피가 선택합니다. 생성된 `go.mod`에서 확인하세요.
 
-CLI v0.4.0은 위 공개 버전 조합과 HTTP 어댑터 v2 계약을 지원합니다.
+일반 설치에는 `@latest`를 사용합니다. 현재 프로젝트의 `go.mod`와 별개로 최신 공개 CLI를 설치하므로, 릴리스마다 설치 명령의 버전을 바꿀 필요가 없습니다.
+기존 앱은 [버전별 마이그레이션 가이드](migration/)에서 대상 버전에 맞는 문서를 선택하세요.
 
-기존 앱이나 초기 CLI로 만든 프로젝트는 [v0.4.0 호환 워크스페이스 마이그레이션 가이드](migration/v0.4.0.md)를 참고하세요. LLM 에이전트가 설정, 제거된 API, 생성 규칙과 검증 절차를 따라갈 수 있도록 정리했습니다.
+아래 예제에서 사용하는 `spine` 명령을 설치합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli@v0.4.0
-spine-cli version
-# spine-cli 0.4.0
+go install github.com/NARUBROWN/spine-cli/cmd/spine@latest
+spine version
 ```
 
-짧은 `spine` 명령을 사용하려면 기존 `cmd/spine` 경로로 설치합니다.
+실행 파일 이름을 `spine-cli`로 사용하려면 루트 경로로 설치합니다. 이 경우 아래 예제의 `spine`을 `spine-cli`로 바꿔 실행하세요.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.0
-spine version
-# spine-cli 0.4.0
+go install github.com/NARUBROWN/spine-cli@latest
+spine-cli version
 ```
 
 ## 빠른 시작
