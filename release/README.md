@@ -1,6 +1,12 @@
 # CLI 릴리스 운영
 
-CLI를 `preview → rc → main` 순서로 승격하고 각 채널에서 공개 설치와 생성 결과를 검사합니다. CLI의 버전과 출시 일정은 Spine과 독립적입니다. 이 문서는 배포 제어기를 도입한 뒤의 운영 절차이며, 워크플로 파일 추가만으로 GitHub 설정이나 공개 릴리스가 생성되지는 않습니다.
+CLI를 `preview → rc → main` 순서로 승격하고 각 채널에서 태그를 발행해 공개 설치와 생성 결과를 검사합니다. GitHub Release는 Production에서만 발행합니다. CLI의 버전과 출시 일정은 Spine과 독립적입니다. 워크플로 파일 추가만으로 GitHub 설정이나 공개 태그가 생성되지는 않습니다.
+
+| 단계 | 태그 예시 | 검증 기록 | GitHub Release |
+| --- | --- | --- | --- |
+| Preview | `v0.4.3-preview.1` | Actions artifact | 발행하지 않음 |
+| RC | `v0.4.3-rc.1` | Actions artifact | 발행하지 않음 |
+| Production | `v0.4.3` | Actions artifact와 Release 첨부 파일 | 정식 발행 |
 
 ## 정책과 승인
 
@@ -8,9 +14,9 @@ CLI를 `preview → rc → main` 순서로 승격하고 각 채널에서 공개 
 
 Preview와 RC는 `vX.Y.Z-preview.N`, `vX.Y.Z-rc.N`, 정식은 `vX.Y.Z` 태그를 사용합니다. 일반 설치의 `@latest`는 정식 버전을 우선합니다. [Go 버전 선택](https://go.dev/ref/mod#version-queries)
 
-세 채널 모두 `release-preview`, `release-rc`, `release-stable` 승인 환경을 사용합니다. 지정 리뷰어가 최종 글을 검토한 뒤 승인해야 태그를 만듭니다. 환경은 해당 채널 브랜치만 허용하며 관리자 우회를 허용하지 않습니다. [GitHub 승인 환경](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
+세 채널 모두 `release-preview`, `release-rc`, `release-stable` 승인 환경을 사용합니다. 지정 리뷰어가 태그, 검증 계획과 릴리스 노트 초안을 검토한 뒤 승인해야 태그를 만듭니다. 환경은 해당 채널 브랜치만 허용하며 관리자 우회를 허용하지 않습니다. [GitHub 승인 환경](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
 
-릴리스 계획 artifact의 `release-title.txt`, `release-notes.md`, `release-plan.json`을 승인 전에 확인합니다. 본문은 `release/notes/vX.Y.Z.md`와 계획의 버전, 소스, 이전 단계, 레시피 해시, 긴급 단축 사유로 구성합니다. 본문 해시를 계획에 저장하고 태그 생성 직전에 다시 계산합니다. 본문을 수정하면 새 소스에서 새 계획을 검토해야 합니다. 테스트 결과는 성공을 확인한 뒤 manifest에 첨부합니다.
+릴리스 계획 artifact의 `release-title.txt`, `release-notes.md`, `release-plan.json`을 승인 전에 확인합니다. 본문은 `release/notes/vX.Y.Z.md`와 계획의 버전, 소스, 이전 단계, 레시피 해시, 긴급 단축 사유로 구성합니다. 본문 해시를 계획에 저장하고 태그 생성 직전에 다시 계산합니다. Preview와 RC에서는 이 초안을 GitHub Release에 게시하지 않습니다. 본문을 수정하면 새 소스에서 새 계획을 검토해야 합니다. 테스트 결과는 성공을 확인한 뒤 manifest에 첨부합니다.
 
 ## 최초 전환
 
@@ -62,20 +68,24 @@ GITHUB_REPOSITORY=NARUBROWN/spine-cli python3 scripts/release/release.py check-e
 
 워크플로는 다음 순서로 실행합니다.
 
-1. 브랜치 HEAD, 정책과 승인 환경을 검사하고 계획과 최종 글을 artifact로 만듭니다.
+1. 브랜치 HEAD, 정책과 승인 환경을 검사하고 계획과 릴리스 노트 초안을 artifact로 만듭니다.
 2. 정확한 SHA의 공통 CI와 세 OS의 공개 SHA 설치 검사를 실행합니다.
-3. `release-preview` 승인 대기에서 최종 제목과 본문, 검증 결과를 검토합니다.
+3. `release-preview` 승인 대기에서 태그, 계획과 릴리스 노트 초안, 검증 결과를 검토합니다.
 4. 승인 후 HEAD와 정책, 본문 해시를 다시 검사하고 새 태그를 만듭니다.
 5. 세 OS에서 그 태그를 공개 설치하고 동일한 생성 검사를 실행합니다.
-6. 모두 성공하면 사전 릴리스와 manifest를 공개합니다.
+6. 모두 성공하면 `release-manifest-<태그>` Actions artifact에 `release-manifest.json`을 저장합니다. Preview의 GitHub Release는 만들지 않습니다.
 
 GitHub 토큰이 만든 태그의 push 이벤트에 의존하지 않습니다. 태그 전후 검사는 재사용 워크플로를 직접 호출합니다. 작업 하나가 실패하면 뒤 단계는 실행하지 않습니다.
 
 ## RC와 Production 승격
 
-Preview 관찰을 마치면 검증한 후보를 `preview → rc` PR로 병합합니다. 후보가 merge commit의 두 번째 부모이며 소스 트리가 같은지 검사합니다. rc 브랜치에서 `Publish RC`를 실행하고 출처 Preview 태그와 새 RC 버전을 지정합니다. 같은 버전 계열의 공개 후보, 성공한 발행 워크플로와 manifest가 필요합니다.
+Preview 관찰을 마치면 검증한 후보를 `preview → rc` PR로 병합합니다. 후보가 merge commit의 두 번째 부모이며 소스 트리가 같은지 검사합니다. rc 브랜치에서 `Publish RC`를 실행하고 출처 Preview 태그와 새 RC 버전을 지정합니다. 같은 버전 계열의 공개 태그, 성공한 발행 워크플로와 Actions manifest가 필요합니다. RC도 태그와 Actions 검증 기록만 남깁니다.
 
-RC 관찰을 마치면 같은 방식으로 `rc → main` PR을 병합합니다. main에서 `Publish Stable`을 실행하고 출처 RC 태그를 지정합니다. 정식 버전은 RC에서 결정합니다. 각 단계에서 전체 검사, 세 OS의 공개 설치, 최종 글 검토와 환경 승인을 반복합니다.
+RC 관찰을 마치면 같은 방식으로 `rc → main` PR을 병합합니다. main에서 `Publish Stable`을 실행하고 출처 RC 태그를 지정합니다. 정식 버전은 RC에서 결정합니다. 각 단계에서 전체 검사, 세 OS의 공개 설치, 초안 검토와 환경 승인을 반복합니다. Production의 태그 설치 검증까지 성공하면 정식 GitHub Release를 만들고 manifest를 첨부합니다.
+
+승격 검사는 출처 태그의 Actions artifact가 하나인지 확인하고 artifact ID로 내려받아 SHA-256을 검증합니다. 저장소, 버전, 브랜치, 소스 SHA와 트리, 실행 ID와 재실행 번호, 레시피, 세 OS의 검증 결과가 일치해야 합니다. 발행 워크플로 전체가 성공해야 승격할 수 있습니다. 출처 artifact의 ID와 해시도 승인 계획에 고정합니다.
+
+Preview와 RC의 관찰 시간은 태그 설치 검증이 끝난 뒤 manifest artifact를 저장한 시점부터 계산합니다. artifact 보관 기간은 90일로 요청합니다. 저장소의 보관 정책 안에서 사용해야 하며, 기록이 삭제되거나 만료되면 해당 후보의 승격을 중단하고 새 Preview부터 검증합니다. [GitHub Actions artifact 보관](https://github.com/actions/upload-artifact#retention-period)
 
 승격 merge의 커밋 SHA는 달라도 소스 트리와 레시피는 같아야 합니다. 코드나 의존성, 릴리스 글을 수정하면 새 Preview로 돌아갑니다. 승인 대기 중 채널 HEAD가 바뀌어도 중단합니다. 긴급 관찰 시간 단축은 20자 이상의 사유가 필요하며 CI, 공개 설치와 승인은 생략하지 않습니다.
 
