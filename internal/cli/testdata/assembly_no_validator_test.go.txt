@@ -1,0 +1,15 @@
+package application
+import("context";"net/http/httptest";"strings";"testing";"github.com/NARUBROWN/spine/pkg/httpx")
+type omittedInput struct { Email string `json:"email" validate:"required,email"` }
+type omittedController struct{}
+func (*omittedController) Post(input *omittedInput) httpx.Response[string] {return httpx.Response[string]{Body:input.Email}}
+func TestValidatorIsOmitted(t *testing.T) {
+ app,options,err:=BuildApplication();if err!=nil {t.Fatal(err)}
+ app.Constructor(func()*omittedController{return &omittedController{}})
+ app.Route("POST","/unvalidated",(*omittedController).Post)
+ prepared,err:=app.Prepare(context.Background(),options);if err!=nil {t.Fatal(err)}
+ defer prepared.Close(context.Background())
+ response:=httptest.NewRecorder();request:=httptest.NewRequest("POST","/unvalidated",strings.NewReader("{}"));request.Header.Set("Content-Type","application/json")
+ prepared.Handler().ServeHTTP(response,request)
+ if response.Code!=200 {t.Fatalf("omitted validator returned %d: %s",response.Code,response.Body.String())}
+}

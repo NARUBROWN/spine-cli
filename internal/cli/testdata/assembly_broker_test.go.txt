@@ -1,0 +1,139 @@
+package application
+
+import (
+ "context"
+ "encoding/json"
+ "fmt"
+ "io"
+ "log"
+ "net"
+ "net/http"
+ "os"
+ "strings"
+ "sync"
+ "sync/atomic"
+ "testing"
+ "time"
+
+ platform "{{PLATFORM_PATH}}"
+ event "github.com/NARUBROWN/spine/contract/event"
+ "github.com/NARUBROWN/spine/pkg/event/publish"
+ "github.com/NARUBROWN/spine/pkg/httpx"
+ amqp "github.com/rabbitmq/amqp091-go"
+ "github.com/segmentio/kafka-go"
+)
+
+type brokerDTO struct {
+ Email string `json:"email" validate:"required,email"`
+ Age int `json:"age" validate:"gte=18"`
+}
+type brokerEvent struct { brokerDTO; topic string }
+func (e brokerEvent) Name() string {return e.topic}
+func (brokerEvent) OccurredAt() time.Time {return time.Now()}
+type brokerController struct {input,output string;sent,handled atomic.Int32}
+func (c *brokerController) Emit(ctx context.Context,input *brokerDTO) httpx.Response[string] {
+ c.sent.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:*input,topic:c.input});return httpx.Response[string]{Body:"accepted"}
+}
+func (c *brokerController) Handle(ctx context.Context,input brokerDTO) {
+ c.handled.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:input,topic:c.output})
+}
+type brokerLog struct{mu sync.Mutex;data strings.Builder}
+func (l *brokerLog) Write(data []byte)(int,error){l.mu.Lock();defer l.mu.Unlock();return l.data.Write(data)}
+func (l *brokerLog) String()string{l.mu.Lock();defer l.mu.Unlock();return l.data.String()}
+func awaitBroker(t *testing.T,ctx context.Context,name string,condition func()bool){
+ t.Helper();for !condition(){select{case <-ctx.Done():t.Fatalf("%s: %v",name,ctx.Err());case <-time.After(30*time.Millisecond):}}
+}
+func brokerFactory(t *testing.T,group string) event.Factory {
+ t.Helper();config,err:={{CONFIG_LOADER}}("SPINE_EVENTS_");if err!=nil{t.Fatal(err)}
+ {{GROUP_CONFIG}}
+ factory,err:=platform.NewFactory(config);if err!=nil{t.Fatal(err)};return factory
+}
+
+// BuildApplication은 CLI가 생성한 원본 그대로 사용합니다. 관찰은 브로커 offset과 queue 상태로 수행합니다.
+func TestGeneratedRealBroker(t *testing.T) {
+ const kind="{{PROVIDER}}"
+ const httpPlatform="{{HTTP}}"
+ ctx,cancel:=context.WithTimeout(context.Background(),75*time.Second);defer cancel()
+ name:=fmt.Sprintf("spine-cli-%d",time.Now().UnixNano());input,output:=name+".input",name+".output"
+ broker,url:=os.Getenv("SPINE_TEST_KAFKA_BROKER"),os.Getenv("SPINE_TEST_RABBITMQ_URL")
+ if broker=="" || url==""{t.Fatal("both actual broker endpoints are required")}
+ t.Setenv("SPINE_EVENTS_BROKERS",broker);t.Setenv("SPINE_EVENTS_GROUP_ID",name+".worker")
+ t.Setenv("SPINE_EVENTS_URL",url);t.Setenv("SPINE_EVENTS_EXCHANGE",name)
+ t.Setenv("SPINE_EVENTS_ALLOW_INSECURE","true");t.Setenv("SPINE_EVENTS_TOPIC_PREFIX","");t.Setenv("SPINE_EVENTS_QUEUE_PREFIX","")
+ var channel *amqp.Channel
+ var kafkaClient *kafka.Client
+ if kind=="kafka" {
+  connection,err:=kafka.DialContext(ctx,"tcp",broker);if err!=nil{t.Fatal(err)};defer connection.Close()
+  if err:=connection.CreateTopics(kafka.TopicConfig{Topic:input,NumPartitions:1,ReplicationFactor:1},kafka.TopicConfig{Topic:output,NumPartitions:1,ReplicationFactor:1});err!=nil{t.Fatal(err)}
+  defer connection.DeleteTopics(input,output)
+  transport:=&kafka.Transport{};defer transport.CloseIdleConnections()
+  kafkaClient=&kafka.Client{Addr:kafka.TCP(broker),Transport:transport,Timeout:3*time.Second}
+ } else {
+  connection,err:=amqp.Dial(url);if err!=nil{t.Fatal(err)};defer connection.Close()
+  channel,err=connection.Channel();if err!=nil{t.Fatal(err)};defer channel.Close()
+  defer channel.ExchangeDelete(name,false,false);defer channel.QueueDelete(input,false,false,false);defer channel.QueueDelete(output,false,false,false)
+ }
+ observer,err:=brokerFactory(t,name+".observer").NewReader(ctx,event.Subscription{Topic:output});if err!=nil{t.Fatal(err)};defer observer.Close(context.Background())
+ publisher,err:=brokerFactory(t,name+".external").NewPublisher(ctx);if err!=nil{t.Fatal(err)};defer publisher.Close(context.Background())
+ app,options,err:=BuildApplication();if err!=nil{t.Fatal(err)}
+ if (options.HTTP!=nil)!=(httpPlatform=="echo"){t.Fatal("generated HTTP selection does not match options")}
+ controller:=&brokerController{input:input,output:output}
+ app.Constructor(func()*brokerController{return controller})
+ if err:=app.Consumers().Register(input,(*brokerController).Handle);err!=nil{t.Fatal(err)}
+ address:=""
+ if options.HTTP!=nil {
+  listener,err:=net.Listen("tcp","127.0.0.1:0");if err!=nil{t.Fatal(err)};address=listener.Addr().String();listener.Close();options.Address=address
+  app.Route("POST","/events",(*brokerController).Emit)
+ }
+ if err:=app.Validate(options);err!=nil{t.Fatal(err)}
+ options.EnableGracefulShutdown=true;options.ShutdownTimeout=10*time.Second
+ logs:=&brokerLog{};previous:=log.Writer();log.SetOutput(io.MultiWriter(previous,logs));defer log.SetOutput(previous)
+ runCtx,stop:=context.WithCancel(ctx);done:=make(chan error,1);stopped:=false
+ go func(){done<-app.RunContext(runCtx,options)}()
+ shutdown:=func(){if stopped{return};stop();select{case err:=<-done:stopped=true;if err!=nil{t.Error(err)};case <-time.After(15*time.Second):t.Error("generated app shutdown timed out")}}
+ defer shutdown()
+ awaitBroker(t,ctx,"consumer readiness",func()bool{return strings.Contains(logs.String(),"Starting consumer for topic '"+input+"'")})
+ client:=&http.Client{Timeout:5*time.Second}
+ send:=func(body string)int{
+  response,err:=client.Post("http://"+address+"/events","application/json",strings.NewReader(body));if err!=nil{t.Fatal(err)};defer response.Body.Close();return response.StatusCode
+ }
+ if options.HTTP!=nil {
+  awaitBroker(t,ctx,"HTTP health",func()bool{response,err:=client.Get("http://"+address+"/health");if err!=nil{return false};defer response.Body.Close();return response.StatusCode==200})
+  if status:=send(`{}`);status!=400 || controller.sent.Load()!=0{t.Fatalf("HTTP validator did not block input: status=%d calls=%d",status,controller.sent.Load())}
+  if status:=send(`{"email":"kim@example.com","age":20}`);status!=200{t.Fatal(status)}
+ } else {
+  if err:=publisher.Publish(ctx,event.Message{EventName:input,Payload:[]byte(`{"email":"kim@example.com","age":20}`),OccurredAt:time.Now()});err!=nil{t.Fatal(err)}
+ }
+ result,err:=observer.Read(ctx);if err!=nil{t.Fatal(err)}
+ var dto brokerDTO;if err:=json.Unmarshal(result.Message().Payload,&dto);err!=nil{t.Fatal(err)}
+ if dto.Email!="kim@example.com" || dto.Age!=20{t.Fatalf("unexpected result: %+v",dto)}
+ if err:=result.Ack(ctx);err!=nil{t.Fatal(err)}
+ offset:=func()int64{
+  response,err:=kafkaClient.OffsetFetch(ctx,&kafka.OffsetFetchRequest{GroupID:name+".worker",Topics:map[string][]int{input:{0}}})
+  if err!=nil || response.Error!=nil || len(response.Topics[input])!=1{return -1}
+  return response.Topics[input][0].CommittedOffset
+ }
+ if kind=="kafka" {awaitBroker(t,ctx,"successful input ACK offset",func()bool{return offset()==1})}
+ if err:=publisher.Publish(ctx,event.Message{EventName:input,Payload:[]byte(`{"email":"external-invalid","age":0}`),OccurredAt:time.Now()});err!=nil{t.Fatal(err)}
+ failure:="Handler execution failed ("+input+")"
+ count:=1;if kind=="kafka"{count=2}
+ awaitBroker(t,ctx,"external DTO rejection and delivery policy",func()bool{return strings.Count(logs.String(),failure)>=count})
+ shutdown()
+ if !stopped{t.Fatal("app did not stop")}
+ if controller.handled.Load()!=1{t.Fatalf("invalid external DTO reached handler: %d",controller.handled.Load())}
+ if options.HTTP!=nil && controller.sent.Load()!=1{t.Fatalf("invalid HTTP DTO reached handler: %d",controller.sent.Load())}
+ if strings.Contains(logs.String(),"NACK failed") || strings.Contains(logs.String(),"ACK failed"){t.Fatalf("settlement failed: %s",logs.String())}
+ if kind=="kafka" {
+  if got:=offset();got!=1{t.Fatalf("invalid offset was committed: %d",got)}
+  replay,err:=brokerFactory(t,name+".worker").NewReader(ctx,event.Subscription{Topic:input});if err!=nil{t.Fatal(err)};defer replay.Close(context.Background())
+  delivery,err:=replay.Read(ctx);if err!=nil{t.Fatal(err)}
+  if !strings.Contains(string(delivery.Message().Payload),"external-invalid"){t.Fatalf("ACKed valid message was redelivered: %s",delivery.Message().Payload)}
+  _=delivery.Nack(ctx)
+  t.Log("native Kafka evidence: successful offset committed at 1; invalid DTO blocked, NACKed and redelivered; offset remains 1")
+ } else {
+  queue,err:=channel.QueueInspect(input);if err!=nil{t.Fatal(err)}
+  if queue.Messages!=0 || queue.Consumers!=0{t.Fatalf("ACK/reject left a pending delivery: %+v",queue)}
+  t.Log("native RabbitMQ evidence: valid result received; invalid DTO blocked and reject policy settled input; queue empty after consumer shutdown")
+ }
+ if address!=""{listener,err:=net.Listen("tcp",address);if err!=nil{t.Fatalf("generated listener not released: %v",err)};listener.Close()}
+}

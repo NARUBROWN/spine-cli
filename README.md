@@ -12,7 +12,8 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 
 ## 권장 환경과 설치
 
-- 최소 Go 버전: 1.25.5
+- CLI와 검증기 없는 생성 앱: Go 1.25.5 이상
+- `--validator playground`를 선택한 앱: Go 1.26.0 이상 (go-playground v10.30.6)
 - 기본 HTTP 플랫폼: Echo
 - Spine, Echo 플랫폼과 Echo 버전은 설치한 CLI에 포함된 검증 레시피가 선택합니다. 생성된 `go.mod`에서 확인하세요.
 
@@ -52,12 +53,74 @@ curl http://localhost:8080/health
 활성 Go workspace는 설치 범위 밖이므로 `GOWORK=off`로 실행하거나 설치를 생략하세요.
 
 새 프로젝트에는 명시적인 `BuildApplication` composition root, `app.Validate`,
-`GET /health`, `spine.toml`이 포함됩니다.
+HTTP 사용 시 `GET /health`, `spine.toml`이 포함됩니다.
+
+## HTTP·이벤트·검증기 선택
+
+새 프로젝트는 `spine.New(echoplatform.Option(), spine.WithEventAdapter(...), spine.WithValidator(...))`로
+하나의 App을 조립합니다. 기본값은 HTTP `echo`, 검증기 `none`이며 두 layout에 같은 옵션을 적용합니다.
+
+```sh
+# HTTP + Kafka + 검증기: diff와 base_hash를 검토한 뒤 같은 명령에 적용
+spine new shop --module example.com/shop --event-platform events:kafka \
+  --validator playground --dry-run --json
+spine new shop --module example.com/shop --event-platform events:kafka \
+  --validator playground --if-match <base_hash> --json
+
+# HTTP 없는 worker
+spine new worker --platform none --event-platform jobs:rabbitmq
+
+# 복수 이벤트 플랫폼
+spine new gateway --event-platform events:kafka --event-platform jobs:rabbitmq
+```
+
+| 옵션 | 값과 기본 동작 |
+| --- | --- |
+| `--platform` | `echo` (기본값), `none` (이벤트 플랫폼 필요) |
+| `--event-platform` | 반복 가능한 `[name:]kafka` 또는 `[name:]rabbitmq`; 이름 생략 시 provider 이름 사용 |
+| `--validator` | `none` (기본값), `playground` |
+
+이벤트 이름은 `[a-z][a-z0-9_]*`이며 중복을 거부합니다. 같은 provider도 서로 다른 이름으로 등록할 수 있습니다.
+선택한 플랫폼과 검증기만 직접 의존성으로 추가하고, `NewFactory(Config)`와 `playground.New()`의
+오류를 `BuildApplication`에서 반환합니다. HTTP 없는 worker에는 Echo와 HTTP health 경로를 넣지 않습니다.
+
+이벤트 설정은 `internal/application/platform_config.go`에서 이름별 환경 변수로 읽습니다.
+이름 `events`의 Kafka에는 `SPINE_EVENTS_BROKERS` (쉼표로 구분)와 `SPINE_EVENTS_GROUP_ID`가 필요합니다.
+RabbitMQ에는 `SPINE_EVENTS_URL`과 `SPINE_EVENTS_EXCHANGE`가 필요합니다. 두 플랫폼 모두
+`SPINE_EVENTS_TOPIC_PREFIX`, RabbitMQ에는 `SPINE_EVENTS_QUEUE_PREFIX`도 선택할 수 있습니다.
+기본 전송은 TLS이고 로컬 평문 브로커에는 `SPINE_EVENTS_ALLOW_INSECURE=true`를 명시합니다.
+설정 누락과 잘못된 boolean, factory 설정 오류는 실행 시 반환됩니다. 설치 중에는 설정 helper와 factory를 실행하지 않습니다.
+
+factory는 consume/publish를 모두 활성화합니다. consumer 생성은 `spine g consumer`로 별도 요청하고
+생성된 미구현 핸들러를 작성하세요. 여러 플랫폼은 같은 consumer registry를 사용하므로
+각 브로커의 topic/prefix와 중복 처리 정책을 함께 설계해야 합니다. RabbitMQ의 기본 실패 정책은 reject입니다.
+검증기를 선택한 앱은 DTO의 `validate` 태그를 HTTP JSON·폼, WS와 consumer 핸들러 전에 검사합니다.
+`none`이면 이 자동 검증을 생략합니다.
+
+### 공개 버전 레시피
+
+현재 소스의 `public-contracts-20261103`은 다음 공개 버전을 고정합니다.
+2026-11-03 확인 시 [Spine PR #16](https://github.com/NARUBROWN/spine/pull/16)은 OPEN/DRAFT이고
+최신 정식 코어 태그는 v0.6.0입니다. 아래 조합은 공개 pseudo-version을 포함한 사전 릴리스 레시피입니다.
+이 기능이 기존 v0.6.0이나 이미 배포된 CLI에 있다고 가정하지 마세요.
+
+| 모듈 | 버전 |
+| --- | --- |
+| Spine | `v0.6.1-0.20261103010611-6e60b34204d3` |
+| Echo 플랫폼 | `v0.1.0` |
+| Kafka 플랫폼 | `v0.0.0-20261103001523-e4b87708f841` |
+| RabbitMQ 플랫폼 | `v0.0.0-20261103001525-b2be17ee8a11` |
+| playground 검증기 | `v0.0.0-20261103011253-5508c82a155e` |
+
+공개 계약은 `contract/http`, `contract/event`, `contract/validator`입니다.
+이전 `adapter`, `adapter/http`, `adapter/event`는 호환 별칭입니다.
+생성 앱과 브로커 E2E의 재현 절차와 증거 범위는 [E2E 안내](test/assembly-e2e/README.md)를 참고하세요.
 
 ## 프로젝트 의존성 갱신
 
 기존 Echo 프로젝트의 의존성은 `spine update`로 갱신할 수 있습니다.
-이 명령은 현재 CLI에 포함된 검증 레시피로 Spine, Echo 플랫폼과 Echo를 함께 갱신합니다.
+새 앱은 `spine.toml`의 `recipe`와 플랫폼·검증기 선택을 사용합니다. `recipe`가 없는 기존 Echo 앱은
+기존 `echo-v0.1.0-spine-v0.6.0` 레시피를 유지합니다. 의존성 갱신으로 새 API 연결 소스를 생성하지 않습니다.
 
 ```sh
 spine update --dry-run
@@ -178,6 +241,10 @@ legacy에서만 지원하며, 새 구조에 CRUD 생성 기능을 추가하지 �
 `platform.New()`, `spine.New(platform.Option())`,
 `spine.New(spine.WithHTTPAdapter(platform.NewFactory()))`를 같은 Echo 선택으로 인식합니다.
 `platform.WithEcho(func(*echo.Echo))`를 전달하는 플랫폼 생성 옵션도 인식하지만 콜백이나 native 경로는 실행하거나 분석하지 않습니다.
+`event_adapters`와 `validator`는 이름 있는 `WithEventAdapter`와 `WithValidator`의 생성식을 보여 줍니다.
+알려진 factory의 직접 지역 변수 대입을 추적하며 중복 이름, 설정과 등록 불일치, 오래된 코어를 진단합니다.
+임의 helper, 재대입, 가변 옵션과 사용자 정의 검증기 옵션은 미해결로 표시합니다.
+이벤트의 `configuration: runtime-values-not-evaluated`는 환경 설정값·연결 가능성·factory capability를 확인하지 않았다는 뜻입니다.
 Spine v0.6.0에서 제거된 `NewWithHTTPAdapter`와 `App.Transport`는 새 생성식과 `WithEcho`로 바꾸도록 진단합니다.
 리스너 없이 앱을 준비하는 테스트는 `app.Prepare(ctx, options)`를 사용합니다.
 `inspect`의 `http_adapter`는 소스에서 확인한 선택과 오프라인 모듈 그래프의 실제 버전을
@@ -258,6 +325,10 @@ entrypoint = "."
 composition = "./internal/application"
 port = 8080
 layout = "layered-v1"
+platform = "echo"
+recipe = "public-contracts-20261103"
+validator = "none"
+# 이벤트 선택 시 예: event_platforms = ["events:kafka", "jobs:rabbitmq"]
 ```
 
 `module`은 `go.mod`의 module path와 같아야 합니다.

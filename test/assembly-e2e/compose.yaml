@@ -1,0 +1,21 @@
+services:
+  kafka:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.18
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:29092
+      - --advertise-kafka-addr=internal://kafka:9092,external://127.0.0.1:29092
+    ports:
+      - "127.0.0.1:29092:29092"
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "127.0.0.1:25672:5672"
+      - "127.0.0.1:25673:15672"
