@@ -61,6 +61,18 @@ func adapterSelection(expression ast.Expr, imports map[string]string) string {
 			selection = "echo"
 			continue
 		}
+		if option, ok := importedCall(argument, imports, spineImportPath, "WithEventAdapter"); ok && len(option.Args) >= 2 && !option.Ellipsis.IsValid() {
+			continue
+		}
+		if option, ok := importedCall(argument, imports, spineImportPath, "WithValidator"); ok && len(option.Args) == 1 && !option.Ellipsis.IsValid() {
+			continue
+		}
+		if option, ok := importedCall(argument, imports, gorillaPlatformPath, "Option"); ok && len(option.Args) == 0 && !option.Ellipsis.IsValid() {
+			continue
+		}
+		if option, ok := importedCall(argument, imports, spineImportPath, "WithWebSocketAdapter"); ok && len(option.Args) == 1 && !option.Ellipsis.IsValid() {
+			continue
+		}
 		// 모르는 옵션이 factory를 바꿀 가능성을 배제하지 않습니다.
 		return "unresolved"
 	}

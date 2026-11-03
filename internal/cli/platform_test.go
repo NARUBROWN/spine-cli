@@ -47,7 +47,7 @@ func TestNewSkipInstallIsOfflineAndGuardsMode(t *testing.T) {
 		t.Fatalf("skip-install produced go.sum: %v", err)
 	}
 	source, _ := os.ReadFile("inventory/internal/application/application.go")
-	if !bytes.Contains(source, []byte("platform.New()")) {
+	if !bytes.Contains(source, []byte("spine.New(")) {
 		t.Fatal("missing platform selection")
 	}
 }

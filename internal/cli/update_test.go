@@ -174,8 +174,8 @@ func TestUpdateRejectsBrokenContractWithoutPublishing(t *testing.T) {
 	t.Setenv("GOFLAGS", " ")
 	// 이전 커널 호출이 남아 있으면 소스를 자동 이동하지 않고 계약 오류로 중단합니다.
 	source, _ := os.ReadFile("internal/application/application.go")
-	source = bytes.ReplaceAll(source, []byte(`platform "github.com/NARUBROWN/spine-echo-platform"`), []byte(`_ "github.com/NARUBROWN/spine-echo-platform"`))
-	source = bytes.ReplaceAll(source, []byte("platform.New()"), []byte("spine.New()"))
+	source = bytes.ReplaceAll(source, []byte(`echoplatform "github.com/NARUBROWN/spine-echo-platform"`), []byte(`_ "github.com/NARUBROWN/spine-echo-platform"`))
+	source = bytes.ReplaceAll(source, []byte("spine.New(echoplatform.Option())"), []byte("spine.New()"))
 	writeE2EFile(t, "internal/application/application.go", string(source))
 	before, _ := os.ReadFile("go.mod")
 	result, code := updateTestResult(t)
@@ -310,5 +310,36 @@ func TestUpdateRollbackRestoresDependencyFiles(t *testing.T) {
 	}
 	if _, err := os.Stat("go.sum"); !os.IsNotExist(err) {
 		t.Fatal("created go.sum was not rolled back")
+	}
+}
+
+func TestUpdateWithoutRecipeKeepsStableEchoDependencies(t *testing.T) {
+	layeredProject(t)
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", " ")
+	config, _ := os.ReadFile("spine.toml")
+	lines := []string{}
+	for _, line := range strings.Split(string(config), "\n") {
+		if !strings.HasPrefix(line, "recipe = ") {
+			lines = append(lines, line)
+		}
+	}
+	writeE2EFile(t, "spine.toml", strings.Join(lines, "\n"))
+	writeE2EFile(t, "go.mod", "module example.com/todo\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine v0.5.2\n")
+	before, _ := os.ReadFile("internal/application/application.go")
+	plan, code := updateTestResult(t, "--dry-run")
+	if code != 0 || plan["recipe"] != echoRecipe {
+		t.Fatalf("existing app changed recipe: %d %+v", code, plan)
+	}
+	if result, code := updateTestResult(t, "--if-match", plan["base_hash"].(string)); code != 0 {
+		t.Fatalf("stable update failed: %d %+v", code, result)
+	}
+	mod, _ := os.ReadFile("go.mod")
+	if !strings.Contains(string(mod), spineImportPath+" "+platformSpineVersion) || strings.Contains(string(mod), assemblySpineVersion) {
+		t.Fatalf("wrong stable version: %s", mod)
+	}
+	after, _ := os.ReadFile("internal/application/application.go")
+	if !bytes.Equal(before, after) {
+		t.Fatal("dependency update rewrote application")
 	}
 }

@@ -47,7 +47,7 @@ func TestLayeredGeneratedProjectEndToEnd(t *testing.T) {
 		result := runE2E(binary, root, nil, args...)
 		assertE2ESuccess(t, result, "apply reviewed plan")
 	}
-	apply(workspace, "new", "todo", "--module", "example.com/todo")
+	apply(workspace, "new", "todo", "--module", "example.com/todo", "--websocket-platform", "gorilla")
 	project := filepath.Join(workspace, "todo")
 	compositionPath := filepath.Join(project, "internal/application/application.go")
 	composition, err := os.ReadFile(compositionPath)
@@ -55,7 +55,7 @@ func TestLayeredGeneratedProjectEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	compositionText := strings.Replace(string(composition), "import (", "import (\n_ \"example.com/todo/src/repository/account\"", 1)
-	compositionText = strings.Replace(compositionText, "app := platform.New()", "app := platform.New()\nif \"disabled\" == \"enabled\" { app.Route(\"GET\", \"/health\", (*controller.HealthController).Get) }", 1)
+	compositionText = strings.Replace(compositionText, "return app, boot.Options{", "if \"disabled\" == \"enabled\" { app.Route(\"GET\", \"/health\", (*controller.HealthController).Get) }\nreturn app, boot.Options{", 1)
 	writeE2EFile(t, compositionPath, compositionText)
 	for _, group := range []string{"account/user", "admin/user"} {
 		apply(project, "g", "resource", group)

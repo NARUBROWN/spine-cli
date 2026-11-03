@@ -96,7 +96,11 @@ func (i *contractInspector) inspectHTTPAdapter(config projectConfig, file *ast.F
 			break
 		}
 	}
+	if config.Platform == "none" && (a.Provider != "" || a.Enabled == nil || *a.Enabled) {
+		add("HTTP_PLATFORM_MISMATCH", "spine.toml disables HTTP but the composition enables it or cannot be resolved")
+	}
 	i.contract.HTTPAdapter = a
+	i.inspectAssembly(config, file, fset, function, index)
 }
 
 // 성공 경로에서 반환하는 Options를 분석합니다. 오류 반환용 빈 Options는 제외합니다.

@@ -24,12 +24,15 @@ type installationStage struct {
 type newProjectOptions struct {
 	Name                     resourceName
 	Module, Layout, Platform string
+	Events                   []eventPlatformSpec
+	Validator                string
+	WebSocketPlatform        string
 	SkipInstall, JSON        bool
 	Write                    writeOptions
 }
 
 func parseNewOptions(args []string) (newProjectOptions, error) {
-	options := newProjectOptions{Layout: layeredLayout, Platform: "echo"}
+	options := newProjectOptions{Layout: layeredLayout, Platform: "echo", Validator: "none", WebSocketPlatform: "none"}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return options, fmt.Errorf("project name is required")
 	}
@@ -40,7 +43,7 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	options.Name, options.Module = name, "github.com/your-org/"+name.Route
 	for index := 1; index < len(args); index++ {
 		switch args[index] {
-		case "--module", "--layout", "--platform", "--if-match":
+		case "--module", "--layout", "--platform", "--event-platform", "--validator", "--websocket-platform", "--if-match":
 			key := args[index]
 			if index+1 == len(args) {
 				return options, fmt.Errorf("%s requires a value", key)
@@ -53,6 +56,16 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 				options.Layout = args[index]
 			case "--platform":
 				options.Platform = args[index]
+			case "--event-platform":
+				spec, err := parseEventPlatform(args[index])
+				if err != nil {
+					return options, err
+				}
+				options.Events = append(options.Events, spec)
+			case "--validator":
+				options.Validator = args[index]
+			case "--websocket-platform":
+				options.WebSocketPlatform = args[index]
 			case "--if-match":
 				options.Write.IfMatch = args[index]
 			}
@@ -71,9 +84,19 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	if options.Layout != layeredLayout && options.Layout != "legacy" {
 		return options, fmt.Errorf("unsupported layout: %s", options.Layout)
 	}
-	if options.Platform != "echo" {
+	if options.Platform != "echo" && options.Platform != "none" {
 		return options, fmt.Errorf("unsupported platform: %s", options.Platform)
 	}
+	if options.WebSocketPlatform != "none" && options.WebSocketPlatform != "gorilla" {
+		return options, fmt.Errorf("unsupported WebSocket platform: %s", options.WebSocketPlatform)
+	}
+	if options.WebSocketPlatform == "gorilla" && options.Platform != "echo" {
+		return options, fmt.Errorf("--websocket-platform gorilla requires --platform echo")
+	}
+	if err := validateAssemblySelection(options.Platform, options.Events, options.Validator); err != nil {
+		return options, err
+	}
+	sort.Slice(options.Events, func(i, j int) bool { return options.Events[i].Name < options.Events[j].Name })
 	if options.Write.Force && !options.SkipInstall {
 		return options, fmt.Errorf("--force requires --skip-install; installed projects must use a fresh destination")
 	}
@@ -86,19 +109,38 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 	config := defaultProjectConfig(options.Module)
 	config.Layout, config.Platform = options.Layout, options.Platform
-	files := map[string]string{
-		"go.mod":                              fmt.Sprintf("module %s\n\ngo 1.25.5\n\nrequire (\n github.com/NARUBROWN/spine %s\n github.com/NARUBROWN/spine-echo-platform %s\n)\n", options.Module, platformSpineVersion, echoPlatformVersion),
-		"main.go":                             strings.ReplaceAll(projectMain, "{{MODULE}}", options.Module),
-		"internal/application/application.go": projectApplication,
-		"internal/application/application_test.go": projectApplicationTest,
-		"README.md":  strings.ReplaceAll(legacyProjectReadme, "{{MODULE}}", options.Module),
-		"spine.toml": projectConfigTemplate(config), ".gitignore": ".env\nbin/\ncoverage.out\n",
+	config.Recipe, config.Events, config.Validator = currentAssemblyRecipe, options.Events, options.Validator
+	config.WebSocketPlatform = options.WebSocketPlatform
+	application, err := assemblyApplication(options)
+	if err != nil {
+		return nil, err
 	}
-	if options.Layout == layeredLayout {
-		files["internal/application/application.go"] = strings.ReplaceAll(layeredProjectApplication, "{{MODULE}}", options.Module)
+	files := map[string]string{
+		"go.mod":                              assemblyGoMod(options),
+		"main.go":                             strings.ReplaceAll(projectMain, "{{MODULE}}", options.Module),
+		"internal/application/application.go": application,
+		"internal/application/application_test.go": projectApplicationTest,
+		"README.md":  assemblyReadme(options),
+		"spine.toml": projectConfigTemplate(config),
+		".gitignore": ".env\nbin/\ncoverage.out\n",
+	}
+	if options.Layout == layeredLayout && options.Platform == "echo" {
 		files["src/controller/health_controller.go"] = layeredHealthController
 		files["src/route/route.go"] = strings.ReplaceAll(layeredHealthRoute, "{{MODULE}}", options.Module)
-		files["README.md"] = strings.ReplaceAll(projectReadme, "{{MODULE}}", options.Module)
+	}
+	if len(options.Events) > 0 {
+		setup := ""
+		for _, spec := range options.Events {
+			prefix := eventEnvPrefix(spec.Name)
+			if spec.Provider == "kafka" {
+				setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"BROKERS", "127.0.0.1:9092", prefix+"GROUP_ID", "generated-test")
+			} else {
+				setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"URL", "amqp://guest:guest@127.0.0.1:5672/", prefix+"EXCHANGE", "generated-test", prefix+"ALLOW_INSECURE", "true")
+			}
+		}
+		files["internal/application/application_test.go"] = strings.Replace(projectApplicationTest, "app, options, err := BuildApplication()", setup+"app, options, err := BuildApplication()", 1)
+		files["internal/application/platform_config.go"] = assemblyConfig(options)
+		files["internal/application/platform_config_test.go"] = assemblyConfigTest(options)
 	}
 	for path, source := range files {
 		if strings.HasSuffix(path, ".go") {
@@ -136,7 +178,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	stages := []installationStage{{"scaffold", "pending"}, {"dependencies", "skipped"}, {"modules", "skipped"}, {"contract", "skipped"}, {"build", "skipped"}, {"publish", "pending"}}
 	modules := []selectedModule{}
 	dir := options.Name.Route
-	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": echoRecipe, "stability": "development", "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
+	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "released", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
 	finish := func(code int, stage string, err error) int {
 		if err != nil {
 			for index := range stages {
@@ -189,7 +231,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 			return finish(10, "scaffold", err)
 		}
 		var failure *installationFailure
-		modules, failure = installEchoProject(ctx, staging, files, stages)
+		modules, failure = installAssemblyProject(ctx, staging, files, stages, currentAssemblyModules(options))
 		if failure != nil {
 			return finish(failure.Code, failure.Stage, failure.Cause)
 		}
@@ -212,7 +254,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	}
 	// 생성 모드와 최종 내용도 해시에 넣어 다른 레시피의 계획을 재사용하지 못하게 합니다.
 	digest := sha256.New()
-	fmt.Fprintf(digest, "%s\n%s\n%s\n%t\n%t\n", state, echoRecipe, options.Platform, options.SkipInstall, options.Write.Force)
+	fmt.Fprintf(digest, "%s\n%s\n%s\n%t\n%t\n", state, currentAssemblyRecipe, options.Platform, options.SkipInstall, options.Write.Force)
 	for _, path := range paths {
 		fmt.Fprintf(digest, "%d:%s%d:%s", len(path), path, len(files[path]), files[path])
 	}
@@ -270,7 +312,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 			fmt.Fprintf(out, "Would create Spine application in %s\n%s", dir, result["diff"])
 			printDryRunHash(out, baseHash)
 		} else {
-			fmt.Fprintf(out, "Created Spine application in %s (Echo, development recipe %s)\n\nNext steps:\n  cd %s\n", dir, echoRecipe, dir)
+			fmt.Fprintf(out, "Created Spine application in %s (%s, release recipe %s)\n\nNext steps:\n  cd %s\n", dir, options.Platform, currentAssemblyRecipe, dir)
 			if options.SkipInstall {
 				fmt.Fprintln(out, "  go mod tidy\n  spine dev\n\nDependency installation and build verification were skipped.")
 			} else {

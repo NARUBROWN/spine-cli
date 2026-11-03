@@ -1,0 +1,53 @@
+name: CLI Public Platform E2E
+on:
+  pull_request:
+  push:
+    branches: [main, public-platform-generator]
+permissions:
+  contents: read
+env:
+  GOWORK: 'off'
+jobs:
+  public-platforms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      rabbitmq:
+        image: rabbitmq:3-management
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+      - name: Prepare minimum Go toolchain
+        run: |
+          minimum_go_root=$(GOTOOLCHAIN=go1.25.5 go env GOROOT)
+          echo "SPINE_TEST_GO125=$minimum_go_root/bin/go" >> "$GITHUB_ENV"
+      - name: Start Redpanda
+        run: |
+          docker run -d --name cli-kafka -p 127.0.0.1:19092:9092 redpandadata/redpanda:v24.3.18 redpanda start --overprovisioned --smp 1 --memory 512M --reserve-memory 0M --node-id 0 --check=false --kafka-addr 0.0.0.0:9092 --advertise-kafka-addr 127.0.0.1:19092
+          for attempt in $(seq 1 60); do
+            if docker exec cli-kafka rpk cluster info -X brokers=127.0.0.1:9092 >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs cli-kafka
+          exit 1
+      - run: go vet ./...
+      - name: CLI race and generated public applications
+        env:
+          SPINE_TEST_KAFKA_BROKER: 127.0.0.1:19092
+          SPINE_TEST_RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
+        run: go test -race -v ./... -count=1 -timeout=20m
+      - name: Check reproducibility
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          test -z "$(gofmt -l .)"

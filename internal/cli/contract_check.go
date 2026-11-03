@@ -10,17 +10,20 @@ import (
 const contractCheckSchemaVersion = "spine.contract-check/v1alpha1"
 
 type contractCheckReport struct {
-	SchemaVersion    string                `json:"schema_version"`
-	ContractSchema   string                `json:"contract_schema"`
-	AnalysisMode     string                `json:"analysis_mode"`
-	AnalysisComplete bool                  `json:"analysis_complete"`
-	Valid            bool                  `json:"valid"`
-	WarningsAsErrors bool                  `json:"warnings_as_errors"`
-	ErrorCount       int                   `json:"error_count"`
-	WarningCount     int                   `json:"warning_count"`
-	Diagnostics      []contractDiagnostic  `json:"diagnostics"`
-	HTTPAdapter      *httpAdapterSelection `json:"http_adapter,omitempty"`
-	EvidenceBoundary []string              `json:"evidence_boundary"`
+	SchemaVersion    string                    `json:"schema_version"`
+	ContractSchema   string                    `json:"contract_schema"`
+	AnalysisMode     string                    `json:"analysis_mode"`
+	AnalysisComplete bool                      `json:"analysis_complete"`
+	Valid            bool                      `json:"valid"`
+	WarningsAsErrors bool                      `json:"warnings_as_errors"`
+	ErrorCount       int                       `json:"error_count"`
+	WarningCount     int                       `json:"warning_count"`
+	Diagnostics      []contractDiagnostic      `json:"diagnostics"`
+	EventAdapters    []eventAdapterSelection   `json:"event_adapters"`
+	WebSocketAdapter webSocketAdapterSelection `json:"websocket_adapter"`
+	Validator        validatorSelection        `json:"validator"`
+	HTTPAdapter      *httpAdapterSelection     `json:"http_adapter,omitempty"`
+	EvidenceBoundary []string                  `json:"evidence_boundary"`
 }
 
 func runContractCheck(args []string, out, errOut io.Writer) int {
@@ -73,12 +76,14 @@ func buildContractCheckReport(contract applicationContract, warningsAsErrors boo
 		AnalysisMode:     contract.AnalysisMode,
 		AnalysisComplete: contract.Complete,
 		Valid:            true,
+		EventAdapters:    contract.EventAdapters, Validator: contract.Validator, WebSocketAdapter: contract.WebSocketAdapter,
 		WarningsAsErrors: warningsAsErrors,
 		Diagnostics:      append([]contractDiagnostic{}, contract.Diagnostics...),
 		EvidenceBoundary: []string{
 			"project source was inspected without claiming complete Go program execution",
 			"direct os.Getenv registration names and string equality conditions use this inspection process's environment; use the same inputs at runtime",
 			"runtime HTTP routes, DI constructors, and interceptors were not observed",
+			"platform settings, factory capabilities and validator rules were not executed or evaluated",
 			"external databases, brokers, listeners, and deployed behavior were not checked",
 		},
 	}

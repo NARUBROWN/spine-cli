@@ -70,10 +70,10 @@ func currentCommandSchema() commandSchema {
 		{Name: "explain", Summary: "Explain one HTTP, consumer, or WebSocket execution path", Arguments: []argumentDefinition{{Name: "kind", Required: true, Enum: []string{"http", "consumer", "websocket"}}, {Name: "selector", Required: true}}, Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "generate", Summary: "Generate and optionally register an application component", Arguments: []argumentDefinition{{Name: "kind", Required: true, Enum: []string{"resource", "slice", "consumer", "websocket", "controller", "service", "repository"}}, {Name: "name", Required: true}}, Options: map[string]optionDefinition{"json": jsonOption, "dry-run": {Type: "boolean"}, "if-match": {Type: "string", Description: "Require the target files to match a dry-run base hash"}, "force": {Type: "boolean"}, "register": {Type: "boolean"}, "no-register": {Type: "boolean"}, "storage": {Type: "string", Enum: []string{"memory"}}, "field": {Type: "string", Repeatable: true}, "depends": {Type: "string", Repeatable: true}, "topic": {Type: "string"}, "path": {Type: "string"}}, Effects: commandEffects{WritesFiles: true}, SupportsJSON: true, SupportsDryRun: true},
 		{Name: "inspect", Summary: "Inspect the canonical static execution contract", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
-		{Name: "new", Summary: "Create a Spine project and install the Echo platform", Arguments: []argumentDefinition{{Name: "project", Required: true}}, Options: map[string]optionDefinition{"json": jsonOption, "module": {Type: "string"}, "dry-run": {Type: "boolean"}, "if-match": {Type: "string"}, "force": {Type: "boolean"}}, Effects: commandEffects{WritesFiles: true}, SupportsJSON: true, SupportsDryRun: true},
+		{Name: "new", Summary: "Create a Spine project with selected HTTP, event and validator implementations", Arguments: []argumentDefinition{{Name: "project", Required: true}}, Options: map[string]optionDefinition{"json": jsonOption, "module": {Type: "string"}, "dry-run": {Type: "boolean"}, "if-match": {Type: "string"}, "force": {Type: "boolean"}}, Effects: commandEffects{WritesFiles: true}, SupportsJSON: true, SupportsDryRun: true},
 		{Name: "schema", Summary: "Discover commands, arguments, options, and side effects", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "test", Summary: "Run all Go tests", Effects: commandEffects{Network: true}},
-		{Name: "update", Summary: "Update project dependencies to the bundled verified Echo recipe", Options: map[string]optionDefinition{"json": jsonOption, "dry-run": {Type: "boolean", Description: "Resolve and validate in a temporary copy without publishing project changes; may use network and Go caches"}, "if-match": {Type: "string", Description: "Require reviewed project inputs, recipe and dependency diff"}, "help": {Type: "boolean", Description: "Show help before reading project files"}}, Effects: commandEffects{WritesFiles: true, Network: true}, SupportsJSON: true, SupportsDryRun: true},
+		{Name: "update", Summary: "Update project dependencies to the selected bundled recipe without rewriting application source", Options: map[string]optionDefinition{"json": jsonOption, "dry-run": {Type: "boolean", Description: "Resolve and validate in a temporary copy without publishing project changes; may use network and Go caches"}, "if-match": {Type: "string", Description: "Require reviewed project inputs, recipe and dependency diff"}, "help": {Type: "boolean", Description: "Show help before reading project files"}}, Effects: commandEffects{WritesFiles: true, Network: true}, SupportsJSON: true, SupportsDryRun: true},
 		{Name: "verify", Summary: "Run contract, formatting, vet, and test verification", Options: map[string]optionDefinition{"json": jsonOption, "warnings-as-errors": {Type: "boolean"}}, Effects: commandEffects{Network: true}, SupportsJSON: true},
 		{Name: "version", Summary: "Print the Spine CLI version", Effects: commandEffects{}},
 		{Name: "dev", Summary: "Watch, rebuild, and run the application", Options: map[string]optionDefinition{"events": {Type: "string", Enum: []string{"jsonl"}, Description: "Stream lifecycle and child-process output as versioned JSON Lines"}}, Effects: commandEffects{WritesFiles: true, Network: true, LongRunning: true}},
@@ -92,7 +92,10 @@ func currentCommandSchema() commandSchema {
 			c.Options["depends"] = d
 		}
 		if c.Name == "new" {
-			c.Options["platform"] = optionDefinition{Type: "string", Enum: []string{"echo"}}
+			c.Options["platform"] = optionDefinition{Type: "string", Enum: []string{"echo", "none"}}
+			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "kafka|rabbitmq or unique name:kafka|rabbitmq; environment prefix SPINE_<NAME>_"}
+			c.Options["websocket-platform"] = optionDefinition{Type: "string", Enum: []string{"none", "gorilla"}, Description: "Default none; Gorilla requires HTTP echo"}
+			c.Options["validator"] = optionDefinition{Type: "string", Enum: []string{"none", "playground"}, Description: "Default none; playground requires Go 1.26.0+"}
 			c.Options["skip-install"] = optionDefinition{Type: "boolean", Description: "Generate files without dependency installation or build verification; offline dry-run"}
 			c.Effects.Network = true
 			c.Options["layout"] = optionDefinition{Type: "string", Enum: []string{layeredLayout, "legacy"}, Description: "New projects default to layered-v1; legacy preserves the previous generation rules"}
@@ -139,12 +142,16 @@ type projectContext struct {
 }
 
 type projectContextConfig struct {
-	Module      string `json:"module"`
-	Entrypoint  string `json:"entrypoint"`
-	Composition string `json:"composition"`
-	Port        int    `json:"port"`
-	Layout      string `json:"layout"`
-	Platform    string `json:"platform,omitempty"`
+	Module            string              `json:"module"`
+	Entrypoint        string              `json:"entrypoint"`
+	Composition       string              `json:"composition"`
+	Port              int                 `json:"port"`
+	Layout            string              `json:"layout"`
+	Platform          string              `json:"platform,omitempty"`
+	Recipe            string              `json:"recipe,omitempty"`
+	Events            []eventPlatformSpec `json:"event_platforms,omitempty"`
+	Validator         string              `json:"validator,omitempty"`
+	WebSocketPlatform string              `json:"websocket_platform,omitempty"`
 }
 
 type nextAction struct {
@@ -185,7 +192,7 @@ func runContext(args []string, out, errOut io.Writer) int {
 		SchemaVersion: contextSchemaVersion,
 		CLIVersion:    version,
 		ProjectRoot:   filepath.Clean(absoluteRoot),
-		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform},
+		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform},
 		Capabilities:  currentCapabilities(),
 		Doctor:        doctor,
 		NextActions: []nextAction{

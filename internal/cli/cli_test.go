@@ -29,7 +29,7 @@ func TestRunVersionUsesProgramName(t *testing.T) {
 	if code := Run([]string{"version"}, &out, &errOut); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, errOut.String())
 	}
-	if out.String() != "spine-cli 0.4.1\n" {
+	if out.String() != "spine-cli 0.4.2\n" {
 		t.Fatalf("unexpected version output: %q", out.String())
 	}
 }
@@ -828,7 +828,7 @@ func TestNewCreatesSpineTomlAndCurrentSpineVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+platformSpineVersion) {
+	if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+currentAssemblySpineVersion) {
 		t.Fatalf("unexpected go.mod: %s", mod)
 	}
 }

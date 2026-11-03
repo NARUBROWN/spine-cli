@@ -171,7 +171,7 @@ func selectedModules(ctx context.Context, root string, offline bool) ([]selected
 		if err != nil {
 			return nil, err
 		}
-		if module.Path == spineImportPath || module.Path == echoPlatformPath || module.Path == "github.com/labstack/echo/v5" {
+		if module.Path == spineImportPath || module.Path == echoPlatformPath || module.Path == "github.com/labstack/echo/v5" || module.Path == kafkaPlatformPath || module.Path == rabbitPlatformPath || module.Path == validatorPlatformPath || module.Path == gorillaPlatformPath {
 			result = append(result, module)
 		}
 	}
@@ -189,14 +189,25 @@ func selectedModuleVersion(modules []selectedModule, path string) string {
 }
 
 func validateEchoModules(modules []selectedModule) error {
-	for path, version := range map[string]string{spineImportPath: platformSpineVersion, echoPlatformPath: echoPlatformVersion, "github.com/labstack/echo/v5": platformEchoVersion} {
-		if actual := selectedModuleVersion(modules, path); actual != version {
-			return fmt.Errorf("platform compatibility: selected %s %s, expected %s", path, actual, version)
+	return validateRecipeModules(modules, echoRecipeModules())
+}
+
+func validateRecipeModules(modules, targets []selectedModule) error {
+	for _, target := range targets {
+		if actual := selectedModuleVersion(modules, target.Path); actual != target.Version {
+			return fmt.Errorf("platform compatibility: selected %s %s, expected %s", target.Path, actual, target.Version)
 		}
 	}
 	for _, module := range modules {
 		if module.Replace != nil {
-			return fmt.Errorf("platform compatibility: local or version replacement for %s is not part of the verified public recipe", module.Path)
+			return fmt.Errorf("platform compatibility: replacement for %s is not part of the verified public recipe", module.Path)
+		}
+		expected := false
+		for _, target := range targets {
+			expected = expected || target.Path == module.Path
+		}
+		if !expected {
+			return fmt.Errorf("platform compatibility: unexpected platform module %s", module.Path)
 		}
 	}
 	return nil

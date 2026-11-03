@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const version = "0.4.1"
+const version = "0.4.2"
 
 // Run은 Spine CLI 명령을 실행하고 요청한 출력 형식으로 결과를 전달합니다.
 func Run(args []string, out, errOut io.Writer) int {
@@ -155,7 +155,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, `Spine CLI - scaffold explicit, execution-centric Spine applications.
 
 Usage:
-  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
+  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo|none] [--event-platform [name:]kafka|rabbitmq ...] [--validator none|playground] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
   spine update [--dry-run] [--if-match <hash>] [--json]
   spine g domain <[group/]name> [--field name:type]
   spine g dto <[group/]name> [--field name:type]

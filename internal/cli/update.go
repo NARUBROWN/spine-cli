@@ -25,7 +25,7 @@ func updateHelp(args []string, out io.Writer) bool {
 	for i, arg := range args {
 		if (arg == "--help" || arg == "-h") && (i == 0 || args[i-1] != "--if-match") {
 			fmt.Fprintln(out, "Usage: spine update [--dry-run] [--if-match <hash>] [--json] [--root <directory>]")
-			fmt.Fprintln(out, "\n기존 프로젝트의 Spine과 Echo 플랫폼 의존성을 이 CLI의 검증된 레시피로 갱신합니다.\n임시 복사본에서 의존성 해석, 정적 계약 검사와 빌드를 완료한 뒤 go.mod와 go.sum을 반영합니다.\n--dry-run도 네트워크와 Go 캐시를 사용할 수 있지만 프로젝트 파일은 바꾸지 않습니다.\n현재 레시피보다 새로운 버전은 낮추지 않습니다. CLI 실행 파일과 업무 소스는 갱신하지 않습니다.\n\n예:\n  spine update\n  spine update --dry-run\n  spine update --root ./shop-api --dry-run --json")
+			fmt.Fprintln(out, "\n기존 프로젝트의 Spine과 선택한 플랫폼 의존성을 이 CLI의 검증된 레시피로 갱신합니다.\n임시 복사본에서 의존성 해석, 정적 계약 검사와 빌드를 완료한 뒤 go.mod와 go.sum을 반영합니다.\n--dry-run도 네트워크와 Go 캐시를 사용할 수 있지만 프로젝트 파일은 바꾸지 않습니다.\n현재 레시피보다 새로운 버전은 낮추지 않습니다. CLI 실행 파일과 업무 소스는 갱신하지 않습니다.\n\n예:\n  spine update\n  spine update --dry-run\n  spine update --root ./shop-api --dry-run --json")
 			return true
 		}
 	}
@@ -66,6 +66,10 @@ func echoRecipeModules() []selectedModule {
 
 // updateModuleRequirements는 레시피 외의 require와 replace 및 주석을 보존합니다.
 func updateModuleRequirements(contents []byte, module string) ([]byte, []selectedModule, error) {
+	return updateRequirementsForRecipe(contents, module, echoRecipeModules(), echoRecipe)
+}
+
+func updateRequirementsForRecipe(contents []byte, module string, targets []selectedModule, recipe string) ([]byte, []selectedModule, error) {
 	file, err := modfile.Parse("go.mod", contents, nil)
 	if err != nil {
 		return nil, nil, err
@@ -73,7 +77,6 @@ func updateModuleRequirements(contents []byte, module string) ([]byte, []selecte
 	if file.Module == nil || file.Module.Mod.Path != module {
 		return nil, nil, fmt.Errorf("spine.toml module %q must match go.mod", module)
 	}
-	targets := echoRecipeModules()
 	for _, replacement := range file.Replace {
 		if replacement.New.Version == "" {
 			return nil, nil, fmt.Errorf("local replace for %s is outside the single-module update recipe; use a published module version", replacement.Old.Path)
@@ -94,7 +97,7 @@ func updateModuleRequirements(contents []byte, module string) ([]byte, []selecte
 			previous = append(previous, selectedModule{Path: requirement.Mod.Path, Version: requirement.Mod.Version})
 			hasSpine = hasSpine || target.Path == spineImportPath
 			if semver.Compare(requirement.Mod.Version, target.Version) > 0 {
-				return nil, nil, fmt.Errorf("%s %s is newer than recipe %s (%s); install a newer CLI with a compatible recipe instead of downgrading", target.Path, requirement.Mod.Version, echoRecipe, target.Version)
+				return nil, nil, fmt.Errorf("%s %s is newer than recipe %s (%s); install a newer CLI with a compatible recipe instead of downgrading", target.Path, requirement.Mod.Version, recipe, target.Version)
 			}
 		}
 	}
@@ -163,8 +166,25 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if err != nil {
 		return finish(3, "snapshot", err)
 	}
-	if config.Platform != "" && config.Platform != "echo" {
+	if config.Platform != "" && config.Platform != "echo" && config.Platform != "none" {
 		return finish(3, "snapshot", fmt.Errorf("unsupported platform: %s", config.Platform))
+	}
+	recipe, targets := echoRecipe, echoRecipeModules()
+	if config.Recipe == assemblyRecipe {
+		recipe, targets = assemblyRecipe, assemblyModules(config.Platform, config.Events, config.Validator)
+	}
+	if config.Recipe == legacyWebSocketRecipe {
+		recipe, targets = legacyWebSocketRecipe, legacyWebSocketModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
+	}
+	if config.Recipe == currentAssemblyRecipe {
+		recipe, targets = currentAssemblyRecipe, currentAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
+	}
+	result["recipe"], result["target_modules"], result["platform"] = recipe, targets, config.Platform
+	if recipe == assemblyRecipe || recipe == legacyWebSocketRecipe {
+		result["stability"] = "prerelease"
+	}
+	if recipe == currentAssemblyRecipe {
+		result["stability"] = "released"
 	}
 	if !filepath.IsLocal(config.Entrypoint) {
 		return finish(3, "snapshot", fmt.Errorf("entrypoint must stay inside the project: %s", config.Entrypoint))
@@ -203,7 +223,7 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if err != nil {
 		return finish(3, "snapshot", err)
 	}
-	updated, requirements, err := updateModuleRequirements(contents, config.Module)
+	updated, requirements, err := updateRequirementsForRecipe(contents, config.Module, targets, recipe)
 	if err != nil {
 		return finish(3, "snapshot", err)
 	}
@@ -212,10 +232,10 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 		return finish(3, "snapshot", err)
 	}
 	stages[0].Status = "passed"
-	modules, failure := verifyEchoProject(ctx, staging, config.Entrypoint, stages)
+	modules, failure := verifyProjectRecipe(ctx, staging, config.Entrypoint, stages, targets)
 	result["selected_modules"] = modules
 	if failure != nil {
-		if failure.Stage == "modules" && selectedModuleVersion(modules, echoPlatformPath) == "" {
+		if recipe == echoRecipe && failure.Stage == "modules" && selectedModuleVersion(modules, echoPlatformPath) == "" {
 			failure.Cause = fmt.Errorf("%w; the Echo recipe requires an application import of %s and platform.New() or platform.Option(); update does not migrate application source", failure.Cause, echoPlatformPath)
 		}
 		return finish(failure.Code, failure.Stage, failure.Cause)
@@ -274,15 +294,15 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if !options.JSON {
 		if options.Write.DryRun {
 			if len(mutations) == 0 {
-				fmt.Fprintf(out, "Spine dependencies already match Echo recipe %s\n", echoRecipe)
+				fmt.Fprintf(out, "Spine dependencies already match recipe %s\n", recipe)
 			} else {
-				fmt.Fprintf(out, "Would update Spine dependencies to Echo recipe %s\n%s", echoRecipe, diff)
+				fmt.Fprintf(out, "Would update Spine dependencies to recipe %s\n%s", recipe, diff)
 			}
 			printDryRunHash(out, baseHash)
 		} else if len(mutations) == 0 {
-			fmt.Fprintf(out, "Spine dependencies already match Echo recipe %s\n", echoRecipe)
+			fmt.Fprintf(out, "Spine dependencies already match recipe %s\n", recipe)
 		} else {
-			fmt.Fprintf(out, "Updated Spine dependencies to Echo recipe %s\n", echoRecipe)
+			fmt.Fprintf(out, "Updated Spine dependencies to recipe %s\n", recipe)
 		}
 		for _, target := range modules {
 			before := selectedModuleVersion(requirements, target.Path)
