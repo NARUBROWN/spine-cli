@@ -3,13 +3,16 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"go/format"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 func runGo(args []string, production bool, out, errOut io.Writer) int {
@@ -34,29 +37,48 @@ func runProject(development bool, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	// Go 자체의 빌드 캐시가 로컬 replace와 워크스페이스 의존성까지 검증하도록 매번 빌드합니다.
-	binary, directory, err := buildDevBinary(config, errOut)
+	if _, err := applicationShutdownTimeout(); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	// Go의 빌드 캐시는 로컬 replace와 워크스페이스 입력도 검증합니다.
+	binary, directory, err := buildDevBinaryContext(ctx, config, errOut)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0
+		}
 		fmt.Fprintf(errOut, "application build failed: %v\n", err)
 		return 1
 	}
 	defer os.RemoveAll(directory)
-
-	cmd := exec.Command(binary)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, out, errOut
-	env := append(os.Environ(), fmt.Sprintf("SPINE_PORT=%d", config.Port))
-	if !development {
-		env = append(env, "ENV=production")
+	environment := "production"
+	if development {
+		environment = "development"
 	}
-	cmd.Env = env
-	if err := cmd.Run(); err != nil {
+	process, err := startApplicationProcess(binary, directory, config, environment, out, errOut)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	select {
+	case err := <-process.done:
 		if exitError, ok := err.(*exec.ExitError); ok {
 			return exitError.ExitCode()
 		}
-		fmt.Fprintf(errOut, "could not run application: %v\n", err)
-		return 1
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return 0
+	case <-ctx.Done():
+		if stopDevProcess(process, false) {
+			fmt.Fprintln(errOut, "Application exceeded the shutdown timeout and was killed.")
+			return 1
+		}
+		return 0
 	}
-	return 0
 }
 
 func runCheck(out, errOut io.Writer) int {

@@ -16,8 +16,8 @@
 - 프로젝트와 제품 이름: `spine-cli`
 - 공식 설치 진입점: `github.com/NARUBROWN/spine-cli/cmd/spine`
 - 실행 파일과 호출 명령: `spine`
-- 현재 소스의 CLI 버전: `0.4.2`
-- `spine version` 출력: `spine-cli 0.4.2`
+- 로컬 빌드의 CLI 버전: `0.4.3-dev`
+- 공개 설치는 실제 모듈 버전을 표시하고 로컬 빌드의 `spine version`은 `spine-cli 0.4.3-dev`를 표시한다.
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
@@ -1087,3 +1087,7 @@ websocket_adapter는 gorillaplatform.Option() 또는 spine.WithWebSocketAdapter(
 ## v0.4.2 정식 버전 고정
 
 새 platform-contracts-v0.6.5 레시피는 Spine v0.6.5와 각 독립 구현 v0.1.0을 사용한다. 이전 platform-contracts-20261103 및 public-contracts-20261103 레시피는 각각 당시 공개 버전으로 보존하며 update는 소스를 재작성하지 않는다. Echo는 기존 호환 v0.1.0을 사용한다.
+
+## CLI 릴리스 채널
+
+운영 절차와 초기 전환은 `release/README.md`를 따른다. 공개 발행 전 최종 제목과 본문을 검토하고 승인한다. 소스 트리나 생성 레시피가 바뀌면 새 Preview에서 검증한다. `SPINE_CLI_SHUTDOWN_TIMEOUT`은 run과 dev의 종료 대기 시간이며 기본값은 15초다.

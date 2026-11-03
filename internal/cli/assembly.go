@@ -172,7 +172,7 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 		} else {
 			source.WriteString("app.Constructor(NewHealthController)\napp.Route(\"GET\",\"/health\",(*HealthController).Get)\n")
 		}
-		source.WriteString("address := \":8080\"\nif port := os.Getenv(\"SPINE_PORT\"); port != \"\" { address = \":\"+port }\nreturn app, boot.Options{Address:address, HTTP:&boot.HTTPOptions{}}, nil\n")
+		source.WriteString("address := \":8080\"\nif port := os.Getenv(\"SPINE_PORT\"); port != \"\" { address = \":\"+port }\nreturn app, boot.Options{Address:address, HTTP:&boot.HTTPOptions{}, EnableGracefulShutdown:true}, nil\n")
 	} else {
 		source.WriteString("return app, boot.Options{}, nil\n")
 	}

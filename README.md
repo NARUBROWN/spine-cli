@@ -378,3 +378,9 @@ git diff --check
 ## License
 
 [MIT](./LICENSE)
+
+## 릴리스 운영
+
+CLI의 Preview, RC, Production 전환과 공개 설치 검증은 [릴리스 운영 절차](release/README.md)를 참고하세요. 공개 설치는 실제 설치 버전을 표시하고 로컬 빌드는 개발 버전으로 구분합니다.
+
+`run`과 `dev`의 종료 대기는 기본 15초입니다. `SPINE_CLI_SHUTDOWN_TIMEOUT=30s`처럼 설정할 수 있습니다. 생성 HTTP 앱은 정상 종료를 활성화하며 기존 앱에는 `EnableGracefulShutdown: true`를 직접 적용해야 합니다. Windows의 자식 종료는 강제 종료 fallback을 사용합니다.
