@@ -15,7 +15,7 @@ type installationFailure struct {
 }
 
 // 임시 프로젝트에서 의존성과 계약 및 컴파일만 검사하며 목적지는 게시하지 않습니다.
-func installEchoProject(ctx context.Context, staging string, files map[string]string, stages []installationStage) ([]selectedModule, *installationFailure) {
+func installAssemblyProject(ctx context.Context, staging string, files map[string]string, stages []installationStage, targets []selectedModule) ([]selectedModule, *installationFailure) {
 	modules := []selectedModule{}
 	failed := func(code int, stage string, cause error) ([]selectedModule, *installationFailure) {
 		return modules, &installationFailure{code, stage, cause}
@@ -30,7 +30,7 @@ func installEchoProject(ctx context.Context, staging string, files map[string]st
 		}
 	}
 	stages[0].Status = "passed"
-	modules, failure := verifyEchoProject(ctx, staging, ".", stages)
+	modules, failure := verifyProjectRecipe(ctx, staging, ".", stages, targets)
 	if failure != nil {
 		return modules, failure
 	}
@@ -45,7 +45,7 @@ func installEchoProject(ctx context.Context, staging string, files map[string]st
 }
 
 // new와 update가 같은 의존성 조합과 정적 계약 및 빌드 기준을 사용합니다.
-func verifyEchoProject(ctx context.Context, staging, entrypoint string, stages []installationStage) ([]selectedModule, *installationFailure) {
+func verifyProjectRecipe(ctx context.Context, staging, entrypoint string, stages []installationStage, targets []selectedModule) ([]selectedModule, *installationFailure) {
 	modules := []selectedModule{}
 	failed := func(code int, stage string, cause error) ([]selectedModule, *installationFailure) {
 		return modules, &installationFailure{code, stage, cause}
@@ -59,7 +59,7 @@ func verifyEchoProject(ctx context.Context, staging, entrypoint string, stages [
 	if err != nil {
 		return failed(3, "modules", err)
 	}
-	if err := validateEchoModules(modules); err != nil {
+	if err := validateRecipeModules(modules, targets); err != nil {
 		return failed(5, "modules", err)
 	}
 	stages[2].Status = "passed"

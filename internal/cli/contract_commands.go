@@ -196,6 +196,17 @@ func semanticView(contract applicationContract) semanticContract {
 	for _, item := range contract.Resources {
 		result.Resources = append(result.Resources, item.Import)
 	}
+	for _, item := range contract.EventAdapters {
+		item.Source = ""
+		encoded, _ := json.Marshal(item)
+		result.Configuration = append(result.Configuration, "event_adapter = "+string(encoded))
+	}
+	if contract.Validator.Provider != "" && contract.Validator.Provider != "none" {
+		item := contract.Validator
+		item.Source = ""
+		encoded, _ := json.Marshal(item)
+		result.Configuration = append(result.Configuration, "validator = "+string(encoded))
+	}
 	for _, item := range contract.Configuration {
 		result.Configuration = append(result.Configuration, item.Path+" = "+item.Value)
 	}

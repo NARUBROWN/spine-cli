@@ -15,6 +15,9 @@ type projectConfig struct {
 	Port        int
 	Layout      string
 	Platform    string
+	Recipe      string
+	Events      []eventPlatformSpec
+	Validator   string
 }
 
 func defaultProjectConfig(module string) projectConfig {
@@ -28,6 +31,19 @@ func projectConfigTemplate(config projectConfig) string {
 	}
 	if config.Platform != "" {
 		result += fmt.Sprintf("platform = %q\n", config.Platform)
+	}
+	if config.Recipe != "" {
+		result += fmt.Sprintf("recipe = %q\n", config.Recipe)
+	}
+	if config.Validator != "" {
+		result += fmt.Sprintf("validator = %q\n", config.Validator)
+	}
+	if len(config.Events) > 0 {
+		specs := []string{}
+		for _, spec := range config.Events {
+			specs = append(specs, strconv.Quote(spec.Name+":"+spec.Provider))
+		}
+		result += "event_platforms = [" + strings.Join(specs, ", ") + "]\n"
 	}
 	return result
 }
@@ -49,7 +65,7 @@ func loadProjectConfig() (projectConfig, error) {
 		}
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		switch key {
-		case "module", "entrypoint", "composition", "layout", "platform":
+		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "validator":
 			unquoted, err := strconv.Unquote(value)
 			if err != nil || unquoted == "" {
 				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
@@ -61,15 +77,40 @@ func loadProjectConfig() (projectConfig, error) {
 			} else if key == "composition" {
 				config.Composition = unquoted
 			} else if key == "platform" {
-				if unquoted != "echo" {
+				if unquoted != "echo" && unquoted != "none" {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported platform %q", lineNumber+1, unquoted)
 				}
 				config.Platform = unquoted
+			} else if key == "recipe" {
+				if unquoted != assemblyRecipe {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported recipe %q", lineNumber+1, unquoted)
+				}
+				config.Recipe = unquoted
+			} else if key == "validator" {
+				config.Validator = unquoted
 			} else {
 				if unquoted != layeredLayout && unquoted != "legacy" {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported layout %q", lineNumber+1, unquoted)
 				}
 				config.Layout = unquoted
+			}
+		case "event_platforms":
+			if !strings.HasPrefix(value, "[") || !strings.HasSuffix(value, "]") {
+				return projectConfig{}, fmt.Errorf("spine.toml:%d: event_platforms must be an array of quoted name:provider strings", lineNumber+1)
+			}
+			body := strings.TrimSpace(value[1 : len(value)-1])
+			if body != "" {
+				for _, entry := range strings.Split(body, ",") {
+					text, err := strconv.Unquote(strings.TrimSpace(entry))
+					if err != nil {
+						return projectConfig{}, fmt.Errorf("spine.toml:%d: invalid event platform", lineNumber+1)
+					}
+					spec, err := parseEventPlatform(text)
+					if err != nil {
+						return projectConfig{}, err
+					}
+					config.Events = append(config.Events, spec)
+				}
 			}
 		case "port":
 			port, err := strconv.Atoi(value)
@@ -83,6 +124,13 @@ func loadProjectConfig() (projectConfig, error) {
 	}
 	if config.Module == "" {
 		return projectConfig{}, fmt.Errorf("spine.toml: module is required")
+	}
+	validator := config.Validator
+	if validator == "" {
+		validator = "none"
+	}
+	if err := validateAssemblySelection(config.Platform, config.Events, validator); err != nil {
+		return projectConfig{}, err
 	}
 	return config, nil
 }

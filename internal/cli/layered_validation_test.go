@@ -19,7 +19,7 @@ func NewReaderRepository(db *Database) *ReaderRepository { return &ReaderReposit
 `)
 	composition, _ := os.ReadFile("internal/application/application.go")
 	composition = bytes.Replace(composition, []byte("import ("), []byte("import (\nrepository \"example.com/todo/src/repository\""), 1)
-	composition = bytes.Replace(composition, []byte("app := platform.New()"), []byte("app := platform.New()\nif \"disabled\" == \"enabled\" { app.Constructor(repository.NewDatabase) }"), 1)
+	composition = bytes.Replace(composition, []byte("app := spine.New(echoplatform.Option())"), []byte("app := spine.New(echoplatform.Option())\nif \"disabled\" == \"enabled\" { app.Constructor(repository.NewDatabase) }"), 1)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	var out, errOut bytes.Buffer
 	if code := runGenerate([]string{"service", "reader", "--depends", "src/repository:ReaderRepository"}, &out, &errOut); code == 0 {
@@ -37,7 +37,7 @@ func NewReaderRepository(db *Database) *ReaderRepository { return &ReaderReposit
 func TestLayeredInactiveRoutesDoNotConflict(t *testing.T) {
 	layeredProject(t)
 	composition, _ := os.ReadFile("internal/application/application.go")
-	composition = bytes.Replace(composition, []byte("app := platform.New()"), []byte("app := platform.New()\nif \"disabled\" == \"enabled\" { app.Route(\"GET\", \"/health\", (*controller.HealthController).Get) }"), 1)
+	composition = bytes.Replace(composition, []byte("app := spine.New(echoplatform.Option())"), []byte("app := spine.New(echoplatform.Option())\nif \"disabled\" == \"enabled\" { app.Route(\"GET\", \"/health\", (*controller.HealthController).Get) }"), 1)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	layeredGenerate(t, "service", "status")
 	contract, err := inspectApplication()
@@ -98,7 +98,7 @@ func TestLayeredIfMatchIncludesRegistrationEnvironment(t *testing.T) {
 	layeredProject(t)
 	t.Setenv("SPINE_LAYOUT_TEST_ROUTE", "off")
 	composition, _ := os.ReadFile("internal/application/application.go")
-	composition = bytes.Replace(composition, []byte("app := platform.New()"), []byte("app := platform.New()\nif os.Getenv(\"SPINE_LAYOUT_TEST_ROUTE\") == \"on\" { app.Route(\"GET\", \"/enabled\", (*controller.HealthController).Get) }"), 1)
+	composition = bytes.Replace(composition, []byte("app := spine.New(echoplatform.Option())"), []byte("app := spine.New(echoplatform.Option())\nif os.Getenv(\"SPINE_LAYOUT_TEST_ROUTE\") == \"on\" { app.Route(\"GET\", \"/enabled\", (*controller.HealthController).Get) }"), 1)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	var out, errOut bytes.Buffer
 	if code := runGenerate([]string{"service", "status", "--dry-run", "--json"}, &out, &errOut); code != 0 {
@@ -141,7 +141,7 @@ func TestLayeredGenerationActivatesAnInactiveConstructor(t *testing.T) {
 	layeredGenerate(t, "repository", "reader", "--no-register")
 	composition, _ := os.ReadFile("internal/application/application.go")
 	composition = bytes.Replace(composition, []byte("import ("), []byte("import (\nrepository \"example.com/todo/src/repository\""), 1)
-	composition = bytes.Replace(composition, []byte("app := platform.New()"), []byte("app := platform.New()\nif \"disabled\" == \"enabled\" { app.Constructor(repository.NewReaderRepository) }"), 1)
+	composition = bytes.Replace(composition, []byte("app := spine.New(echoplatform.Option())"), []byte("app := spine.New(echoplatform.Option())\nif \"disabled\" == \"enabled\" { app.Constructor(repository.NewReaderRepository) }"), 1)
 	writeE2EFile(t, "internal/application/application.go", string(composition))
 	layeredGenerate(t, "repository", "reader")
 	contract, err := inspectApplication()

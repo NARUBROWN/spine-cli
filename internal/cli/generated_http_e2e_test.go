@@ -38,7 +38,7 @@ func TestGeneratedProjectsHandleHTTPInputErrors(t *testing.T) {
 			apply(workspace, "new", "todo", "--module", "example.com/todo", "--layout", layout)
 			project := filepath.Join(workspace, "todo")
 			mod, _ := os.ReadFile(filepath.Join(project, "go.mod"))
-			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+platformSpineVersion) {
+			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+assemblySpineVersion) {
 				t.Fatalf("generated project uses an unfixed runtime: %s", mod)
 			}
 			if err := os.MkdirAll(filepath.Join(project, "handlers"), 0o755); err != nil {
@@ -79,7 +79,7 @@ func (*Controller) Redirect() httpx.Redirect { return httpx.Redirect{Location:"/
 				path := filepath.Join(project, "internal", "application", "application.go")
 				source, _ := os.ReadFile(path)
 				text := strings.Replace(string(source), "import (", "import (\n\"example.com/todo/handlers\"", 1)
-				text = strings.Replace(text, "app := platform.New()", `app := platform.New()
+				text = strings.Replace(text, "app := spine.New(echoplatform.Option())", `app := spine.New(echoplatform.Option())
  app.Constructor(handlers.NewController)
  app.Route("POST", "/products", (*handlers.Controller).Create)
  app.Route("GET", "/products/:id", (*handlers.Controller).Detail)

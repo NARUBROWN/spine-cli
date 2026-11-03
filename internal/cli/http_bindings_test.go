@@ -26,7 +26,7 @@ func httpBindingProject(t *testing.T, layout, imports, declarations, parameters,
 	writeE2EFile(t, "handlers/controller.go", "package handlers\n"+imports+"\n"+declarations+"\ntype Controller struct{}\nfunc NewController() *Controller { return &Controller{} }\nfunc (*Controller) Get("+parameters+") error { return nil }\n")
 	source, _ := os.ReadFile("internal/application/application.go")
 	source = bytes.Replace(source, []byte("import ("), []byte("import (\nprobe \"example.com/todo/handlers\""), 1)
-	source = bytes.Replace(source, []byte("app := platform.New()"), []byte("app := platform.New()\napp.Constructor(probe.NewController)\napp.Route(\"POST\", \""+path+"\", (*probe.Controller).Get)"), 1)
+	source = bytes.Replace(source, []byte("app := spine.New(echoplatform.Option())"), []byte("app := spine.New(echoplatform.Option())\napp.Constructor(probe.NewController)\napp.Route(\"POST\", \""+path+"\", (*probe.Controller).Get)"), 1)
 	writeE2EFile(t, "internal/application/application.go", string(source))
 }
 

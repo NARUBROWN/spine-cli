@@ -828,7 +828,7 @@ func TestNewCreatesSpineTomlAndCurrentSpineVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+platformSpineVersion) {
+	if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+assemblySpineVersion) {
 		t.Fatalf("unexpected go.mod: %s", mod)
 	}
 }

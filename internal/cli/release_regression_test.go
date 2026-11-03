@@ -20,7 +20,7 @@ func TestExternalRegistrationNeverReportsACompleteContract(t *testing.T) {
 			}
 			source, _ := os.ReadFile("internal/application/application.go")
 			source = bytes.Replace(source, []byte("import ("), []byte("import (\nplugin \"example.net/plugin\""), 1)
-			source = bytes.Replace(source, []byte("app := platform.New()"), []byte("app := platform.New()\nif err := plugin.Register(app); err != nil { return nil, boot.Options{}, err }"), 1)
+			source = bytes.Replace(source, []byte("app := spine.New(echoplatform.Option())"), []byte("app := spine.New(echoplatform.Option())\nif err := plugin.Register(app); err != nil { return nil, boot.Options{}, err }"), 1)
 			writeE2EFile(t, "internal/application/application.go", string(source))
 			contract, err := inspectApplication()
 			if err != nil {
