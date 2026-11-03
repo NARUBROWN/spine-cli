@@ -16,18 +16,18 @@
 - 프로젝트와 제품 이름: `spine-cli`
 - 공식 설치 진입점: `github.com/NARUBROWN/spine-cli/cmd/spine`
 - 실행 파일과 호출 명령: `spine`
-- 현재 소스의 CLI 버전: `0.4.1`
-- `spine version` 출력: `spine-cli 0.4.1`
+- 현재 소스의 CLI 버전: `0.4.2`
+- `spine version` 출력: `spine-cli 0.4.2`
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
-- 새 프로젝트의 레시피: `platform-contracts-20261103` (공개 pseudo-version을 포함한 사전 릴리스)
+- 새 프로젝트의 레시피: `platform-contracts-v0.6.5` (Spine v0.6.5와 플랫폼 정식 태그)
 - recipe 미지정 기존 Echo 앱의 update 레시피: `echo-v0.1.0-spine-v0.6.0`
-- Gorilla WS: `v0.0.0-20261103040512-36ad41dff88f`
-- 새 앱 Spine: `github.com/NARUBROWN/spine v0.6.1-0.20261103040400-9b1321410211`
-- Kafka: `v0.0.0-20261103001523-e4b87708f841`; RabbitMQ: `v0.0.0-20261103001525-b2be17ee8a11`
-- playground: `v0.0.0-20261103011253-5508c82a155e`
-- 2026-11-03 확인 시 Spine PR #16은 OPEN/DRAFT이고 최신 정식 코어 태그는 v0.6.0이다. 위 기능을 v0.6.0에 있다고 가정하지 않는다.
+- Gorilla WS: `v0.1.0`
+- 새 앱 Spine: `github.com/NARUBROWN/spine v0.6.5`
+- Kafka: `v0.1.0`; RabbitMQ: `v0.1.0`
+- playground: `v0.1.0`
+- Spine PR #16은 병합됐고 정식 코어 버전은 v0.6.5이다. 위 기능을 과거 v0.6.0에 있다고 가정하지 않는다.
 - Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform v0.1.0`
 - Echo 플랫폼 설치, 프로젝트 의존성 갱신과 HTTP 반환형 진단은 CLI v0.3.0에서 제공한다.
 - CLI v0.4.0은 위 v0.6.0/v0.1.0 공개 조합과 adapter v2 계약을 지원한다. v0.3.0 태그는 이전 v1 레시피를 사용한다.
@@ -1078,8 +1078,12 @@ Spine application의 실행 계약을 명시적으로 생성하고 검사하며,
 
 ## 독립 WebSocket 플랫폼
 
-새 프로젝트의 platform-contracts-20261103은 WS가 분리된 코어 9b13214를 사용한다. 기존 public-contracts-20261103과 recipe 없는 Echo 앱의 update 버전은 보존한다. --websocket-platform none|gorilla로 선택하며 gorilla는 HTTP echo가 필요하다. 설정은 spine.toml의 websocket_platform에 기록한다. HTTP 없는 worker는 WS 구현을 선택할 수 없다. HTTP와 event/validator의 확정 API는 바꾸지 않는다.
+새 프로젝트의 platform-contracts-v0.6.5 레시피는 WS가 분리된 코어 v0.6.5를 사용한다. 기존 public-contracts-20261103과 recipe 없는 Echo 앱의 update 버전은 보존한다. --websocket-platform none|gorilla로 선택하며 gorilla는 HTTP echo가 필요하다. 설정은 spine.toml의 websocket_platform에 기록한다. HTTP 없는 worker는 WS 구현을 선택할 수 없다. HTTP와 event/validator의 확정 API는 바꾸지 않는다.
 
 websocket_adapter는 gorillaplatform.Option() 또는 spine.WithWebSocketAdapter(gorillaplatform.NewFactory())와 직접 지역 변수 factory를 정적으로 추적한다. custom/재대입/동적 옵션은 실행하지 않고 WEBSOCKET_ADAPTER_UNRESOLVED, 중복 선택은 WEBSOCKET_ADAPTER_DUPLICATE로 진단한다. 새 코어에서 WS 경로가 있고 구현이 없으면 WEBSOCKET_ADAPTER_MISSING이다. 기존 내장 WS 코어는 legacy-implicit로 구분한다. WS backend 선택은 semantic snapshot/diff에도 포함된다.
 
 생성 앱의 두 layout × validator none/playground WS E2E 4개, 두 layout × Kafka/RabbitMQ × HTTP/worker/WebSocket 브로커 E2E 12개를 별도로 실행한다. 공개 모듈만 사용하며 원래 BuildApplication 소스는 변경하지 않는다. playground 없는 WS 조합은 실제 Go 1.25.5 설치를 검사하고 playground는 낮은 toolchain에서 목적지를 게시하지 않는다.
+
+## v0.4.2 정식 버전 고정
+
+새 platform-contracts-v0.6.5 레시피는 Spine v0.6.5와 각 독립 구현 v0.1.0을 사용한다. 이전 platform-contracts-20261103 및 public-contracts-20261103 레시피는 각각 당시 공개 버전으로 보존하며 update는 소스를 재작성하지 않는다. Echo는 기존 호환 v0.1.0을 사용한다.

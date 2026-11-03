@@ -173,12 +173,18 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if config.Recipe == assemblyRecipe {
 		recipe, targets = assemblyRecipe, assemblyModules(config.Platform, config.Events, config.Validator)
 	}
+	if config.Recipe == legacyWebSocketRecipe {
+		recipe, targets = legacyWebSocketRecipe, legacyWebSocketModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
+	}
 	if config.Recipe == currentAssemblyRecipe {
 		recipe, targets = currentAssemblyRecipe, currentAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
 	}
 	result["recipe"], result["target_modules"], result["platform"] = recipe, targets, config.Platform
-	if recipe == assemblyRecipe || recipe == currentAssemblyRecipe {
+	if recipe == assemblyRecipe || recipe == legacyWebSocketRecipe {
 		result["stability"] = "prerelease"
+	}
+	if recipe == currentAssemblyRecipe {
+		result["stability"] = "released"
 	}
 	if !filepath.IsLocal(config.Entrypoint) {
 		return finish(3, "snapshot", fmt.Errorf("entrypoint must stay inside the project: %s", config.Entrypoint))

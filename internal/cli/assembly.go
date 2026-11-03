@@ -249,7 +249,7 @@ func loadRabbitmqConfig(prefix string) (rabbitmqplatform.Config,error) {
 
 func assemblyReadme(options newProjectOptions) string {
 	var source strings.Builder
-	fmt.Fprintf(&source, "# Spine application\n\n모듈: %s\n\nGo %s 이상이 필요합니다. 레시피 `%s`는 공개 pseudo-version을 사용합니다. Spine PR #16은 2026-11-03 확인 시 OPEN/DRAFT이며 정식 릴리스가 아닙니다.\n\n", options.Module, assemblyGoVersion(options.Validator), currentAssemblyRecipe)
+	fmt.Fprintf(&source, "# Spine application\n\n모듈: %s\n\nGo %s 이상이 필요합니다. 레시피 `%s`는 Spine v0.6.5와 플랫폼의 정식 태그를 사용합니다.\n\n", options.Module, assemblyGoVersion(options.Validator), currentAssemblyRecipe)
 	source.WriteString("기본 생성은 의존성 설치·정적 계약 검사·빌드를 수행합니다. `--skip-install`은 파일만 생성하므로 먼저 `go mod tidy`를 실행하세요. 생성 과정에서 앱과 factory는 실행하지 않습니다.\n\n")
 	if len(options.Events) > 0 {
 		source.WriteString("## 이벤트 설정\n\n실행과 `go test` 전에 다음 환경 변수를 설정하세요. 주소와 자격 증명은 소스에 저장하지 않습니다. 기본 전송은 TLS이며 로컬 평문 브로커에만 `ALLOW_INSECURE=true`를 명시합니다.\n\n")

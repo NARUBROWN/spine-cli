@@ -102,19 +102,18 @@ WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playgr
 
 ### 공개 버전 레시피
 
-현재 소스의 `platform-contracts-20261103`은 다음 공개 버전을 고정합니다.
-2026-11-03 확인 시 [Spine PR #16](https://github.com/NARUBROWN/spine/pull/16)은 OPEN/DRAFT이고
-최신 정식 코어 태그는 v0.6.0입니다. 아래 조합은 공개 pseudo-version을 포함한 사전 릴리스 레시피입니다.
-이 기능이 기존 v0.6.0이나 이미 배포된 CLI에 있다고 가정하지 마세요.
+현재 `platform-contracts-v0.6.5` 레시피는 다음 정식 태그를 고정합니다.
+[Spine PR #16](https://github.com/NARUBROWN/spine/pull/16)은 병합됐고 코어 버전은 v0.6.5입니다.
+Spine v0.6.0 앱은 생성식 전환과 의존성 갱신을 함께 검토하세요.
 
 | 모듈 | 버전 |
 | --- | --- |
-| Spine | `v0.6.1-0.20261103040400-9b1321410211` |
+| Spine | `v0.6.5` |
 | Echo 플랫폼 | `v0.1.0` |
-| Gorilla WS 플랫폼 | `v0.0.0-20261103040512-36ad41dff88f` |
-| Kafka 플랫폼 | `v0.0.0-20261103001523-e4b87708f841` |
-| RabbitMQ 플랫폼 | `v0.0.0-20261103001525-b2be17ee8a11` |
-| playground 검증기 | `v0.0.0-20261103011253-5508c82a155e` |
+| Gorilla WS 플랫폼 | `v0.1.0` |
+| Kafka 플랫폼 | `v0.1.0` |
+| RabbitMQ 플랫폼 | `v0.1.0` |
+| playground 검증기 | `v0.1.0` |
 
 공개 계약은 `contract/http`, `contract/event`, `contract/websocket`, `contract/validator`입니다.
 이전 `adapter`, `adapter/http`, `adapter/event`, `wsadapter`는 호환 별칭입니다.
@@ -331,7 +330,7 @@ composition = "./internal/application"
 port = 8080
 layout = "layered-v1"
 platform = "echo"
-recipe = "platform-contracts-20261103"
+recipe = "platform-contracts-v0.6.5"
 validator = "none"
 websocket_platform = "none"
 # 이벤트 선택 시 예: event_platforms = ["events:kafka", "jobs:rabbitmq"]

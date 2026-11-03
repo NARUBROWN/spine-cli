@@ -8,6 +8,22 @@ import (
 	"testing"
 )
 
+func TestReleaseRecipeDoesNotChangeLegacyPins(t *testing.T) {
+	options := newProjectOptions{Platform: "echo", WebSocketPlatform: "gorilla", Events: []eventPlatformSpec{{Name: "events", Provider: "kafka"}}, Validator: "none"}
+	stable := currentAssemblyModules(options)
+	if selectedModuleVersion(stable, spineImportPath) != "v0.6.5" || selectedModuleVersion(stable, gorillaPlatformPath) != "v0.1.0" || selectedModuleVersion(stable, kafkaPlatformPath) != "v0.1.0" {
+		t.Fatalf("release recipe: %+v", stable)
+	}
+	legacy := legacyWebSocketModules(options)
+	if selectedModuleVersion(legacy, spineImportPath) != "v0.6.1-0.20261103040400-9b1321410211" || selectedModuleVersion(legacy, gorillaPlatformPath) != "v0.0.0-20261103040512-36ad41dff88f" {
+		t.Fatalf("legacy recipe changed: %+v", legacy)
+	}
+	older := assemblyModules(options.Platform, options.Events, options.Validator)
+	if selectedModuleVersion(older, spineImportPath) != "v0.6.1-0.20261103010611-6e60b34204d3" {
+		t.Fatalf("initial public recipe changed: %+v", older)
+	}
+}
+
 func TestWebSocketSelectionPlanAndDiagnostics(t *testing.T) {
 	if err := prepareTestModuleCache(); err != nil {
 		t.Fatal(err)

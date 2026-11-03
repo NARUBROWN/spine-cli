@@ -6,16 +6,16 @@
 
 ## 공개 레시피와 Go 버전
 
-`platform-contracts-20261103`은 다음 공개 모듈을 사용합니다. 생성 프로젝트에는 local `replace`가 없습니다.
+`platform-contracts-v0.6.5` 레시피는 다음 공개 모듈을 사용합니다. 생성 프로젝트에는 local `replace`가 없습니다.
 
 | 모듈 | 버전 |
 | --- | --- |
-| Spine | `v0.6.1-0.20261103040400-9b1321410211` |
+| Spine | `v0.6.5` |
 | Echo 플랫폼 | `v0.1.0` |
-| Gorilla WS 플랫폼 | `v0.0.0-20261103040512-36ad41dff88f` |
-| Kafka 플랫폼 | `v0.0.0-20261103001523-e4b87708f841` |
-| RabbitMQ 플랫폼 | `v0.0.0-20261103001525-b2be17ee8a11` |
-| playground 검증기 | `v0.0.0-20261103011253-5508c82a155e` |
+| Gorilla WS 플랫폼 | `v0.1.0` |
+| Kafka 플랫폼 | `v0.1.0` |
+| RabbitMQ 플랫폼 | `v0.1.0` |
+| playground 검증기 | `v0.1.0` |
 
 CLI와 검증기 없는 생성 앱의 최소 버전은 Go 1.25.5입니다. playground는 go-playground v10.30.6을
 사용하므로 Go 1.26.0 이상이 필요합니다. 설치는 `GOTOOLCHAIN=local`로 검사하며 자동 다운로드하지 않습니다.
@@ -26,10 +26,7 @@ SPINE_TEST_GO125=/absolute/path/to/go1.25.5/bin/go \
   go test ./internal/cli -run '^TestGeneratedAssemblyMinimumToolchain$' -count=1 -v
 ```
 
-2026-11-03 확인 시 [코어 PR #16](https://github.com/NARUBROWN/spine/pull/16)은 OPEN/DRAFT이고
-WS 통합 코어의 공개 기준 커밋은 `9b132141021155367d4eaeb8c89c511a00e9c839`입니다. 최신 정식 코어 태그는 v0.6.0이며,
-위 설치 결과는 PR 병합이나 정식 릴리스를 뜻하지 않습니다. 코어 runtime banner의 고정된 버전 문자열보다
-Go 모듈 그래프의 실제 선택 버전을 설치 근거로 사용합니다.
+[코어 PR #16](https://github.com/NARUBROWN/spine/pull/16)의 병합 커밋에 v0.6.5 태그를 고정했습니다. 런타임 banner와 공개 모듈 버전도 v0.6.5입니다.
 
 ## 회귀 테스트와 생성 matrix
 
@@ -121,3 +118,5 @@ go test ./internal/cli -run '^TestGeneratedWebSocketPublicAssembly$' -count=1 -v
 
 두 layout과 validator none/playground의 4개 조합에서 실제 CLI dry-run/apply, context/inspect/contract check/verify, 공개 모듈 그래프와 WS 메시지·1008 검증 종료·1000 정상 종료·listener 해제를 검사합니다. 원래 BuildApplication 바이트와 SHA-256을 보존합니다.
 기존 public-contracts-20261103 레시피는 이전 버전으로 보존합니다. 새 프로젝트만 현재 분리 코어를 기본 선택하며 기존 앱의 update는 소스를 재작성하지 않습니다.
+
+이전 `platform-contracts-20261103` WS 개발 레시피도 당시 버전으로 보존합니다. 정식 버전은 `platform-contracts-v0.6.5`에서 선택하며 소스를 자동으로 바꾸지 않습니다.

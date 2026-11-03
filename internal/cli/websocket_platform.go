@@ -8,18 +8,34 @@ import (
 )
 
 const (
-	currentAssemblyRecipe  = "platform-contracts-20261103"
-	webSocketSpineVersion  = "v0.6.1-0.20261103040400-9b1321410211"
-	gorillaPlatformPath    = "github.com/NARUBROWN/spine-gorilla-platform"
-	gorillaPlatformVersion = "v0.0.0-20261103040512-36ad41dff88f"
+	currentAssemblyRecipe       = "platform-contracts-v0.6.5"
+	legacyWebSocketRecipe       = "platform-contracts-20261103"
+	currentAssemblySpineVersion = "v0.6.5"
+	releasedPlatformVersion     = "v0.1.0"
+	webSocketSpineVersion       = "v0.6.1-0.20261103040400-9b1321410211"
+	gorillaPlatformPath         = "github.com/NARUBROWN/spine-gorilla-platform"
+	gorillaPlatformVersion      = "v0.0.0-20261103040512-36ad41dff88f"
 )
 
-// 기존 공개 레시피는 보존하고 새 프로젝트만 WS 분리 코어를 선택합니다.
-func currentAssemblyModules(options newProjectOptions) []selectedModule {
+// 이전 WS 개발 레시피의 공개 버전을 그대로 보존합니다.
+func legacyWebSocketModules(options newProjectOptions) []selectedModule {
 	modules := assemblyModules(options.Platform, options.Events, options.Validator)
 	modules[0].Version = webSocketSpineVersion
 	if options.WebSocketPlatform == "gorilla" {
 		modules = append(modules, selectedModule{Path: gorillaPlatformPath, Version: gorillaPlatformVersion})
+	}
+	return modules
+}
+
+func currentAssemblyModules(options newProjectOptions) []selectedModule {
+	modules := legacyWebSocketModules(options)
+	for index := range modules {
+		switch modules[index].Path {
+		case spineImportPath:
+			modules[index].Version = currentAssemblySpineVersion
+		case kafkaPlatformPath, rabbitPlatformPath, validatorPlatformPath, gorillaPlatformPath:
+			modules[index].Version = releasedPlatformVersion
+		}
 	}
 	return modules
 }
