@@ -1,16 +1,71 @@
-name: CLI Public Platform E2E
+name: CLI CI
 on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+    outputs:
+      verified_sha:
+        value: ${{ jobs.verified.outputs.sha }}
   pull_request:
+    branches: [preview, rc, main]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
   push:
-    branches: [main, public-platform-generator]
+    branches: [preview, rc, main]
 permissions:
   contents: read
 env:
   GOWORK: 'off'
 jobs:
-  public-platforms:
+  policy:
+    name: Release Policy
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+      - run: node scripts/release/branch_flow.cjs
+      - run: node --test scripts/release/branch_flow.test.cjs
+      - run: python3 scripts/release/release.py validate-policy
+      - run: python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
+      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - run: actionlint -shellcheck= -pyflakes=
+  portable:
+    name: Portable CLI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+      - run: go build ./...
+      - run: go test ./internal/cli -run '^(TestRunVersionUsesProgramName|TestBuildVersion|Test.*Protocol.*|Test.*Schema.*|TestCapabilities.*|Test.*Windows.*|TestApplicationShutdownTimeout)$' -count=1 -timeout=5m
+      - if: runner.os != 'Windows'
+        run: go test ./internal/cli -run '^(TestRunAndDevGracefulShutdown|TestGeneratedHTTPShutdownDrainsRequests|TestDevRuntimeLifecycleEndToEnd)$' -count=1 -timeout=5m
+  public-platforms:
+    name: Public Platforms and Full Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
     services:
       rabbitmq:
         image: rabbitmq:3-management
@@ -23,6 +78,9 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.0'
@@ -44,10 +102,37 @@ jobs:
         env:
           SPINE_TEST_KAFKA_BROKER: 127.0.0.1:19092
           SPINE_TEST_RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
-        run: go test -race -v ./... -count=1 -timeout=20m
+        run: go test -race -json ./... -count=1 -timeout=30m > regression.jsonl
+      - name: Require live broker and minimum Go evidence
+        run: python3 scripts/release/check_tests.py regression.jsonl
       - name: Check reproducibility
         run: |
           go mod verify
           go mod tidy
           git diff --exit-code -- go.mod go.sum
           test -z "$(gofmt -l .)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-regression
+          path: regression.jsonl
+  verified:
+    name: ${{ github.event_name == 'pull_request' && format('Verified Source / {0}', github.base_ref) || 'Verified Source' }}
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs: [policy, portable, public-platforms]
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          SOURCE_SHA: ${{ inputs.ref || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          if any(j['result'] != 'success' for j in json.loads(os.environ['RESULTS']).values()):
+              raise SystemExit('필수 검사가 모두 성공해야 합니다')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sha=' + os.environ['SOURCE_SHA'] + '\n')
+          PY

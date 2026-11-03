@@ -83,7 +83,7 @@ func (writer *devEventWriter) Flush() {
 }
 
 // runDev는 변경된 앱을 먼저 빌드하고, 빌드에 성공했을 때만 실행 프로세스를 교체합니다.
-func runDev(args []string, out, errOut io.Writer) int {
+func runDev(args []string, out, errOut io.Writer) (code int) {
 	eventMode := ""
 	for index := 0; index < len(args); index++ {
 		if args[index] != "--events" || index+1 >= len(args) || args[index+1] != "jsonl" || eventMode != "" {
@@ -116,6 +116,10 @@ func runDev(args []string, out, errOut io.Writer) int {
 		} else {
 			fmt.Fprintln(errOut, message)
 		}
+	}
+	if _, err := applicationShutdownTimeout(); err != nil {
+		fail("configuration_failed", err.Error())
+		return 1
 	}
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
@@ -153,7 +157,12 @@ func runDev(args []string, out, errOut io.Writer) int {
 	}
 	emit("process_started", "Application process started.", map[string]any{"pid": process.cmd.Process.Pid, "address": fmt.Sprintf("http://127.0.0.1:%d", config.Port), "readiness_observed": false})
 	processDone := process.done
-	defer func() { stopDevProcess(process, false) }()
+	defer func() {
+		if stopDevProcess(process, false) {
+			fail("process_killed", "Application exceeded the shutdown timeout and was killed.")
+			code = 1
+		}
+	}()
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -212,7 +221,9 @@ func runDev(args []string, out, errOut io.Writer) int {
 				return 0
 			}
 			config = updatedConfig
-			stopDevProcess(process, false)
+			if stopDevProcess(process, false) {
+				fail("process_killed", "Previous application exceeded the shutdown timeout and was killed.")
+			}
 			process, err = startDevProcess(newBinary, newBinaryDir, config, processOut, processErr)
 			if err != nil {
 				_ = os.RemoveAll(newBinaryDir)
@@ -228,12 +239,16 @@ func runDev(args []string, out, errOut io.Writer) int {
 }
 
 func buildDevBinary(config projectConfig, errOut io.Writer) (string, string, error) {
+	return buildDevBinaryContext(context.Background(), config, errOut)
+}
+
+func buildDevBinaryContext(ctx context.Context, config projectConfig, errOut io.Writer) (string, string, error) {
 	directory, err := os.MkdirTemp("", "spine-dev-build-*")
 	if err != nil {
 		return "", "", err
 	}
 	binary := devBinaryPath(directory, runtime.GOOS)
-	cmd := exec.Command("go", "build", "-o", binary, config.Entrypoint)
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", binary, config.Entrypoint)
 	cmd.Stdout, cmd.Stderr = errOut, errOut
 	if err := cmd.Run(); err != nil {
 		_ = os.RemoveAll(directory)
@@ -328,9 +343,13 @@ func devBinaryPath(directory, goos string) string {
 }
 
 func startDevProcess(binary, binaryDir string, config projectConfig, out, errOut io.Writer) (*devProcess, error) {
+	return startApplicationProcess(binary, binaryDir, config, "development", out, errOut)
+}
+
+func startApplicationProcess(binary, binaryDir string, config projectConfig, environment string, out, errOut io.Writer) (*devProcess, error) {
 	cmd := exec.Command(binary)
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = out, errOut, os.Stdin
-	cmd.Env = append(os.Environ(), fmt.Sprintf("SPINE_PORT=%d", config.Port), "ENV=development")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("SPINE_PORT=%d", config.Port), "ENV="+environment)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -350,29 +369,50 @@ func flushDevEventWriter(writer io.Writer) {
 	}
 }
 
-func stopDevProcess(process *devProcess, removeBinary bool) {
+// CLI의 기본 대기는 Spine의 기본 정상 종료 제한 10초보다 길게 둡니다.
+func applicationShutdownTimeout() (time.Duration, error) {
+	value := os.Getenv("SPINE_CLI_SHUTDOWN_TIMEOUT")
+	if value == "" {
+		return 15 * time.Second, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout <= 0 {
+		return 0, fmt.Errorf("SPINE_CLI_SHUTDOWN_TIMEOUT must be a positive duration (for example 30s)")
+	}
+	return timeout, nil
+}
+
+// stopDevProcess는 제한 시간을 넘겨 강제 종료했는지 반환합니다.
+func stopDevProcess(process *devProcess, removeBinary bool) bool {
 	if process == nil {
-		return
+		return false
 	}
 	if removeBinary {
 		defer os.RemoveAll(process.binaryDir)
 	}
 	if process.cmd == nil || process.cmd.Process == nil {
-		return
+		return false
 	}
 	if err := terminateDevProcess(process.cmd.Process, runtime.GOOS); err != nil {
 		select {
 		case <-process.done:
-			return
+			return false
 		default:
 		}
 	}
+	timeout, err := applicationShutdownTimeout()
+	if err != nil {
+		timeout = 15 * time.Second
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-process.done:
-		return
-	case <-time.After(3 * time.Second):
+		return false
+	case <-timer.C:
 		_ = process.cmd.Process.Kill()
 		<-process.done
+		return true
 	}
 }
 

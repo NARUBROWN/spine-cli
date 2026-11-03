@@ -1,0 +1,48 @@
+name: CLI Public Installation
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        type: string
+        required: true
+      query:
+        type: string
+        required: true
+      artifact:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  public:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install exact public CLI and exercise generated applications
+        env:
+          RELEASE_QUERY: ${{ inputs.query }}
+        run: python scripts/release/verify_public.py --query "$env:RELEASE_QUERY"
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}-${{ runner.os }}
+          path: release-validation.json
+          if-no-files-found: error
