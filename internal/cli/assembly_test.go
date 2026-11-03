@@ -143,7 +143,7 @@ func TestAssemblyStaticDiagnosticsAndSemanticDrift(t *testing.T) {
 	}
 	writeE2EFile(t, "internal/application/application.go", string(source))
 	config, err := loadProjectConfig()
-	if err != nil || config.Recipe != assemblyRecipe || len(config.Events) != 2 {
+	if err != nil || config.Recipe != currentAssemblyRecipe || len(config.Events) != 2 {
 		t.Fatalf("config lost selection: %+v %v", config, err)
 	}
 	if _, err := os.Stat(filepath.Join("internal/application", "platform_config.go")); err != nil {

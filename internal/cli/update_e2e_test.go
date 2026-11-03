@@ -89,7 +89,7 @@ func init() { if path := os.Getenv("SPINE_UPDATE_EXEC_MARKER"); path != "" { _ =
 	}
 	apply := runE2E(binary, filepath.Join(project, "src/controller"), env, "update", "--if-match", envelope.Result.Hash)
 	assertE2ESuccess(t, apply, "apply update from nested package")
-	for _, text := range []string{"v0.5.2 -> " + assemblySpineVersion, "go.mod", "go.sum", "static contract and build verified"} {
+	for _, text := range []string{"v0.5.2 -> " + webSocketSpineVersion, "go.mod", "go.sum", "static contract and build verified"} {
 		if !strings.Contains(apply.stdout, text) {
 			t.Fatalf("completion lost %q: %s", text, apply.stdout)
 		}

@@ -19,6 +19,8 @@ import (
  event "github.com/NARUBROWN/spine/contract/event"
  "github.com/NARUBROWN/spine/pkg/event/publish"
  "github.com/NARUBROWN/spine/pkg/httpx"
+ "github.com/NARUBROWN/spine/pkg/ws"
+ "github.com/gorilla/websocket"
  amqp "github.com/rabbitmq/amqp091-go"
  "github.com/segmentio/kafka-go"
 )
@@ -33,6 +35,9 @@ func (brokerEvent) OccurredAt() time.Time {return time.Now()}
 type brokerController struct {input,output string;sent,handled atomic.Int32}
 func (c *brokerController) Emit(ctx context.Context,input *brokerDTO) httpx.Response[string] {
  c.sent.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:*input,topic:c.input});return httpx.Response[string]{Body:"accepted"}
+}
+func (c *brokerController) EmitWS(ctx context.Context,input brokerDTO) error {
+ c.sent.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:input,topic:c.input});return ws.Send(ctx,ws.TextMessage,[]byte("accepted"))
 }
 func (c *brokerController) Handle(ctx context.Context,input brokerDTO) {
  c.handled.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:input,topic:c.output})
@@ -53,6 +58,7 @@ func brokerFactory(t *testing.T,group string) event.Factory {
 func TestGeneratedRealBroker(t *testing.T) {
  const kind="{{PROVIDER}}"
  const httpPlatform="{{HTTP}}"
+ const useWebSocket={{WEBSOCKET}}
  ctx,cancel:=context.WithTimeout(context.Background(),75*time.Second);defer cancel()
  name:=fmt.Sprintf("spine-cli-%d",time.Now().UnixNano());input,output:=name+".input",name+".output"
  broker,url:=os.Getenv("SPINE_TEST_KAFKA_BROKER"),os.Getenv("SPINE_TEST_RABBITMQ_URL")
@@ -84,6 +90,7 @@ func TestGeneratedRealBroker(t *testing.T) {
  if options.HTTP!=nil {
   listener,err:=net.Listen("tcp","127.0.0.1:0");if err!=nil{t.Fatal(err)};address=listener.Addr().String();listener.Close();options.Address=address
   app.Route("POST","/events",(*brokerController).Emit)
+ if useWebSocket {if err:=app.WebSocket().Register("/ws/events",(*brokerController).EmitWS);err!=nil{t.Fatal(err)}}
  }
  if err:=app.Validate(options);err!=nil{t.Fatal(err)}
  options.EnableGracefulShutdown=true;options.ShutdownTimeout=10*time.Second
@@ -99,8 +106,20 @@ func TestGeneratedRealBroker(t *testing.T) {
  }
  if options.HTTP!=nil {
   awaitBroker(t,ctx,"HTTP health",func()bool{response,err:=client.Get("http://"+address+"/health");if err!=nil{return false};defer response.Body.Close();return response.StatusCode==200})
+  if useWebSocket {
+   dial:=func()*websocket.Conn {connection,_,err:=websocket.DefaultDialer.Dial("ws://"+address+"/ws/events",nil);if err!=nil{t.Fatal(err)};_ = connection.SetReadDeadline(time.Now().Add(5*time.Second));return connection}
+   connection:=dial()
+   if err:=connection.WriteJSON(brokerDTO{});err!=nil{t.Fatal(err)}
+   if _,_,err:=connection.ReadMessage();!websocket.IsCloseError(err,websocket.ClosePolicyViolation){t.Fatalf("invalid WS input was not blocked: %v",err)}
+   connection.Close()
+   if controller.sent.Load()!=0 {t.Fatal("invalid WS input reached handler")}
+   connection=dial();defer connection.Close()
+   if err:=connection.WriteJSON(brokerDTO{Email:"kim@example.com",Age:20});err!=nil{t.Fatal(err)}
+   _,reply,err:=connection.ReadMessage();if err!=nil || string(reply)!="accepted"{t.Fatalf("WS event publication: %s %v",reply,err)}
+  } else {
   if status:=send(`{}`);status!=400 || controller.sent.Load()!=0{t.Fatalf("HTTP validator did not block input: status=%d calls=%d",status,controller.sent.Load())}
   if status:=send(`{"email":"kim@example.com","age":20}`);status!=200{t.Fatal(status)}
+  }
  } else {
   if err:=publisher.Publish(ctx,event.Message{EventName:input,Payload:[]byte(`{"email":"kim@example.com","age":20}`),OccurredAt:time.Now()});err!=nil{t.Fatal(err)}
  }

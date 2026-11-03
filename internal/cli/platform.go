@@ -171,7 +171,7 @@ func selectedModules(ctx context.Context, root string, offline bool) ([]selected
 		if err != nil {
 			return nil, err
 		}
-		if module.Path == spineImportPath || module.Path == echoPlatformPath || module.Path == "github.com/labstack/echo/v5" || module.Path == kafkaPlatformPath || module.Path == rabbitPlatformPath || module.Path == validatorPlatformPath {
+		if module.Path == spineImportPath || module.Path == echoPlatformPath || module.Path == "github.com/labstack/echo/v5" || module.Path == kafkaPlatformPath || module.Path == rabbitPlatformPath || module.Path == validatorPlatformPath || module.Path == gorillaPlatformPath {
 			result = append(result, module)
 		}
 	}

@@ -117,6 +117,7 @@ func (i *contractInspector) inspectAssembly(config projectConfig, file *ast.File
 	if config.Validator != "" && config.Validator != i.contract.Validator.Provider {
 		add("VALIDATOR_MISMATCH", "spine.toml validator differs from composition", assignment)
 	}
+	i.inspectWebSocketAdapter(config, imports, fset, function, assignment, call, changed)
 	sort.Slice(i.contract.EventAdapters, func(a, b int) bool { return i.contract.EventAdapters[a].Name < i.contract.EventAdapters[b].Name })
 }
 

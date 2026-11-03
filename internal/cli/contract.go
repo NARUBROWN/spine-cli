@@ -18,23 +18,24 @@ import (
 const contractSchemaVersion = "spine.contract/v1alpha2"
 
 type applicationContract struct {
-	SchemaVersion string                  `json:"schema_version"`
-	AnalysisMode  string                  `json:"analysis_mode"`
-	Complete      bool                    `json:"analysis_complete"`
-	Module        string                  `json:"module"`
-	Entrypoint    string                  `json:"entrypoint"`
-	Composition   string                  `json:"composition"`
-	EventAdapters []eventAdapterSelection `json:"event_adapters"`
-	Validator     validatorSelection      `json:"validator"`
-	HTTPAdapter   httpAdapterSelection    `json:"http_adapter"`
-	Constructors  []contractRegistration  `json:"constructors"`
-	HTTP          []httpRegistration      `json:"http"`
-	Interceptors  []contractRegistration  `json:"interceptors"`
-	Consumers     []namedRegistration     `json:"consumers"`
-	WebSockets    []namedRegistration     `json:"websockets"`
-	Resources     []resourceRegistration  `json:"resources"`
-	Configuration []contractSetting       `json:"configuration"`
-	Diagnostics   []contractDiagnostic    `json:"diagnostics"`
+	SchemaVersion    string                    `json:"schema_version"`
+	AnalysisMode     string                    `json:"analysis_mode"`
+	Complete         bool                      `json:"analysis_complete"`
+	Module           string                    `json:"module"`
+	Entrypoint       string                    `json:"entrypoint"`
+	Composition      string                    `json:"composition"`
+	EventAdapters    []eventAdapterSelection   `json:"event_adapters"`
+	WebSocketAdapter webSocketAdapterSelection `json:"websocket_adapter"`
+	Validator        validatorSelection        `json:"validator"`
+	HTTPAdapter      httpAdapterSelection      `json:"http_adapter"`
+	Constructors     []contractRegistration    `json:"constructors"`
+	HTTP             []httpRegistration        `json:"http"`
+	Interceptors     []contractRegistration    `json:"interceptors"`
+	Consumers        []namedRegistration       `json:"consumers"`
+	WebSockets       []namedRegistration       `json:"websockets"`
+	Resources        []resourceRegistration    `json:"resources"`
+	Configuration    []contractSetting         `json:"configuration"`
+	Diagnostics      []contractDiagnostic      `json:"diagnostics"`
 }
 
 type contractRegistration struct {

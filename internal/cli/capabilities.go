@@ -25,6 +25,7 @@ type capabilityDefinition struct {
 
 func currentCapabilities() capabilityReport {
 	capabilities := []capabilityDefinition{
+		{Name: "generation.project.websocket", Implemented: true, Stability: "experimental", Evidence: "new --websocket-platform gorilla generates an independent Gorilla option and pinned public module", Limit: "default none; HTTP echo required; WebSocket route registration remains explicit"},
 		{Name: "generation.project.validator", Implemented: true, Stability: "experimental", Evidence: "new --validator playground generates playground.New error handling and WithValidator; none omits the implementation", Limit: "public pseudo-version recipe; playground requires Go 1.26.0+"},
 		{Name: "generation.project.event-platforms", Implemented: true, Stability: "experimental", Evidence: "HTTP+events, event-only workers and multiple uniquely named Kafka/RabbitMQ factories", Limit: "public pseudo-versions; no broker or application execution during generation"},
 		{Name: "contract.assembly-selection", Implemented: true, Stability: "alpha", Evidence: "static named event factories and optional playground validator, duplicate/mismatch/version and dynamic-expression diagnostics", Limit: "factory configuration values and validator rules are not executed or proven; unknown helpers, mutations and option expansions fail the gate"},

@@ -9,15 +9,16 @@ import (
 
 // projectConfig는 CLI 공통 설정만 보관하며 앱별 설정은 애플리케이션에서 관리합니다.
 type projectConfig struct {
-	Module      string
-	Entrypoint  string
-	Composition string
-	Port        int
-	Layout      string
-	Platform    string
-	Recipe      string
-	Events      []eventPlatformSpec
-	Validator   string
+	Module            string
+	Entrypoint        string
+	Composition       string
+	Port              int
+	Layout            string
+	Platform          string
+	Recipe            string
+	Events            []eventPlatformSpec
+	Validator         string
+	WebSocketPlatform string
 }
 
 func defaultProjectConfig(module string) projectConfig {
@@ -34,6 +35,9 @@ func projectConfigTemplate(config projectConfig) string {
 	}
 	if config.Recipe != "" {
 		result += fmt.Sprintf("recipe = %q\n", config.Recipe)
+	}
+	if config.WebSocketPlatform != "" {
+		result += fmt.Sprintf("websocket_platform = %q\n", config.WebSocketPlatform)
 	}
 	if config.Validator != "" {
 		result += fmt.Sprintf("validator = %q\n", config.Validator)
@@ -65,7 +69,7 @@ func loadProjectConfig() (projectConfig, error) {
 		}
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		switch key {
-		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "validator":
+		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "validator", "websocket_platform":
 			unquoted, err := strconv.Unquote(value)
 			if err != nil || unquoted == "" {
 				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
@@ -82,10 +86,15 @@ func loadProjectConfig() (projectConfig, error) {
 				}
 				config.Platform = unquoted
 			} else if key == "recipe" {
-				if unquoted != assemblyRecipe {
+				if unquoted != assemblyRecipe && unquoted != currentAssemblyRecipe {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported recipe %q", lineNumber+1, unquoted)
 				}
 				config.Recipe = unquoted
+			} else if key == "websocket_platform" {
+				if unquoted != "none" && unquoted != "gorilla" {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported WebSocket platform %q", lineNumber+1, unquoted)
+				}
+				config.WebSocketPlatform = unquoted
 			} else if key == "validator" {
 				config.Validator = unquoted
 			} else {
@@ -124,6 +133,9 @@ func loadProjectConfig() (projectConfig, error) {
 	}
 	if config.Module == "" {
 		return projectConfig{}, fmt.Errorf("spine.toml: module is required")
+	}
+	if config.WebSocketPlatform == "gorilla" && config.Platform != "echo" {
+		return config, fmt.Errorf("WebSocket platform requires HTTP echo")
 	}
 	validator := config.Validator
 	if validator == "" {

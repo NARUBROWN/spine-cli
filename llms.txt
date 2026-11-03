@@ -21,9 +21,10 @@
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
-- 새 프로젝트의 레시피: `public-contracts-20261103` (공개 pseudo-version을 포함한 사전 릴리스)
+- 새 프로젝트의 레시피: `platform-contracts-20261103` (공개 pseudo-version을 포함한 사전 릴리스)
 - recipe 미지정 기존 Echo 앱의 update 레시피: `echo-v0.1.0-spine-v0.6.0`
-- 새 앱 Spine: `github.com/NARUBROWN/spine v0.6.1-0.20261103010611-6e60b34204d3`
+- Gorilla WS: `v0.0.0-20261103040512-36ad41dff88f`
+- 새 앱 Spine: `github.com/NARUBROWN/spine v0.6.1-0.20261103040400-9b1321410211`
 - Kafka: `v0.0.0-20261103001523-e4b87708f841`; RabbitMQ: `v0.0.0-20261103001525-b2be17ee8a11`
 - playground: `v0.0.0-20261103011253-5508c82a155e`
 - 2026-11-03 확인 시 Spine PR #16은 OPEN/DRAFT이고 최신 정식 코어 태그는 v0.6.0이다. 위 기능을 v0.6.0에 있다고 가정하지 않는다.
@@ -91,7 +92,7 @@ schema/capabilities 확인
 ## 프로젝트 의존성 갱신
 
 `spine update`는 프로젝트 의존성 갱신이다. CLI self-update나 소스 마이그레이션이 아니다.
-새 앱은 spine.toml의 recipe/event_platforms/validator/platform 선택으로 레시피를 정한다. recipe가 없는 기존 앱은 기존 v0.6.0 Echo 레시피를 유지한다. 선택한 모듈 버전을 함께 검사하며,
+새 앱은 spine.toml의 recipe/event_platforms/validator/platform/websocket_platform 선택으로 레시피를 정한다. recipe가 없는 기존 앱은 기존 v0.6.0 Echo 레시피를 유지한다. 선택한 모듈 버전을 함께 검사하며,
 최신 버전 문자열을 개별적으로 조회해 섞거나 현재 버전을 낮추지 않는다.
 
 ```sh
@@ -285,6 +286,7 @@ spine new <project>
   [--platform echo|none]
   [--event-platform [name:]kafka|rabbitmq ...]
   [--validator none|playground]
+  [--websocket-platform none|gorilla]
   [--skip-install]
   [--dry-run]
   [--force (requires --skip-install)]
@@ -294,12 +296,12 @@ spine new <project>
 
 `--module` 생략 시 `github.com/your-org/<project>`를 사용한다. 기본 layout은 layered-v1이다.
 `new`는 `spine.New(echoplatform.Option(), spine.WithEventAdapter(name, factory), spine.WithValidator(validator))`로 선택한 구현을 조립한다.
-기본값은 HTTP echo, 이벤트 없음, validator none이다. --platform none은 이벤트 플랫폼이 필요하며 Echo 의존성·HTTP 옵션·health를 생략한다.
+기본값은 HTTP echo, WebSocket none, 이벤트 없음, validator none이다. --websocket-platform gorilla는 gorillaplatform.Option()을 추가하며 HTTP echo가 필요하다. --platform none은 이벤트 플랫폼이 필요하며 Echo 의존성·HTTP 옵션·health를 생략한다.
 --event-platform은 반복할 수 있고 [name:]kafka 또는 [name:]rabbitmq를 받는다. 이름 생략 시 provider 이름을 사용하며 이름은 [a-z][a-z0-9_]*, 중복 이름은 오류다.
 NewFactory(Config)와 playground.New()의 오류를 반환한다. 두 layout에 생성자·Route·Consumers().Register 연결 방식을 유지한다.
 선택한 플랫폼과 검증기만 직접 require하며 core와 모든 선택 모듈의 실제 선택 버전 및 replace를 검사한다.
 playground.New()를 사용하면 Go 1.26.0 이상이 필요하며 도구 체인을 자동 설치하지 않는다. 낮은 로컬 Go에서는 설치 단계를 실패시키고 목적지를 게시하지 않는다.
-공개 계약 경로는 contract/http, contract/event, contract/validator이다. adapter, adapter/http, adapter/event는 같은 타입의 호환 별칭이다.
+공개 계약 경로는 contract/http, contract/event, contract/websocket, contract/validator이다. adapter, adapter/http, adapter/event는 같은 타입의 호환 별칭이다.
 `go mod tidy`, 선택 버전 확인, 정적 계약 검사와 entrypoint 빌드가 성공하면 새 디렉터리를 게시한다.
 서버, Prepare, 사용자 테스트와 listener는 실행하지 않는다. 기본 생성 후에는 `spine dev`로 실행한다.
 
@@ -327,7 +329,7 @@ Kafka: BROKERS와 GROUP_ID 필수, TOPIC_PREFIX 선택. RabbitMQ: URL과 EXCHANG
 ALLOW_INSECURE는 boolean이며 생략하면 TLS를 사용한다. 로컬 평문 브로커에만 true를 명시한다. 설정값·인증 정보는 spine.toml에 기록하지 않는다.
 factories는 consume/publish를 모두 활성화하고 RabbitMQ 실패 정책은 reject이다. consumer와 topic/queue 준비는 자동 생성하지 않는다.
 복수 플랫폼은 같은 consumer registry를 공유하므로 prefix와 중복 처리 정책을 별도로 설계한다. DTO validate 태그는 playground를 선택했을 때만 자동 검사한다.
-inspect/context/contract check의 event_adapters와 validator는 정적 factory 선택이다. factory의 직접 지역 변수 대입만 추적한다.
+inspect/context/contract check의 websocket_adapter, event_adapters와 validator는 정적 factory 선택이다. factory의 직접 지역 변수 대입만 추적한다.
 중복 이벤트 이름·검증기, config와 등록 불일치, 호환되지 않는 core와 동적 factory/옵션을 오류로 진단한다.
 알려진 factory의 설정 인자는 runtime-values-not-evaluated로 표시하며 helper, factory, capability와 검증 규칙을 실행하지 않는다.
 이 선택은 semantic snapshot/diff에도 포함된다. 실제 HTTP·WS·브로커 검증은 test/assembly-e2e/README.md의 CLI 생성 결과 E2E로 분리한다.
@@ -1073,3 +1075,11 @@ spine dev --root <project-directory> --events jsonl
 증거가 없는 기능은 추정하지 않는다. 이 CLI의 핵심 가치는 많은 generator를 제공하는 것이 아니라,
 Spine application의 실행 계약을 명시적으로 생성하고 검사하며, 불완전한 분석과 검증 경계를
 기계 판독 가능한 형태로 정직하게 드러내는 데 있다.
+
+## 독립 WebSocket 플랫폼
+
+새 프로젝트의 platform-contracts-20261103은 WS가 분리된 코어 9b13214를 사용한다. 기존 public-contracts-20261103과 recipe 없는 Echo 앱의 update 버전은 보존한다. --websocket-platform none|gorilla로 선택하며 gorilla는 HTTP echo가 필요하다. 설정은 spine.toml의 websocket_platform에 기록한다. HTTP 없는 worker는 WS 구현을 선택할 수 없다. HTTP와 event/validator의 확정 API는 바꾸지 않는다.
+
+websocket_adapter는 gorillaplatform.Option() 또는 spine.WithWebSocketAdapter(gorillaplatform.NewFactory())와 직접 지역 변수 factory를 정적으로 추적한다. custom/재대입/동적 옵션은 실행하지 않고 WEBSOCKET_ADAPTER_UNRESOLVED, 중복 선택은 WEBSOCKET_ADAPTER_DUPLICATE로 진단한다. 새 코어에서 WS 경로가 있고 구현이 없으면 WEBSOCKET_ADAPTER_MISSING이다. 기존 내장 WS 코어는 legacy-implicit로 구분한다. WS backend 선택은 semantic snapshot/diff에도 포함된다.
+
+생성 앱의 두 layout × validator none/playground WS E2E 4개, 두 layout × Kafka/RabbitMQ × HTTP/worker/WebSocket 브로커 E2E 12개를 별도로 실행한다. 공개 모듈만 사용하며 원래 BuildApplication 소스는 변경하지 않는다. playground 없는 WS 조합은 실제 Go 1.25.5 설치를 검사하고 playground는 낮은 toolchain에서 목적지를 게시하지 않는다.

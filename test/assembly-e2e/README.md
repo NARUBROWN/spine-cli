@@ -6,12 +6,13 @@
 
 ## 공개 레시피와 Go 버전
 
-`public-contracts-20261103`은 다음 공개 모듈을 사용합니다. 생성 프로젝트에는 local `replace`가 없습니다.
+`platform-contracts-20261103`은 다음 공개 모듈을 사용합니다. 생성 프로젝트에는 local `replace`가 없습니다.
 
 | 모듈 | 버전 |
 | --- | --- |
-| Spine | `v0.6.1-0.20261103010611-6e60b34204d3` |
+| Spine | `v0.6.1-0.20261103040400-9b1321410211` |
 | Echo 플랫폼 | `v0.1.0` |
+| Gorilla WS 플랫폼 | `v0.0.0-20261103040512-36ad41dff88f` |
 | Kafka 플랫폼 | `v0.0.0-20261103001523-e4b87708f841` |
 | RabbitMQ 플랫폼 | `v0.0.0-20261103001525-b2be17ee8a11` |
 | playground 검증기 | `v0.0.0-20261103011253-5508c82a155e` |
@@ -26,7 +27,7 @@ SPINE_TEST_GO125=/absolute/path/to/go1.25.5/bin/go \
 ```
 
 2026-11-03 확인 시 [코어 PR #16](https://github.com/NARUBROWN/spine/pull/16)은 OPEN/DRAFT이고
-head는 `7ebae28b79265547b773f7346086a6a254d52ccf`입니다. 최신 정식 코어 태그는 v0.6.0이며,
+WS 통합 코어의 공개 기준 커밋은 `9b132141021155367d4eaeb8c89c511a00e9c839`입니다. 최신 정식 코어 태그는 v0.6.0이며,
 위 설치 결과는 PR 병합이나 정식 릴리스를 뜻하지 않습니다. 코어 runtime banner의 고정된 버전 문자열보다
 Go 모듈 그래프의 실제 선택 버전을 설치 근거로 사용합니다.
 
@@ -47,7 +48,7 @@ matrix는 `layered-v1`과 `legacy`에서 각각 다음 7개 구성을 검사합�
 - HTTP + RabbitMQ
 - HTTP 없는 Kafka worker
 - 이름이 다른 두 Kafka와 RabbitMQ를 함께 등록
-- HTTP + playground
+- HTTP + playground + 명시적 Gorilla WS
 - HTTP + Kafka + RabbitMQ + playground
 
 각 구성은 dry-run의 diff·변경 목록·base_hash를 확인하고 `--if-match`로 적용합니다.
@@ -79,13 +80,13 @@ compose는 Redpanda v24.3.18과 RabbitMQ 3-management를 사용하고 로컬 주
 실행 직후 브로커가 준비될 때까지 기다린 뒤 테스트를 시작하세요. 두 환경 변수가 없으면 broker suite를
 명시적으로 건너뜁니다. 생략된 결과를 실제 브로커 검증 통과로 보고하지 않습니다.
 
-두 layout × Kafka/RabbitMQ × HTTP/worker의 8개 경로를 실행합니다. 매번 실제 CLI가 공개 모듈로
+두 layout × Kafka/RabbitMQ × HTTP/worker/WebSocket의 12개 경로를 실행합니다. 매번 실제 CLI가 공개 모듈로
 프로젝트를 생성하고 설치·정적 검사를 마칩니다. 그 뒤 테스트 코드만 추가하고 `go test -race`를 실행합니다.
 원래 `application.go`는 변경하지 않으며 실행 전후 SHA-256도 기록합니다. 테스트에 필요한 native
 클라이언트 의존성은 fixture의 `go mod tidy`에서 추가합니다. 이때도 local `replace`는 사용하지 않습니다.
 
 HTTP 앱은 잘못된 DTO를 400으로 차단하고, 정상 HTTP 요청을 이벤트로 발행합니다.
-worker 앱은 외부 producer의 정상 이벤트로 시작합니다. 두 경로 모두 consumer 검증 → 핸들러 →
+WebSocket 앱은 `--websocket-platform gorilla`로 생성하고 잘못된 메시지의 1008 차단과 정상 WS 메시지의 이벤트 발행을 확인합니다. worker 앱은 외부 producer의 정상 이벤트로 시작합니다. 모든 경로에서 consumer 검증 → 핸들러 →
 결과 이벤트를 확인한 뒤, HTTP 검증을 우회한 외부 producer의 잘못된 DTO를 전송합니다.
 
 - Kafka: 정상 입력의 committed offset이 1인 것을 native API로 확인합니다. 잘못된 DTO는 핸들러에
@@ -111,3 +112,12 @@ worker 앱은 외부 producer의 정상 이벤트로 시작합니다. 두 경로
 | 외부 E2E | 생성 앱의 실제 Kafka/RabbitMQ 8개 경로 | 발행·consumer·결과·settlement·재전달 정책·종료 |
 
 2026-11-03 검증 결과는 이 표의 범위에 한정합니다. 실제 실행 로그는 작업 결과와 PR에 구분해 보고합니다.
+
+## 독립 WS 생성 E2E
+
+```sh
+go test ./internal/cli -run '^TestGeneratedWebSocketPublicAssembly$' -count=1 -v
+```
+
+두 layout과 validator none/playground의 4개 조합에서 실제 CLI dry-run/apply, context/inspect/contract check/verify, 공개 모듈 그래프와 WS 메시지·1008 검증 종료·1000 정상 종료·listener 해제를 검사합니다. 원래 BuildApplication 바이트와 SHA-256을 보존합니다.
+기존 public-contracts-20261103 레시피는 이전 버전으로 보존합니다. 새 프로젝트만 현재 분리 코어를 기본 선택하며 기존 앱의 update는 소스를 재작성하지 않습니다.

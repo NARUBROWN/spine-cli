@@ -35,10 +35,10 @@ func TestGeneratedProjectsHandleHTTPInputErrors(t *testing.T) {
 				result := runE2E(binary, directory, nil, append(append([]string{}, args...), "--if-match", envelope.Result.BaseHash, "--json")...)
 				assertE2ESuccess(t, result, "HTTP fixture apply")
 			}
-			apply(workspace, "new", "todo", "--module", "example.com/todo", "--layout", layout)
+			apply(workspace, "new", "todo", "--module", "example.com/todo", "--layout", layout, "--websocket-platform", "gorilla")
 			project := filepath.Join(workspace, "todo")
 			mod, _ := os.ReadFile(filepath.Join(project, "go.mod"))
-			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+assemblySpineVersion) {
+			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+webSocketSpineVersion) {
 				t.Fatalf("generated project uses an unfixed runtime: %s", mod)
 			}
 			if err := os.MkdirAll(filepath.Join(project, "handlers"), 0o755); err != nil {
@@ -79,15 +79,15 @@ func (*Controller) Redirect() httpx.Redirect { return httpx.Redirect{Location:"/
 				path := filepath.Join(project, "internal", "application", "application.go")
 				source, _ := os.ReadFile(path)
 				text := strings.Replace(string(source), "import (", "import (\n\"example.com/todo/handlers\"", 1)
-				text = strings.Replace(text, "app := spine.New(echoplatform.Option())", `app := spine.New(echoplatform.Option())
- app.Constructor(handlers.NewController)
+				text = strings.Replace(text, "return app, boot.Options{", `app.Constructor(handlers.NewController)
  app.Route("POST", "/products", (*handlers.Controller).Create)
  app.Route("GET", "/products/:id", (*handlers.Controller).Detail)
  app.Route("POST", "/wrapper", (*handlers.Controller).Wrapped)
  app.Route("GET", "/failure", (*handlers.Controller).Fail)
  app.Route("GET", "/text", (*handlers.Controller).Text)
  app.Route("GET", "/download", (*handlers.Controller).Download)
- app.Route("GET", "/redirect", (*handlers.Controller).Redirect)`, 1)
+ app.Route("GET", "/redirect", (*handlers.Controller).Redirect)
+ return app, boot.Options{`, 1)
 				writeE2EFile(t, path, text)
 			}
 			writeE2EFile(t, filepath.Join(project, "internal", "application", "http_test.go"), generatedHTTPInputTest)

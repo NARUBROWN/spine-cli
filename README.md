@@ -78,6 +78,7 @@ spine new gateway --event-platform events:kafka --event-platform jobs:rabbitmq
 | --- | --- |
 | `--platform` | `echo` (기본값), `none` (이벤트 플랫폼 필요) |
 | `--event-platform` | 반복 가능한 `[name:]kafka` 또는 `[name:]rabbitmq`; 이름 생략 시 provider 이름 사용 |
+| `--websocket-platform` | `none` (기본값), `gorilla` (HTTP echo 필요) |
 | `--validator` | `none` (기본값), `playground` |
 
 이벤트 이름은 `[a-z][a-z0-9_]*`이며 중복을 거부합니다. 같은 provider도 서로 다른 이름으로 등록할 수 있습니다.
@@ -97,23 +98,27 @@ factory는 consume/publish를 모두 활성화합니다. consumer 생성은 `spi
 검증기를 선택한 앱은 DTO의 `validate` 태그를 HTTP JSON·폼, WS와 consumer 핸들러 전에 검사합니다.
 `none`이면 이 자동 검증을 생략합니다.
 
+WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playground`로 독립 WS 구현을 선택합니다. `gorillaplatform.Option()`은 HTTP 옵션과 별개로 등록합니다. 기존 이벤트 factory·validator 오류 처리와 API는 유지합니다. WS 경로를 등록하기 전에 구현을 선택해야 하며 `none` 상태의 새 코어는 암묵적으로 Gorilla를 포함하지 않습니다.
+
 ### 공개 버전 레시피
 
-현재 소스의 `public-contracts-20261103`은 다음 공개 버전을 고정합니다.
+현재 소스의 `platform-contracts-20261103`은 다음 공개 버전을 고정합니다.
 2026-11-03 확인 시 [Spine PR #16](https://github.com/NARUBROWN/spine/pull/16)은 OPEN/DRAFT이고
 최신 정식 코어 태그는 v0.6.0입니다. 아래 조합은 공개 pseudo-version을 포함한 사전 릴리스 레시피입니다.
 이 기능이 기존 v0.6.0이나 이미 배포된 CLI에 있다고 가정하지 마세요.
 
 | 모듈 | 버전 |
 | --- | --- |
-| Spine | `v0.6.1-0.20261103010611-6e60b34204d3` |
+| Spine | `v0.6.1-0.20261103040400-9b1321410211` |
 | Echo 플랫폼 | `v0.1.0` |
+| Gorilla WS 플랫폼 | `v0.0.0-20261103040512-36ad41dff88f` |
 | Kafka 플랫폼 | `v0.0.0-20261103001523-e4b87708f841` |
 | RabbitMQ 플랫폼 | `v0.0.0-20261103001525-b2be17ee8a11` |
 | playground 검증기 | `v0.0.0-20261103011253-5508c82a155e` |
 
-공개 계약은 `contract/http`, `contract/event`, `contract/validator`입니다.
-이전 `adapter`, `adapter/http`, `adapter/event`는 호환 별칭입니다.
+공개 계약은 `contract/http`, `contract/event`, `contract/websocket`, `contract/validator`입니다.
+이전 `adapter`, `adapter/http`, `adapter/event`, `wsadapter`는 호환 별칭입니다.
+기존 `public-contracts-20261103` 레시피는 이전 버전으로 보존하며 `update`가 소스나 WS 선택을 조용히 추가하지 않습니다.
 생성 앱과 브로커 E2E의 재현 절차와 증거 범위는 [E2E 안내](test/assembly-e2e/README.md)를 참고하세요.
 
 ## 프로젝트 의존성 갱신
@@ -241,7 +246,7 @@ legacy에서만 지원하며, 새 구조에 CRUD 생성 기능을 추가하지 �
 `platform.New()`, `spine.New(platform.Option())`,
 `spine.New(spine.WithHTTPAdapter(platform.NewFactory()))`를 같은 Echo 선택으로 인식합니다.
 `platform.WithEcho(func(*echo.Echo))`를 전달하는 플랫폼 생성 옵션도 인식하지만 콜백이나 native 경로는 실행하거나 분석하지 않습니다.
-`event_adapters`와 `validator`는 이름 있는 `WithEventAdapter`와 `WithValidator`의 생성식을 보여 줍니다.
+`websocket_adapter`는 Gorilla 옵션 또는 `WithWebSocketAdapter(NewFactory())`를, `event_adapters`와 `validator`는 이름 있는 `WithEventAdapter`와 `WithValidator`의 생성식을 보여 줍니다.
 알려진 factory의 직접 지역 변수 대입을 추적하며 중복 이름, 설정과 등록 불일치, 오래된 코어를 진단합니다.
 임의 helper, 재대입, 가변 옵션과 사용자 정의 검증기 옵션은 미해결로 표시합니다.
 이벤트의 `configuration: runtime-values-not-evaluated`는 환경 설정값·연결 가능성·factory capability를 확인하지 않았다는 뜻입니다.
@@ -326,8 +331,9 @@ composition = "./internal/application"
 port = 8080
 layout = "layered-v1"
 platform = "echo"
-recipe = "public-contracts-20261103"
+recipe = "platform-contracts-20261103"
 validator = "none"
+websocket_platform = "none"
 # 이벤트 선택 시 예: event_platforms = ["events:kafka", "jobs:rabbitmq"]
 ```
 

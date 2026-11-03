@@ -82,7 +82,7 @@ func TestGeneratedAssemblyPublicMatrix(t *testing.T) {
 			{"rabbitmq", []string{"--event-platform", "rabbitmq"}, false},
 			{"worker", []string{"--platform", "none", "--event-platform", "events:kafka"}, false},
 			{"multiple", []string{"--event-platform", "primary:kafka", "--event-platform", "secondary:kafka", "--event-platform", "jobs:rabbitmq"}, false},
-			{"validator", []string{"--validator", "playground"}, true},
+			{"validator", []string{"--validator", "playground", "--websocket-platform", "gorilla"}, true},
 			{"all", []string{"--event-platform", "kafka", "--event-platform", "rabbitmq", "--validator", "playground"}, true},
 		} {
 			t.Run(layout+"/"+scenario.name, func(t *testing.T) {
@@ -166,14 +166,23 @@ func TestGeneratedAssemblyBrokerE2E(t *testing.T) {
 	}
 	for _, layout := range []string{layeredLayout, "legacy"} {
 		for _, provider := range []string{"kafka", "rabbitmq"} {
-			for _, http := range []string{"echo", "none"} {
+			for _, http := range []string{"echo", "none", "websocket"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", layout, provider, http), func(t *testing.T) {
 					workspace := t.TempDir()
-					applyAssemblyPlan(t, binary, workspace, "new", "sample", "--module", "example.com/sample", "--layout", layout, "--platform", http, "--event-platform", "events:"+provider, "--validator", "playground")
+					selectedHTTP := http
+					if selectedHTTP == "websocket" {
+						selectedHTTP = "echo"
+					}
+					args := []string{"new", "sample", "--module", "example.com/sample", "--layout", layout, "--platform", selectedHTTP, "--event-platform", "events:" + provider, "--validator", "playground"}
+					if http == "websocket" {
+						args = append(args, "--websocket-platform", "gorilla")
+					}
+					applyAssemblyPlan(t, binary, workspace, args...)
 					project := filepath.Join(workspace, "sample")
 					source, _ := os.ReadFile(filepath.Join(project, "internal/application/application.go"))
 					text := strings.ReplaceAll(string(fixture), "{{PROVIDER}}", provider)
-					text = strings.ReplaceAll(text, "{{HTTP}}", http)
+					text = strings.ReplaceAll(text, "{{HTTP}}", selectedHTTP)
+					text = strings.ReplaceAll(text, "{{WEBSOCKET}}", fmt.Sprint(http == "websocket"))
 					module, loader, group := kafkaPlatformPath, "loadKafkaConfig", "config.GroupID = group"
 					if provider == "rabbitmq" {
 						module, loader, group = rabbitPlatformPath, "loadRabbitmqConfig", ""
@@ -207,7 +216,7 @@ func TestGeneratedAssemblyMinimumToolchain(t *testing.T) {
 	binary := buildUpdateCLI(t)
 	env := []string{"PATH=" + filepath.Dir(go125) + string(os.PathListSeparator) + os.Getenv("PATH"), "GOTOOLCHAIN=local"}
 	root := t.TempDir()
-	args := []string{"new", "sample", "--module", "example.com/sample", "--event-platform", "kafka", "--event-platform", "rabbitmq"}
+	args := []string{"new", "sample", "--module", "example.com/sample", "--event-platform", "kafka", "--event-platform", "rabbitmq", "--websocket-platform", "gorilla"}
 	plan := runE2E(binary, root, env, append(append([]string{}, args...), "--dry-run", "--json")...)
 	assertE2ESuccess(t, plan, "Go 1.25.5 install plan without validator")
 	var envelope struct {

@@ -173,8 +173,11 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if config.Recipe == assemblyRecipe {
 		recipe, targets = assemblyRecipe, assemblyModules(config.Platform, config.Events, config.Validator)
 	}
+	if config.Recipe == currentAssemblyRecipe {
+		recipe, targets = currentAssemblyRecipe, currentAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
+	}
 	result["recipe"], result["target_modules"], result["platform"] = recipe, targets, config.Platform
-	if recipe == assemblyRecipe {
+	if recipe == assemblyRecipe || recipe == currentAssemblyRecipe {
 		result["stability"] = "prerelease"
 	}
 	if !filepath.IsLocal(config.Entrypoint) {

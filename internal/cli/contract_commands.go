@@ -207,6 +207,12 @@ func semanticView(contract applicationContract) semanticContract {
 		encoded, _ := json.Marshal(item)
 		result.Configuration = append(result.Configuration, "validator = "+string(encoded))
 	}
+	if contract.WebSocketAdapter.Provider != "" && contract.WebSocketAdapter.Provider != "none" {
+		item := contract.WebSocketAdapter
+		item.Source = ""
+		encoded, _ := json.Marshal(item)
+		result.Configuration = append(result.Configuration, "websocket_adapter = "+string(encoded))
+	}
 	for _, item := range contract.Configuration {
 		result.Configuration = append(result.Configuration, item.Path+" = "+item.Value)
 	}

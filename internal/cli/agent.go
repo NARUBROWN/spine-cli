@@ -94,6 +94,7 @@ func currentCommandSchema() commandSchema {
 		if c.Name == "new" {
 			c.Options["platform"] = optionDefinition{Type: "string", Enum: []string{"echo", "none"}}
 			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "kafka|rabbitmq or unique name:kafka|rabbitmq; environment prefix SPINE_<NAME>_"}
+			c.Options["websocket-platform"] = optionDefinition{Type: "string", Enum: []string{"none", "gorilla"}, Description: "Default none; Gorilla requires HTTP echo"}
 			c.Options["validator"] = optionDefinition{Type: "string", Enum: []string{"none", "playground"}, Description: "Default none; playground requires Go 1.26.0+"}
 			c.Options["skip-install"] = optionDefinition{Type: "boolean", Description: "Generate files without dependency installation or build verification; offline dry-run"}
 			c.Effects.Network = true
@@ -141,15 +142,16 @@ type projectContext struct {
 }
 
 type projectContextConfig struct {
-	Module      string              `json:"module"`
-	Entrypoint  string              `json:"entrypoint"`
-	Composition string              `json:"composition"`
-	Port        int                 `json:"port"`
-	Layout      string              `json:"layout"`
-	Platform    string              `json:"platform,omitempty"`
-	Recipe      string              `json:"recipe,omitempty"`
-	Events      []eventPlatformSpec `json:"event_platforms,omitempty"`
-	Validator   string              `json:"validator,omitempty"`
+	Module            string              `json:"module"`
+	Entrypoint        string              `json:"entrypoint"`
+	Composition       string              `json:"composition"`
+	Port              int                 `json:"port"`
+	Layout            string              `json:"layout"`
+	Platform          string              `json:"platform,omitempty"`
+	Recipe            string              `json:"recipe,omitempty"`
+	Events            []eventPlatformSpec `json:"event_platforms,omitempty"`
+	Validator         string              `json:"validator,omitempty"`
+	WebSocketPlatform string              `json:"websocket_platform,omitempty"`
 }
 
 type nextAction struct {
@@ -190,7 +192,7 @@ func runContext(args []string, out, errOut io.Writer) int {
 		SchemaVersion: contextSchemaVersion,
 		CLIVersion:    version,
 		ProjectRoot:   filepath.Clean(absoluteRoot),
-		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, Events: config.Events, Validator: config.Validator},
+		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform},
 		Capabilities:  currentCapabilities(),
 		Doctor:        doctor,
 		NextActions: []nextAction{

@@ -26,12 +26,13 @@ type newProjectOptions struct {
 	Module, Layout, Platform string
 	Events                   []eventPlatformSpec
 	Validator                string
+	WebSocketPlatform        string
 	SkipInstall, JSON        bool
 	Write                    writeOptions
 }
 
 func parseNewOptions(args []string) (newProjectOptions, error) {
-	options := newProjectOptions{Layout: layeredLayout, Platform: "echo", Validator: "none"}
+	options := newProjectOptions{Layout: layeredLayout, Platform: "echo", Validator: "none", WebSocketPlatform: "none"}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return options, fmt.Errorf("project name is required")
 	}
@@ -42,7 +43,7 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	options.Name, options.Module = name, "github.com/your-org/"+name.Route
 	for index := 1; index < len(args); index++ {
 		switch args[index] {
-		case "--module", "--layout", "--platform", "--event-platform", "--validator", "--if-match":
+		case "--module", "--layout", "--platform", "--event-platform", "--validator", "--websocket-platform", "--if-match":
 			key := args[index]
 			if index+1 == len(args) {
 				return options, fmt.Errorf("%s requires a value", key)
@@ -63,6 +64,8 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 				options.Events = append(options.Events, spec)
 			case "--validator":
 				options.Validator = args[index]
+			case "--websocket-platform":
+				options.WebSocketPlatform = args[index]
 			case "--if-match":
 				options.Write.IfMatch = args[index]
 			}
@@ -84,6 +87,12 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	if options.Platform != "echo" && options.Platform != "none" {
 		return options, fmt.Errorf("unsupported platform: %s", options.Platform)
 	}
+	if options.WebSocketPlatform != "none" && options.WebSocketPlatform != "gorilla" {
+		return options, fmt.Errorf("unsupported WebSocket platform: %s", options.WebSocketPlatform)
+	}
+	if options.WebSocketPlatform == "gorilla" && options.Platform != "echo" {
+		return options, fmt.Errorf("--websocket-platform gorilla requires --platform echo")
+	}
 	if err := validateAssemblySelection(options.Platform, options.Events, options.Validator); err != nil {
 		return options, err
 	}
@@ -100,7 +109,8 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 	config := defaultProjectConfig(options.Module)
 	config.Layout, config.Platform = options.Layout, options.Platform
-	config.Recipe, config.Events, config.Validator = assemblyRecipe, options.Events, options.Validator
+	config.Recipe, config.Events, config.Validator = currentAssemblyRecipe, options.Events, options.Validator
+	config.WebSocketPlatform = options.WebSocketPlatform
 	application, err := assemblyApplication(options)
 	if err != nil {
 		return nil, err
@@ -168,7 +178,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	stages := []installationStage{{"scaffold", "pending"}, {"dependencies", "skipped"}, {"modules", "skipped"}, {"contract", "skipped"}, {"build", "skipped"}, {"publish", "pending"}}
 	modules := []selectedModule{}
 	dir := options.Name.Route
-	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": assemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "minimum_go": assemblyGoVersion(options.Validator), "target_modules": assemblyModules(options.Platform, options.Events, options.Validator), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
+	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
 	finish := func(code int, stage string, err error) int {
 		if err != nil {
 			for index := range stages {
@@ -221,7 +231,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 			return finish(10, "scaffold", err)
 		}
 		var failure *installationFailure
-		modules, failure = installAssemblyProject(ctx, staging, files, stages, assemblyModules(options.Platform, options.Events, options.Validator))
+		modules, failure = installAssemblyProject(ctx, staging, files, stages, currentAssemblyModules(options))
 		if failure != nil {
 			return finish(failure.Code, failure.Stage, failure.Cause)
 		}
@@ -244,7 +254,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	}
 	// 생성 모드와 최종 내용도 해시에 넣어 다른 레시피의 계획을 재사용하지 못하게 합니다.
 	digest := sha256.New()
-	fmt.Fprintf(digest, "%s\n%s\n%s\n%t\n%t\n", state, assemblyRecipe, options.Platform, options.SkipInstall, options.Write.Force)
+	fmt.Fprintf(digest, "%s\n%s\n%s\n%t\n%t\n", state, currentAssemblyRecipe, options.Platform, options.SkipInstall, options.Write.Force)
 	for _, path := range paths {
 		fmt.Fprintf(digest, "%d:%s%d:%s", len(path), path, len(files[path]), files[path])
 	}
@@ -302,7 +312,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 			fmt.Fprintf(out, "Would create Spine application in %s\n%s", dir, result["diff"])
 			printDryRunHash(out, baseHash)
 		} else {
-			fmt.Fprintf(out, "Created Spine application in %s (%s, prerelease recipe %s)\n\nNext steps:\n  cd %s\n", dir, options.Platform, assemblyRecipe, dir)
+			fmt.Fprintf(out, "Created Spine application in %s (%s, prerelease recipe %s)\n\nNext steps:\n  cd %s\n", dir, options.Platform, currentAssemblyRecipe, dir)
 			if options.SkipInstall {
 				fmt.Fprintln(out, "  go mod tidy\n  spine dev\n\nDependency installation and build verification were skipped.")
 			} else {

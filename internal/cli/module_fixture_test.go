@@ -24,7 +24,7 @@ func prepareTestModuleCache() error {
 			return
 		}
 		defer os.RemoveAll(root)
-		for _, requirements := range []string{fmt.Sprintf("require (\n%s %s\n%s %s\n)\n", spineImportPath, platformSpineVersion, echoPlatformPath, echoPlatformVersion), "require " + spineImportPath + " v0.5.2\n", strings.TrimPrefix(assemblyGoMod(newProjectOptions{Module: "example.com/fixture", Platform: "echo", Events: []eventPlatformSpec{{Name: "kafka", Provider: "kafka"}, {Name: "rabbitmq", Provider: "rabbitmq"}}, Validator: "none"}), "module example.com/fixture\n\ngo 1.25.5\n\n")} {
+		for _, requirements := range []string{fmt.Sprintf("require (\n%s %s\n%s %s\n)\n", spineImportPath, platformSpineVersion, echoPlatformPath, echoPlatformVersion), "require " + spineImportPath + " v0.5.2\n", strings.TrimPrefix(assemblyGoMod(newProjectOptions{Module: "example.com/fixture", Platform: "echo", Events: []eventPlatformSpec{{Name: "kafka", Provider: "kafka"}, {Name: "rabbitmq", Provider: "rabbitmq"}}, Validator: "none", WebSocketPlatform: "gorilla"}), "module example.com/fixture\n\ngo 1.25.5\n\n")} {
 			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/fixture\n\ngo 1.25.5\n\n"+requirements), 0o600); err != nil {
 				testModuleCache.err = err
 				return
