@@ -276,7 +276,7 @@ func assemblyReadme(options newProjectOptions) string {
 	if options.Platform == "echo" {
 		source.WriteString("\n`GET /health`를 제공합니다. `SPINE_PORT` 또는 CLI의 `spine.toml` port로 포트를 정합니다. Echo native 설정은 `echoplatform.Option(echoplatform.WithEcho(func(*echo.Echo) { ... }))`에 추가합니다.\n")
 	}
-	source.WriteString("\n`spine-cli update --dry-run --json`으로 의존성 변경을 검토하고 `--if-match`로 적용합니다. update는 앱 소스를 바꾸지 않습니다. 정적 검사와 build/test는 실제 브로커 연결, ACK/NACK, 배포 검증을 뜻하지 않습니다.\n")
+	source.WriteString("\n`spine update --dry-run --json`으로 의존성 변경을 검토하고 `--if-match`로 적용합니다. update는 앱 소스를 바꾸지 않습니다. 정적 검사와 build/test는 실제 브로커 연결, ACK/NACK, 배포 검증을 뜻하지 않습니다.\n")
 	if options.Layout == layeredLayout && options.Platform == "echo" {
 		source.WriteString(strings.ReplaceAll(generatedFirstAPIGuide(), "{{MODULE}}", options.Module))
 	}

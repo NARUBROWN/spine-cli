@@ -314,9 +314,9 @@ func runNew(args []string, out, errOut io.Writer) int {
 		} else {
 			fmt.Fprintf(out, "Created Spine application in %s (%s, release recipe %s)\n\nNext steps:\n  cd %s\n", dir, options.Platform, currentAssemblyRecipe, dir)
 			if options.SkipInstall {
-				fmt.Fprintln(out, "  go mod tidy\n  spine-cli dev\n\nDependency installation and build verification were skipped.")
+				fmt.Fprintln(out, "  go mod tidy\n  spine dev\n\nDependency installation and build verification were skipped.")
 			} else {
-				fmt.Fprintln(out, "  spine-cli dev\n\nDependencies, static contract and build verified.")
+				fmt.Fprintln(out, "  spine dev\n\nDependencies, static contract and build verified.")
 				for _, module := range modules {
 					fmt.Fprintf(out, "  %s %s\n", module.Path, module.Version)
 				}
