@@ -2,12 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRuntimeOpenAPIExportUsesCompositionWithoutStartingApplication(t *testing.T) {
@@ -41,6 +44,7 @@ func BuildApplication() (spine.App,boot.Options,error) {
  if os.Getenv("SPINE_OPENAPI_CONDITIONAL") == "true" { app.Route("GET","/conditional",(*Controller).Get) }
  return app,boot.Options{HTTP:&boot.HTTPOptions{GlobalPrefix:"/api",OpenAPI:boot.OpenAPIOptions{Title:"Runtime API"}}},nil
 }
+
 `)
 	command := exec.Command("go", "mod", "tidy")
 	if output, err := command.CombinedOutput(); err != nil {
@@ -133,5 +137,72 @@ func TestRuntimeOpenAPIExportRejectsUnsupportedCoreAndHTTPDisabled(t *testing.T)
 				t.Fatalf("temporary exporter remained after failure: %v", files)
 			}
 		})
+	}
+}
+
+func TestRuntimeOpenAPICancellationBoundsChildOutputWait(t *testing.T) {
+	inTempDir(t)
+	writeE2EFile(t, "go.mod", "module example.com/runtime-api\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine "+currentAssemblySpineVersion+"\n")
+	writeE2EFile(t, "spine.toml", "module = \"example.com/runtime-api\"\nentrypoint = \".\"\ncomposition = \"application\"\nport = 8080\n")
+	if err := os.MkdirAll("application", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeE2EFile(t, "application/app.go", `package application
+import (
+ "os"
+ "strconv"
+ "time"
+ "github.com/NARUBROWN/spine"
+ "github.com/NARUBROWN/spine/pkg/boot"
+)
+func BuildApplication() (spine.App,boot.Options,error) {
+ if err := os.WriteFile("composition.pid", []byte(strconv.Itoa(os.Getpid())), 0600); err != nil { return nil,boot.Options{},err }
+ time.Sleep(time.Minute)
+ return spine.New(),boot.Options{HTTP:&boot.HTTPOptions{}},nil
+}
+`)
+	if output, err := exec.Command("go", "mod", "tidy").CombinedOutput(); err != nil {
+		t.Fatalf("fixture modules: %v %s", err, output)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() { _, err := executeRuntimeOpenAPIContext(ctx); finished <- err }()
+	var child *os.Process
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile("composition.pid"); err == nil {
+			pid, err := strconv.Atoi(string(data))
+			if err != nil || pid <= 0 {
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
+			child, err = os.FindProcess(pid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = child.Kill(); _ = child.Release() })
+			break
+		}
+		select {
+		case err := <-finished:
+			t.Fatalf("composition did not start: %v", err)
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if child == nil {
+		t.Fatal("composition process did not become ready")
+	}
+	cancel()
+	select {
+	case err := <-finished:
+		if err == nil {
+			t.Fatal("cancelled composition exported a document")
+		}
+	case <-time.After(10 * time.Second):
+		_ = child.Kill()
+		<-finished
+		t.Fatal("runtime export kept waiting for the child's output pipes after cancellation")
 	}
 }

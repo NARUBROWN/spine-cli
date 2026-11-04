@@ -31,6 +31,24 @@ go install github.com/NARUBROWN/spine-cli@latest
 spine-cli version
 ```
 
+### 이번 Preview 설치
+
+아래 Preview 예제에는 CLI `v0.4.3-preview.1`에 포함되는 기능이 필요합니다. 해당 소스 체크아웃의 루트에서는 다음과 같이 설치합니다. 로컬 소스 설치본은 `0.4.3-dev`로 표시됩니다.
+
+```sh
+go install .
+spine-cli version
+```
+
+`v0.4.3-preview.1` 태그가 공개된 뒤에는 정확한 공개 버전으로 설치할 수 있습니다. 설치 결과는 `spine-cli 0.4.3-preview.1`입니다.
+
+```sh
+go install github.com/NARUBROWN/spine-cli@v0.4.3-preview.1
+spine-cli version
+```
+
+일반 정식 설치의 `@latest`와 Preview 설치 버전을 구분하세요. 기존 `spine` 호환 명령이 필요하면 `github.com/NARUBROWN/spine-cli/cmd/spine`을 같은 버전으로 별도 설치할 수 있습니다.
+
 ## 빠른 시작
 
 ```sh

@@ -19,6 +19,12 @@ const runtimeOpenAPIMarker = "SPINE_RUNTIME_OPENAPI="
 // executeRuntimeOpenAPI는 리스너 없이 앱의 설명 API를 호출합니다.
 // BuildApplication과 Go 도구는 실행되므로 정적 검사와 별도인 실행 증거입니다.
 func executeRuntimeOpenAPI() ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return executeRuntimeOpenAPIContext(ctx)
+}
+
+func executeRuntimeOpenAPIContext(ctx context.Context) ([]byte, error) {
 	importPath, err := compositionImportPath()
 	if err != nil {
 		return nil, err
@@ -35,9 +41,8 @@ func executeRuntimeOpenAPI() ([]byte, error) {
 	if err := os.WriteFile(filepath.Join(directory, "main.go"), source, 0o600); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
 	command := exec.CommandContext(ctx, "go", "run", "./"+filepath.Base(directory))
+	command.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {

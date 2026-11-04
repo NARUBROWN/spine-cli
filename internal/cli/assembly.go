@@ -250,7 +250,7 @@ func loadRabbitmqConfig(prefix string) (rabbitmqplatform.Config,error) {
 func assemblyReadme(options newProjectOptions) string {
 	var source strings.Builder
 	fmt.Fprintf(&source, "# Spine application\n\n모듈: %s\n\nGo %s 이상이 필요합니다. 레시피 `%s`는 코어 `%s`와 플랫폼 `%s`의 공개 Preview 태그를 사용합니다.\n\n", options.Module, assemblyGoVersion(options.Validator), currentAssemblyRecipe, currentAssemblySpineVersion, previewPlatformVersion)
-	source.WriteString("기본 생성은 의존성 설치·정적 계약 검사·빌드를 수행합니다. `--skip-install`은 파일만 생성하므로 먼저 `go mod tidy`를 실행하세요. 생성 과정에서 앱과 factory는 실행하지 않습니다.\n\n")
+	source.WriteString("기본 생성은 의존성 설치, 정적 계약 검사, 빌드를 수행합니다. `--skip-install`은 파일만 생성하므로 먼저 `go mod tidy`를 실행하세요. 생성 과정에서 앱과 factory는 실행하지 않습니다.\n\n")
 	if len(options.Events) > 0 {
 		source.WriteString("## 이벤트 설정\n\n실행과 `go test` 전에 다음 환경 변수를 설정하세요. 주소와 자격 증명은 소스에 저장하지 않습니다. 기본 전송은 TLS이며 로컬 평문 브로커에만 `ALLOW_INSECURE=true`를 명시합니다.\n\n")
 		for _, spec := range options.Events {
@@ -262,13 +262,13 @@ func assemblyReadme(options newProjectOptions) string {
 				fmt.Fprintf(&source, "`%sURL`, `%sEXCHANGE`; 선택 `%sQUEUE_PREFIX`, `%sTOPIC_PREFIX`, `%sALLOW_INSECURE`. 실패 정책은 reject입니다.\n", prefix, prefix, prefix, prefix, prefix)
 			}
 		}
-		source.WriteString("\n`BuildApplication`은 설정과 factory 생성 오류를 반환합니다. consumer는 `app.Consumers().Register`로 등록합니다. 등록된 이벤트 factory는 같은 consumer registry를 사용하므로 복수 플랫폼에서는 각 플랫폼의 topic·prefix와 중복 처리 정책을 함께 설계하세요. 생성만으로 consumer나 topic·queue를 만들지는 않습니다.\n")
+		source.WriteString("\n`BuildApplication`은 설정과 factory 생성 오류를 반환합니다. consumer는 `app.Consumers().Register`로 등록합니다. 등록된 이벤트 factory는 같은 consumer registry를 사용하므로 복수 플랫폼에서는 각 플랫폼의 topic, prefix와 중복 처리 정책을 함께 설계하세요. 생성만으로 consumer나 topic, queue를 만들지는 않습니다.\n")
 	}
 	if options.WebSocketPlatform == "gorilla" {
 		source.WriteString("\nWebSocket 구현은 gorillaplatform.Option()으로 선택했습니다. app.WebSocket().Register로 경로를 등록하고 boot.HTTPOptions.WebSocket으로 정책을 설정합니다.\n")
 	}
 	if options.Validator == "playground" {
-		source.WriteString("\n검증기는 `playground.New()`와 `spine.WithValidator`로 연결됩니다. DTO에 `validate` 태그를 추가하세요. 검증기는 핸들러 전 HTTP·WS·consumer 입력을 검사합니다.\n")
+		source.WriteString("\n검증기는 `playground.New()`와 `spine.WithValidator`로 연결됩니다. DTO에 `validate` 태그를 추가하세요. 검증기는 핸들러 전 HTTP, WS, consumer 입력을 검사합니다.\n")
 	} else {
 		source.WriteString("\n검증기를 생략했습니다. DTO의 `validate` 태그는 자동 검사되지 않습니다.\n")
 	}
@@ -276,7 +276,7 @@ func assemblyReadme(options newProjectOptions) string {
 	if options.Platform == "echo" {
 		source.WriteString("\n`GET /health`를 제공합니다. `SPINE_PORT` 또는 CLI의 `spine.toml` port로 포트를 정합니다. Echo native 설정은 `echoplatform.Option(echoplatform.WithEcho(func(*echo.Echo) { ... }))`에 추가합니다.\n")
 	}
-	source.WriteString("\n`spine update --dry-run --json`으로 의존성 변경을 검토하고 `--if-match`로 적용합니다. update는 앱 소스를 바꾸지 않습니다. 정적 검사와 build/test는 실제 브로커 연결·ACK/NACK·배포 검증을 뜻하지 않습니다.\n")
+	source.WriteString("\n`spine-cli update --dry-run --json`으로 의존성 변경을 검토하고 `--if-match`로 적용합니다. update는 앱 소스를 바꾸지 않습니다. 정적 검사와 build/test는 실제 브로커 연결, ACK/NACK, 배포 검증을 뜻하지 않습니다.\n")
 	if options.Layout == layeredLayout && options.Platform == "echo" {
 		source.WriteString(strings.ReplaceAll(generatedFirstAPIGuide(), "{{MODULE}}", options.Module))
 	}
