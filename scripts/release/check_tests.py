@@ -7,6 +7,7 @@ import sys
 REQUIRED = {"TestGeneratedAssemblyBrokerE2E", "TestGeneratedAssemblyMinimumToolchain",
             "TestGeneratedAssemblyPublicMatrix", "TestGeneratedWebSocketPublicAssembly",
             "TestStructuredHTTPInputContracts", "TestRuntimeOpenAPIGeneratedApplications",
+            "TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn",
             "TestRunAndDevGracefulShutdown", "TestGeneratedHTTPShutdownDrainsRequests"}
 
 

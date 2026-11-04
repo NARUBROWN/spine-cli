@@ -12,15 +12,30 @@ import (
 )
 
 func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
-	name := "spine-cli"
+	name := "spine"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	binary := filepath.Join(t.TempDir(), name)
-	build := exec.Command("go", "build", "-o", binary, ".")
+	binDir := t.TempDir()
+	binary := filepath.Join(binDir, name)
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := regexp.MustCompile(`(?m)^go install (github.com/NARUBROWN/spine-cli(?:/[^@\s]+)?)@latest$`).FindStringSubmatch(string(readme))
+	if len(install) != 2 {
+		t.Fatal("README lacks the public installation command")
+	}
+	// README의 공개 패키지와 같은 소스를 격리한 GOBIN에 설치합니다.
+	packagePath := "." + strings.TrimPrefix(install[1], "github.com/NARUBROWN/spine-cli")
+	build := exec.Command("go", "install", packagePath)
 	build.Dir = filepath.Join("..", "..")
+	build.Env = append(os.Environ(), "GOBIN="+binDir)
 	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v %s", err, output)
+		t.Fatalf("install documented CLI package: %v %s", err, output)
+	}
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatalf("README installation %s did not provide the spine executable: %v", install[1], err)
 	}
 	workspace := t.TempDir()
 	apply := func(root string, args ...string) {
@@ -35,7 +50,14 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 		if err := json.Unmarshal([]byte(plan.stdout), &result); err != nil {
 			t.Fatal(err)
 		}
-		assertE2ESuccess(t, runE2E(binary, root, nil, append(append([]string{}, args...), "--if-match", result.Result.Hash)...), "guide apply")
+		applied := runE2E(binary, root, nil, append(append([]string{}, args...), "--if-match", result.Result.Hash)...)
+		assertE2ESuccess(t, applied, "guide apply")
+		if args[0] == "new" && (!strings.Contains(applied.stdout, "  spine dev\n") || strings.Contains(applied.stdout, "spine-cli dev")) {
+			t.Fatalf("new suggested a command outside the documented installation: %s", applied.stdout)
+		}
+	}
+	for _, layout := range []string{"layered-v1", "legacy"} {
+		apply(workspace, "new", "offline-"+layout, "--layout", layout, "--skip-install")
 	}
 	apply(workspace, "new", "shop-api", "--module", "example.com/first-api")
 	project := filepath.Join(workspace, "shop-api")
@@ -44,7 +66,7 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 		t.Fatal(err)
 	}
 	guide := string(contents)
-	if strings.Contains(guide, "    go mod tidy\n") || strings.Contains(guide, "{{MODULE}}") {
+	if strings.Contains(guide, "    go mod tidy\n") || strings.Contains(guide, "{{MODULE}}") || strings.Contains(guide, "spine-cli ") {
 		t.Fatalf("README has a stale install step or placeholder: %s", guide)
 	}
 	code := regexp.MustCompile("(?s)```go\\n(.*?)\\n```").FindStringSubmatch(guide)
@@ -52,8 +74,8 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 		t.Fatal("generated guide lacks complete Go handler")
 	}
 	for _, line := range strings.Split(guide, "\n") {
-		if strings.HasPrefix(line, "spine-cli g dto ") || strings.HasPrefix(line, "spine-cli g controller ") {
-			apply(project, strings.Fields(strings.TrimPrefix(line, "spine-cli "))...)
+		if strings.HasPrefix(line, "spine g dto ") || strings.HasPrefix(line, "spine g controller ") {
+			apply(project, strings.Fields(strings.TrimPrefix(line, "spine "))...)
 		}
 	}
 	controller := filepath.Join(project, "src/controller/api/product_controller.go")
@@ -63,8 +85,8 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 		t.Fatalf("format guide: %v %s", err, output)
 	}
 	for _, line := range strings.Split(guide, "\n") {
-		if strings.HasPrefix(line, "spine-cli g route ") {
-			apply(project, strings.Fields(strings.TrimPrefix(line, "spine-cli "))...)
+		if strings.HasPrefix(line, "spine g route ") {
+			apply(project, strings.Fields(strings.TrimPrefix(line, "spine "))...)
 		}
 	}
 	writeE2EFile(t, filepath.Join(project, "internal/application/guide_test.go"), firstAPIGuideHTTPTest)

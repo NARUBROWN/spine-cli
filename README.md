@@ -3,8 +3,8 @@
 Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 생성하고,
 소스 코드에서 실행 계약을 검사하고 설명하며 검증하는 Go CLI입니다.
 
-공식 설치 경로는 `github.com/NARUBROWN/spine-cli`이며, 실행 파일과 호출 명령은 `spine-cli`입니다.
-기존 `cmd/spine` 진입점과 `spine` 명령도 호환용으로 유지합니다.
+프로젝트 이름은 `spine-cli`입니다. 공식 설치 경로는 `github.com/NARUBROWN/spine-cli/cmd/spine`이며,
+설치되는 실행 파일과 호출 명령은 `spine`입니다.
 
 이 문서는 Preview 브랜치의 동작을 설명합니다. 일반 설치의 `@latest`는 정식 버전을 선택하므로,
 이번 코어 Preview 대응은 해당 변경을 포함한 CLI 소스 또는 공개된 CLI Preview 태그로 확인하세요.
@@ -23,38 +23,38 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 일반 설치에는 `@latest`를 사용합니다. 현재 프로젝트의 `go.mod`와 별개로 최신 공개 CLI를 설치하므로, 릴리스마다 설치 명령의 버전을 바꿀 필요가 없습니다.
 기존 앱은 [버전별 마이그레이션 가이드](migration/)에서 대상 버전에 맞는 문서를 선택하세요.
 
-아래 예제에서 사용하는 `spine-cli` 명령을 설치합니다. 특정 버전이 필요하면
+아래 예제에서 사용하는 `spine` 명령을 설치합니다. 특정 버전이 필요하면
 `@latest` 대신 `@v0.4.0`처럼 공개된 태그를 지정합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli@latest
-spine-cli version
+go install github.com/NARUBROWN/spine-cli/cmd/spine@latest
+spine version
 ```
 
 ### 이번 Preview 설치
 
-아래 Preview 예제에는 CLI `v0.4.3-preview.1`에 포함되는 기능이 필요합니다. 해당 소스 체크아웃의 루트에서는 다음과 같이 설치합니다. 로컬 소스 설치본은 `0.4.3-dev`로 표시됩니다.
+아래 Preview 예제에는 CLI `v0.4.3-preview.2`에 포함되는 기능이 필요합니다. 해당 소스 체크아웃의 루트에서는 다음과 같이 설치합니다. 로컬 소스 설치본은 `0.4.3-dev`로 표시됩니다.
 
 ```sh
-go install .
-spine-cli version
+go install ./cmd/spine
+spine version
 ```
 
-`v0.4.3-preview.1` 태그가 공개된 뒤에는 정확한 공개 버전으로 설치할 수 있습니다. 설치 결과는 `spine-cli 0.4.3-preview.1`입니다.
+`v0.4.3-preview.2` 태그가 공개된 뒤에는 정확한 공개 버전으로 설치할 수 있습니다. 공개 설치본은 실제 태그 버전을 표시합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli@v0.4.3-preview.1
-spine-cli version
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.3-preview.2
+spine version
 ```
 
-일반 정식 설치의 `@latest`와 Preview 설치 버전을 구분하세요. 기존 `spine` 호환 명령이 필요하면 `github.com/NARUBROWN/spine-cli/cmd/spine`을 같은 버전으로 별도 설치할 수 있습니다.
+일반 정식 설치의 `@latest`와 Preview 설치 버전을 구분하세요. `v0.4.3-preview.1`은 설치 안내와 생성 템플릿의 명령 표기 회귀로 폐기했으며 같은 태그를 재사용하지 않습니다.
 
 ## 빠른 시작
 
 ```sh
-spine-cli new todo-api --module github.com/acme/todo-api
+spine new todo-api --module github.com/acme/todo-api
 cd todo-api
-spine-cli dev
+spine dev
 ```
 
 다른 터미널에서 생성된 health endpoint를 확인합니다.
@@ -64,10 +64,10 @@ curl http://localhost:8080/health
 ```
 
 `new`는 Echo 플랫폼 연결과 의존성 설치, 정적 계약 검사와 빌드를
-완료한 뒤 프로젝트를 생성합니다. 서버는 `spine-cli dev`로 시작합니다. 설치 과정에서는
+완료한 뒤 프로젝트를 생성합니다. 서버는 `spine dev`로 시작합니다. 설치 과정에서는
 애플리케이션 초기화, 테스트나 listener를 실행하지 않습니다.
 
-파일만 생성하려면 `spine-cli new todo-api --skip-install`을 사용하고, 생성 후 `go mod tidy`를
+파일만 생성하려면 `spine new todo-api --skip-install`을 사용하고, 생성 후 `go mod tidy`를
 실행하세요. `--platform echo`는 기본 플랫폼을 명시합니다. 설치 포함 `--dry-run`은 정확한
 의존성 계획을 위해 네트워크와 Go 캐시를 사용할 수 있으며, 오프라인 계획은
 `--skip-install --dry-run`으로 확인합니다. `--force`는 `--skip-install`과 함께만 허용합니다.
@@ -83,16 +83,16 @@ HTTP 사용 시 `GET /health`, `spine.toml`이 포함됩니다.
 
 ```sh
 # HTTP + Kafka + 검증기: diff와 base_hash를 검토한 뒤 같은 명령에 적용
-spine-cli new shop --module example.com/shop --event-platform events:kafka \
+spine new shop --module example.com/shop --event-platform events:kafka \
   --validator playground --dry-run --json
-spine-cli new shop --module example.com/shop --event-platform events:kafka \
+spine new shop --module example.com/shop --event-platform events:kafka \
   --validator playground --if-match <base_hash> --json
 
 # HTTP 없는 worker
-spine-cli new worker --platform none --event-platform jobs:rabbitmq
+spine new worker --platform none --event-platform jobs:rabbitmq
 
 # 복수 이벤트 플랫폼
-spine-cli new gateway --event-platform events:kafka --event-platform jobs:rabbitmq
+spine new gateway --event-platform events:kafka --event-platform jobs:rabbitmq
 ```
 
 | 옵션 | 값과 기본 동작 |
@@ -113,13 +113,13 @@ RabbitMQ에는 `SPINE_EVENTS_URL`과 `SPINE_EVENTS_EXCHANGE`가 필요합니다.
 기본 전송은 TLS이고 로컬 평문 브로커에는 `SPINE_EVENTS_ALLOW_INSECURE=true`를 명시합니다.
 설정 누락과 잘못된 boolean, factory 설정 오류는 실행 시 반환됩니다. 설치 중에는 설정 helper와 factory를 실행하지 않습니다.
 
-factory는 consume/publish를 모두 활성화합니다. consumer 생성은 `spine-cli g consumer`로 별도 요청하고
+factory는 consume/publish를 모두 활성화합니다. consumer 생성은 `spine g consumer`로 별도 요청하고
 생성된 미구현 핸들러를 작성하세요. 여러 플랫폼은 같은 consumer registry를 사용하므로
 각 브로커의 topic/prefix와 중복 처리 정책을 함께 설계해야 합니다. RabbitMQ의 기본 실패 정책은 reject입니다.
 검증기를 선택한 앱은 DTO의 `validate` 태그를 HTTP JSON, 폼, WS와 consumer 핸들러 전에 검사합니다.
 `none`이면 이 자동 검증을 생략합니다.
 
-WebSocket 앱은 `spine-cli new chat --websocket-platform gorilla --validator playground`로 독립 WS 구현을 선택합니다. `gorillaplatform.Option()`은 HTTP 옵션과 별개로 등록합니다. 기존 이벤트 factory, validator 오류 처리와 API는 유지합니다. WS 경로를 등록하기 전에 구현을 선택해야 하며 `none` 상태의 새 코어는 암묵적으로 Gorilla를 포함하지 않습니다.
+WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playground`로 독립 WS 구현을 선택합니다. `gorillaplatform.Option()`은 HTTP 옵션과 별개로 등록합니다. 기존 이벤트 factory, validator 오류 처리와 API는 유지합니다. WS 경로를 등록하기 전에 구현을 선택해야 하며 `none` 상태의 새 코어는 암묵적으로 Gorilla를 포함하지 않습니다.
 
 ### 공개 버전 레시피
 
@@ -154,13 +154,13 @@ CLI의 `contract export --format openapi --source runtime`은 `BuildApplication`
 
 ## 프로젝트 의존성 갱신
 
-기존 Echo 프로젝트의 의존성은 `spine-cli update`로 갱신할 수 있습니다.
+기존 Echo 프로젝트의 의존성은 `spine update`로 갱신할 수 있습니다.
 새 앱은 `spine.toml`의 `recipe`와 플랫폼, 검증기 선택을 사용합니다. `recipe`가 없는 기존 Echo 앱은
 기존 `echo-v0.1.0-spine-v0.6.0` 레시피를 유지합니다. 의존성 갱신으로 새 API 연결 소스를 생성하지 않습니다.
 
 ```sh
-spine-cli update --dry-run
-spine-cli update
+spine update --dry-run
+spine update
 ```
 
 완료 출력에는 이전 require 버전과 갱신 후 실제 선택 버전, 변경 파일과 검사 결과가 표시됩니다.
@@ -171,14 +171,14 @@ spine-cli update
 임시 프로젝트 복사본에서 `go mod tidy`, 모듈 호환성 검사, 정적 계약 검사와 설정된
 entrypoint 빌드를 실행합니다. 성공한 뒤 `go.mod`와 `go.sum`을 반영하며, 실패하거나
 검사 도중 원본 입력이 바뀌면 반영하지 않습니다. 이 과정에서 애플리케이션 초기화,
-테스트와 서버는 실행하지 않습니다. 갱신 후에는 `spine-cli verify`와 실제 API 요청을 별도로 확인하세요.
+테스트와 서버는 실행하지 않습니다. 갱신 후에는 `spine verify`와 실제 API 요청을 별도로 확인하세요.
 `go mod tidy`에 따라 간접 의존성과 체크섬도 바뀔 수 있습니다.
 
 자동화에서는 다음과 같이 정확한 diff와 입력 hash를 검토해 적용합니다.
 
 ```sh
-spine-cli update --root ./shop-api --dry-run --json
-spine-cli update --root ./shop-api --if-match <base_hash> --json
+spine update --root ./shop-api --dry-run --json
+spine update --root ./shop-api --if-match <base_hash> --json
 ```
 
 `--dry-run`도 네트워크와 Go 캐시를 사용할 수 있으며, 프로젝트 파일은 바꾸지 않습니다.
@@ -215,11 +215,11 @@ DTO, slice와 string을 직접 반환하지 않고 `httpx.Response[T].Body`에 �
 | application | `internal/application/` | 생성자와 등록 함수 연결 |
 
 ```sh
-spine-cli g domain account/user --field id:int64 --field name:string
-spine-cli g dto account/create-user-request --field name:string
-spine-cli g repository account/user
-spine-cli g service user --depends src/repository/account:UserRepository
-spine-cli g controller admin/user --depends src/service:UserService
+spine g domain account/user --field id:int64 --field name:string
+spine g dto account/create-user-request --field name:string
+spine g repository account/user
+spine g service user --depends src/repository/account:UserRepository
+spine g controller admin/user --depends src/service:UserService
 ```
 
 `domain user`는 `database/domain/user.go`, `domain account/user`는
@@ -227,7 +227,7 @@ spine-cli g controller admin/user --depends src/service:UserService
 묶을 수도 있습니다. 그룹은 역할마다 독립적으로 정하며 실행 위치는 생성 경로에 영향을 주지 않습니다.
 CLI는 그룹을 애그리거트로 해석하지 않습니다.
 
-`spine-cli g route --help`처럼 생성기별 도움말을 확인할 수 있습니다. `--help`와 `-h`는
+`spine g route --help`처럼 생성기별 도움말을 확인할 수 있습니다. `--help`와 `-h`는
 프로젝트 설정을 읽거나 파일을 생성하지 않습니다.
 
 `--depends`는 모듈 기준 패키지 경로와 타입을 받습니다. 여러 의존성은 옵션을 반복해서 지정합니다.
@@ -240,7 +240,7 @@ controller 생성만으로 HTTP 경로가 생기지는 않습니다. 실제 `Get
 
 ```sh
 # src/controller/admin 패키지에 UserController.Get 메서드가 있을 때 실행
-spine-cli g route get-user --method GET --path /users/:id \
+spine g route get-user --method GET --path /users/:id \
   --handler src/controller/admin:UserController.Get
 ```
 
@@ -253,15 +253,15 @@ Spine wrapper도 포인터로 받으면 본문 DTO로 해석되며, 경로 인�
 외부 타입이나 사용자 정의 resolver의 지원 여부를 소스만으로 확인할 수 없으면 분석 불완전으로
 표시합니다. 이는 실제 HTTP 요청을 실행한 결과와 구분됩니다.
 
-`spine-cli g resource account/user`는 같은 그룹의 domain, repository, service, controller 생성을
+`spine g resource account/user`는 같은 그룹의 domain, repository, service, controller 생성을
 조합합니다. DTO와 HTTP 경로는 별도로 추가합니다. 생성자는 기본적으로 application에 등록하며,
 파일만 생성하려면 `--no-register`를 사용합니다.
 
 consumer와 WebSocket 생성기도 사용할 수 있습니다.
 
 ```sh
-spine-cli g consumer order --topic order.created --field order_id:int64
-spine-cli g websocket chat --path /ws/chat --field message:string
+spine g consumer order --topic order.created --field order_id:int64
+spine g websocket chat --path /ws/chat --field message:string
 ```
 
 생성한 메시지 핸들러는 `not implemented` 오류를 반환합니다. 실제 로직을 작성하고 이 오류를
@@ -269,7 +269,7 @@ spine-cli g websocket chat --path /ws/chat --field message:string
 
 `layout`이 없는 기존 프로젝트와 `layout = "legacy"` 프로젝트에는 이전 생성 규칙을 적용합니다.
 기존 파일을 이동하거나 구조를 자동 전환하지 않습니다. 이전 구조의 재현이 필요하면
-`spine-cli new <project> --layout legacy`를 사용할 수 있습니다. `slice --storage memory`는
+`spine new <project> --layout legacy`를 사용할 수 있습니다. `slice --storage memory`는
 legacy에서만 지원하며, 새 구조에 CRUD 생성 기능을 추가하지 않습니다.
 
 ## 실행 계약
@@ -289,28 +289,28 @@ factory를 빠뜨리면 `HTTP_ADAPTER_MISSING`으로 진단합니다. 기존 v0.
 `legacy-implicit`으로 표시합니다.
 
 계약 payload는 `spine.contract/v1alpha2`입니다. 이전 snapshot은 현재 계약을 검토한 뒤
-`spine-cli contract snapshot --force`로 다시 생성해야 합니다. CLI 바깥 JSON envelope는
+`spine contract snapshot --force`로 다시 생성해야 합니다. CLI 바깥 JSON envelope는
 `spine.cli-result/v1`을 유지합니다.
 
 ```sh
 # 현재 등록 계약 조회와 단일 실행 경로 설명
-spine-cli inspect
-spine-cli explain http GET /orders/:id
-spine-cli explain consumer order.created
-spine-cli explain websocket /ws/orders
+spine inspect
+spine explain http GET /orders/:id
+spine explain consumer order.created
+spine explain websocket /ws/orders
 
 # CI 또는 로컬 검증
-spine-cli contract check --warnings-as-errors
-spine-cli verify
+spine contract check --warnings-as-errors
+spine verify
 
 # 의미 단위 계약 변경 추적
-spine-cli contract snapshot
-spine-cli contract diff
+spine contract snapshot
+spine contract diff
 
 # API 문서 생성
-spine-cli contract export --format openapi --output openapi.json
-spine-cli contract export --format openapi --source runtime --output runtime-openapi.json
-spine-cli contract export --format asyncapi --output asyncapi.json
+spine contract export --format openapi --output openapi.json
+spine contract export --format openapi --source runtime --output runtime-openapi.json
+spine contract export --format asyncapi --output asyncapi.json
 ```
 
 검증 결과는 다음 경계를 가집니다.
@@ -334,14 +334,14 @@ JSON 태그가 없으면 Go 필드 이름을 그대로 사용하고, `time.Time`
 
 | 명령 | 동작 |
 | --- | --- |
-| `spine-cli dev` | 변경을 감지하고, 새 빌드가 성공한 경우에만 앱을 교체 |
-| `spine-cli run` | `ENV=production`으로 빌드하고 실행 |
-| `spine-cli test` | `go test ./...` 실행 |
-| `spine-cli check` | gofmt 상태, `go vet`, `go test` 검사 |
-| `spine-cli verify` | 정적 계약 검사 후 `spine-cli check` 수행 |
-| `spine-cli build` | `bin/<모듈명>`에 바이너리 생성 |
-| `spine-cli doctor` | 도구 체인, 설정, 정적 계약을 오프라인 진단 |
-| `spine-cli completion <shell>` | bash, zsh, PowerShell completion 생성 |
+| `spine dev` | 변경을 감지하고, 새 빌드가 성공한 경우에만 앱을 교체 |
+| `spine run` | `ENV=production`으로 빌드하고 실행 |
+| `spine test` | `go test ./...` 실행 |
+| `spine check` | gofmt 상태, `go vet`, `go test` 검사 |
+| `spine verify` | 정적 계약 검사 후 `spine check` 수행 |
+| `spine build` | `bin/<모듈명>`에 바이너리 생성 |
+| `spine doctor` | 도구 체인, 설정, 정적 계약을 오프라인 진단 |
+| `spine completion <shell>` | bash, zsh, PowerShell completion 생성 |
 
 `run`, `test`, `check`, `build`는 `--help` 또는 `-h`로 도움말을 확인할 수 있습니다.
 그 밖의 명령별 옵션은 실행 전에 오류로 처리합니다. 테스트 필터는 `go test ./... -run <이름>`으로
@@ -377,9 +377,9 @@ websocket_platform = "none"
 의도적인 교체에만 `--force`를 사용하세요.
 
 ```sh
-spine-cli g resource orders --dry-run
-spine-cli g resource orders --dry-run --json
-spine-cli g resource orders --if-match <base_hash> --json
+spine g resource orders --dry-run
+spine g resource orders --dry-run --json
+spine g resource orders --if-match <base_hash> --json
 ```
 
 JSON dry-run에는 모든 변경 파일과 diff와 SHA-256, `base_hash`가 포함됩니다.
@@ -396,8 +396,8 @@ JSON dry-run에는 모든 변경 파일과 diff와 SHA-256, `base_hash`가 포�
 [`llms.txt`](./llms.txt)를 참고하세요.
 
 ```sh
-spine-cli schema --json
-spine-cli context --json
+spine schema --json
+spine context --json
 ```
 
 ## 저장소 개발

@@ -7,11 +7,11 @@
 CLI 소스를 빌드한 뒤 schema와 capabilities를 확인합니다.
 
 ```sh
-go build -o ./bin/spine-cli .
-./bin/spine-cli schema --json
-./bin/spine-cli capabilities --json
-./bin/spine-cli new shop --module example.com/shop --validator playground --dry-run --json
-./bin/spine-cli new shop --module example.com/shop --validator playground --if-match <base_hash> --json
+go build -o ./bin/spine ./cmd/spine
+./bin/spine schema --json
+./bin/spine capabilities --json
+./bin/spine new shop --module example.com/shop --validator playground --dry-run --json
+./bin/spine new shop --module example.com/shop --validator playground --if-match <base_hash> --json
 ```
 
 playground 앱에는 Go 1.26.0 이상이 필요합니다. 검증기를 생략한 앱과 CLI 자체의 최소 버전은 Go 1.25.5입니다. 생성 계획의 `target_modules`, `changes`, `diff`와 `base_hash`를 검토한 뒤 같은 hash로 적용하세요. 실제 설치 모드에서는 공개 모듈을 해석하고 정적 검사와 빌드를 실행합니다. `--skip-install`은 파일만 생성합니다.
@@ -69,7 +69,7 @@ HTTP: &boot.HTTPOptions{
 CLI로 명세 파일이 필요하면 프로젝트에서 다음 명령을 실행합니다.
 
 ```sh
-spine-cli contract export --format openapi --source runtime --output openapi.json
+spine contract export --format openapi --source runtime --output openapi.json
 ```
 
 런타임 내보내기는 import할 수 있는 composition 패키지의 `BuildApplication() (spine.App, boot.Options, error)`를 호출한 뒤 코어의 `DescribeHTTP`와 `openapi.Generate`를 사용합니다. HTTP 리소스의 `Enabled` 설정과 별개로 명세를 내보내며, 리스너와 DI 생성자, 요청 핸들러를 시작하지 않습니다. 다만 composition 사용자 코드와 Go 도구는 실행하므로 설정 helper가 요구하는 환경 변수와 실행 부작용을 확인하세요. 앱의 HTTP가 비활성화돼 있거나 호환 코어 API가 없으면 실패합니다.
@@ -81,9 +81,9 @@ spine-cli contract export --format openapi --source runtime --output openapi.jso
 ## 전환 결과 확인
 
 ```sh
-spine-cli context --json
-spine-cli contract check --json
-spine-cli verify --json
+spine context --json
+spine contract check --json
+spine verify --json
 ```
 
 `contract check`의 분석 완료 여부와 오류를 확인한 뒤 실제 HTTP 요청, 필요한 WebSocket과 브로커 통신을 검증하세요. CLI 소스의 회귀 테스트, 생성 앱의 빌드, 실제 요청과 외부 인프라 검증은 구분해서 기록합니다.
