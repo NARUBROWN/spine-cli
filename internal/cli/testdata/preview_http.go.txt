@@ -1,0 +1,20 @@
+package application
+
+import "github.com/NARUBROWN/spine/pkg/httpx"
+
+type PreviewPath struct { ID int64 `path:"id"` }
+type PreviewQuery struct {
+    Tags []string `query:"tag"`
+    Page *int `query:"page" validate:"omitempty,min=1"`
+}
+type PreviewHeaders struct { Host string `header:"Host"` }
+type PreviewResult struct {
+    ID int64 `json:"id"`
+    Tags []string `json:"tags"`
+    Host string `json:"host"`
+}
+type PreviewController struct{}
+func NewPreviewController() *PreviewController { return &PreviewController{} }
+func (*PreviewController) Get(path *PreviewPath, query *PreviewQuery, headers *PreviewHeaders) httpx.Response[PreviewResult] {
+    return httpx.Response[PreviewResult]{Body: PreviewResult{path.ID, query.Tags, headers.Host}}
+}

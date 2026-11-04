@@ -59,7 +59,7 @@ jobs:
         with:
           go-version: '1.26.0'
       - run: go build ./...
-      - run: go test ./internal/cli -run '^(TestRunVersionUsesProgramName|TestBuildVersion|Test.*Protocol.*|Test.*Schema.*|TestCapabilities.*|Test.*Windows.*|TestApplicationShutdownTimeout)$' -count=1 -timeout=5m
+      - run: go test ./internal/cli -run '^(TestRunVersionUsesProgramName|TestBuildVersion|Test.*Protocol.*|Test.*Schema.*|TestCapabilities.*|Test.*Windows.*|TestApplicationShutdownTimeout|TestStructured.*|TestHTTPBindings.*|TestRuntimeOpenAPI.*|TestRuntimeExportOptions.*|TestReleaseRecipe.*)$' -count=1 -timeout=5m
       - if: runner.os != 'Windows'
         run: go test ./internal/cli -run '^(TestRunAndDevGracefulShutdown|TestGeneratedHTTPShutdownDrainsRequests|TestDevRuntimeLifecycleEndToEnd)$' -count=1 -timeout=5m
   public-platforms:

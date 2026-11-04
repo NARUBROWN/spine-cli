@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 	formatName := ""
 	outputPath := ""
 	force := false
+	source := ""
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
 		case "--format":
@@ -30,6 +32,13 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 			outputPath = args[index]
 		case "--force":
 			force = true
+		case "--source":
+			if index+1 >= len(args) {
+				fmt.Fprintln(errOut, "--source requires runtime or static")
+				return 1
+			}
+			index++
+			source = args[index]
 		default:
 			fmt.Fprintf(errOut, "unknown option: %s\n", args[index])
 			return 1
@@ -38,6 +47,26 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 	if formatName != "openapi" && formatName != "asyncapi" {
 		fmt.Fprintln(errOut, "contract export supports --format openapi or --format asyncapi")
 		return 1
+	}
+	if source == "" {
+		source = "static"
+	}
+	if source != "runtime" && source != "static" || formatName == "asyncapi" && source != "static" {
+		fmt.Fprintln(errOut, "--source supports runtime or static for OpenAPI; AsyncAPI uses static")
+		return 1
+	}
+	if source == "runtime" {
+		contents, err := executeRuntimeOpenAPI()
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		var formatted bytes.Buffer
+		if err := json.Indent(&formatted, contents, "", "  "); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return writeAPIExport(formatted.Bytes(), formatName, outputPath, force, out, errOut)
 	}
 	contract, err := inspectApplication()
 	if err != nil {
@@ -63,6 +92,10 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
+	return writeAPIExport(contents, formatName, outputPath, force, out, errOut)
+}
+
+func writeAPIExport(contents []byte, formatName, outputPath string, force bool, out, errOut io.Writer) int {
 	contents = append(contents, '\n')
 	if outputPath == "" {
 		_, _ = out.Write(contents)
@@ -104,6 +137,12 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 		for _, parameter := range route.Parameters {
 			switch parameter.Binding {
 			case "path":
+				if parameter.SourceDTO {
+					for _, key := range parameter.Keys {
+						parameters = append(parameters, map[string]any{"name": key, "in": "path", "required": true, "schema": unresolvedAPISchema(parameter.Type + "." + key)})
+					}
+					continue
+				}
 				parameters = append(parameters, map[string]any{
 					"name": parameter.Key, "in": "path", "required": true, "schema": pathParameterSchema(parameter.Type),
 				})

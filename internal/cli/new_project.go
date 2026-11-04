@@ -178,7 +178,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	stages := []installationStage{{"scaffold", "pending"}, {"dependencies", "skipped"}, {"modules", "skipped"}, {"contract", "skipped"}, {"build", "skipped"}, {"publish", "pending"}}
 	modules := []selectedModule{}
 	dir := options.Name.Route
-	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "released", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
+	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
 	finish := func(code int, stage string, err error) int {
 		if err != nil {
 			for index := range stages {
@@ -314,9 +314,9 @@ func runNew(args []string, out, errOut io.Writer) int {
 		} else {
 			fmt.Fprintf(out, "Created Spine application in %s (%s, release recipe %s)\n\nNext steps:\n  cd %s\n", dir, options.Platform, currentAssemblyRecipe, dir)
 			if options.SkipInstall {
-				fmt.Fprintln(out, "  go mod tidy\n  spine dev\n\nDependency installation and build verification were skipped.")
+				fmt.Fprintln(out, "  go mod tidy\n  spine-cli dev\n\nDependency installation and build verification were skipped.")
 			} else {
-				fmt.Fprintln(out, "  spine dev\n\nDependencies, static contract and build verified.")
+				fmt.Fprintln(out, "  spine-cli dev\n\nDependencies, static contract and build verified.")
 				for _, module := range modules {
 					fmt.Fprintf(out, "  %s %s\n", module.Path, module.Version)
 				}

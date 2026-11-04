@@ -86,7 +86,7 @@ func loadProjectConfig() (projectConfig, error) {
 				}
 				config.Platform = unquoted
 			} else if key == "recipe" {
-				if unquoted != assemblyRecipe && unquoted != currentAssemblyRecipe && unquoted != legacyWebSocketRecipe {
+				if unquoted != assemblyRecipe && unquoted != currentAssemblyRecipe && unquoted != stableAssemblyRecipe && unquoted != legacyWebSocketRecipe {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported recipe %q", lineNumber+1, unquoted)
 				}
 				config.Recipe = unquoted

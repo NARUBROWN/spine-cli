@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+
+	"golang.org/x/mod/semver"
 )
 
 type httpTypeDeclaration struct {
@@ -15,16 +17,21 @@ type httpBindingCatalog struct {
 	module       string
 	types        map[string]httpTypeDeclaration
 	errorMethods map[string]bool
+	structured   bool
 }
 
 type httpBindingShape struct {
 	binding string
 	kind    string
+	source  string
+	keys    []string
+	legacy  bool
+	problem string
 }
 
 // HTTP 검증과 route 생성은 동일한 소스 기반 resolver 지원 규칙을 사용합니다.
-func newHTTPBindingCatalog(module string, sources layoutSources) *httpBindingCatalog {
-	catalog := &httpBindingCatalog{module: module, types: map[string]httpTypeDeclaration{}, errorMethods: map[string]bool{}}
+func newHTTPBindingCatalog(module string, sources layoutSources, coreVersion string) *httpBindingCatalog {
+	catalog := &httpBindingCatalog{module: module, types: map[string]httpTypeDeclaration{}, errorMethods: map[string]bool{}, structured: semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.0-preview.1") >= 0}
 	for _, source := range sources.sortedFiles() {
 		for _, declaration := range source.File.Decls {
 			group, ok := declaration.(*ast.GenDecl)
@@ -68,7 +75,10 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 		for range count {
 			parameter := &parameters[index]
 			parameter.Binding = shape.binding
-			if shape.binding == "path" {
+			parameter.SourceDTO = shape.source != "" && shape.kind == "pointer"
+			parameter.Keys = append([]string(nil), shape.keys...)
+			parameter.Deprecated = catalog.structured && shape.legacy
+			if shape.binding == "path" && !parameter.SourceDTO {
 				if pathIndex < len(pathKeys) {
 					parameter.Key = pathKeys[pathIndex]
 				}
@@ -84,6 +94,10 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 					code = "HTTP_PARAMETER_BINDING_UNRESOLVED"
 					hint = "Static inspection cannot prove support for this type or a custom argument resolver; use an explicit supported binding."
 				}
+				if shape.problem != "" {
+					code = "HTTP_INPUT_CONTRACT_INVALID"
+					hint = shape.problem + ". Use separate struct pointers with path, query or header tags."
+				}
 				parameter.Binding = "unresolved"
 				diagnostics = append(diagnostics, contractDiagnostic{
 					Severity: "error", Code: code,
@@ -93,6 +107,9 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 			}
 			index++
 		}
+	}
+	if catalog.structured {
+		diagnostics = append(diagnostics, catalog.inputParameterDiagnostics(source, fields, parameters, handler)...)
 	}
 	return parameters, diagnostics
 }
@@ -114,22 +131,39 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 		}
 		// 새로 정의한 타입은 path.Int 같은 기본 wrapper와 런타임 타입이 다릅니다.
 		if shape.kind == "struct" {
-			return httpBindingShape{kind: "struct"}
+			shape.binding, shape.legacy = "", false
+			return shape
 		}
 		if shape.kind == "interface" && shape.binding == "context" {
 			return shape
 		}
-		return httpBindingShape{kind: shape.kind}
+		shape.binding = ""
+		return shape
 	}
 	switch node := expression.(type) {
 	case *ast.ParenExpr:
 		return catalog.shape(source, node.X, visiting)
 	case *ast.StarExpr:
-		if catalog.shape(source, node.X, visiting).kind == "struct" {
-			return httpBindingShape{binding: "body", kind: "pointer"}
+		shape := catalog.shape(source, node.X, visiting)
+		if shape.kind == "struct" {
+			if catalog.structured && shape.legacy {
+				return httpBindingShape{kind: "unsupported", problem: "Deprecated path/query/header wrappers must be values"}
+			}
+			shape.binding, shape.kind = "body", "pointer"
+			if shape.source != "" {
+				shape.binding = shape.source
+			}
+			shape.legacy = false
+			return shape
+		}
+		if shape.problem != "" {
+			return shape
 		}
 		return httpBindingShape{kind: "unknown"}
 	case *ast.StructType:
+		if catalog.structured {
+			return catalog.inputStruct(source, node, visiting)
+		}
 		return httpBindingShape{kind: "struct"}
 	case *ast.InterfaceType:
 		if catalog.controllerContextInterface(source, node, visiting) {
@@ -179,11 +213,11 @@ func defaultHTTPBinding(key string) (httpBindingShape, bool) {
 	case spineImportPath + "/core:ControllerContext", spineImportPath + "/pkg/spine:Ctx":
 		return httpBindingShape{binding: "context", kind: "interface"}, true
 	case spineImportPath + "/pkg/path:Int", spineImportPath + "/pkg/path:String", spineImportPath + "/pkg/path:Boolean":
-		return httpBindingShape{binding: "path", kind: "struct"}, true
+		return httpBindingShape{binding: "path", kind: "struct", legacy: true}, true
 	case spineImportPath + "/pkg/query:Values", spineImportPath + "/pkg/query:Pagination":
-		return httpBindingShape{binding: "query", kind: "struct"}, true
+		return httpBindingShape{binding: "query", kind: "struct", legacy: true}, true
 	case spineImportPath + "/pkg/header:Values":
-		return httpBindingShape{binding: "header", kind: "struct"}, true
+		return httpBindingShape{binding: "header", kind: "struct", legacy: true}, true
 	case spineImportPath + "/pkg/multipart:UploadedFiles":
 		return httpBindingShape{binding: "multipart", kind: "struct"}, true
 	}

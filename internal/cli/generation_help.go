@@ -111,7 +111,7 @@ func printGeneratorGuide(kind string, out io.Writer) {
 		fmt.Fprintln(out, "layered-v1: 같은 그룹의 domain/repository/service/controller와 DI 등록을 생성합니다. DTO와 HTTP 경로는 별도로 추가합니다.")
 		examples = []string{"spine g resource user", "spine g resource account/user --no-register"}
 	case "route":
-		fmt.Fprintln(out, "layered-v1 등록 위치: src/route/route.go. 실제 핸들러 메서드를 먼저 작성합니다.\n--handler는 모듈 상대 package/path:Type.Method입니다. path.Int 같은 인자로 :id를 받고 본문 DTO는 포인터로 받습니다.\n성공 응답: httpx.Response[T], httpx.Binary, httpx.Redirect. 실패 응답: error 또는 (httpx.Response[T], error).\nraw DTO/string은 직접 반환하지 말고 httpx.Response[T].Body로 감쌉니다.")
+		fmt.Fprintln(out, "layered-v1 등록 위치: src/route/route.go. 실제 핸들러 메서드를 먼저 작성합니다.\n--handler는 모듈 상대 package/path:Type.Method입니다. Preview 코어에서는 path 태그가 있는 구조체 포인터로 :id를 받습니다. 본문, query와 header도 출처별 DTO 포인터로 분리합니다.\n성공 응답: httpx.Response[T], httpx.Binary, httpx.Redirect. 실패 응답: error 또는 (httpx.Response[T], error).\nraw DTO/string은 직접 반환하지 말고 httpx.Response[T].Body로 감쌉니다.")
 		examples = []string{"spine g route create-user --method POST --path /users --handler src/controller:UserController.Create", "spine g route get-user --method GET --path /users/:id --handler src/controller/account:UserController.Get"}
 	case "consumer":
 		fmt.Fprintln(out, "생성 위치: src/consumer/[group/]name. 생성자와 수신 계약을 등록합니다. 미구현 오류를 업무 코드로 바꾼 뒤 검증하세요.")

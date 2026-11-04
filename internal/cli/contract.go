@@ -66,10 +66,13 @@ type namedRegistration struct {
 }
 
 type handlerParameter struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Binding string `json:"binding"`
-	Key     string `json:"key,omitempty"`
+	Name       string   `json:"name"`
+	Type       string   `json:"type"`
+	Binding    string   `json:"binding"`
+	Key        string   `json:"key,omitempty"`
+	Keys       []string `json:"keys,omitempty"`
+	SourceDTO  bool     `json:"source_dto,omitempty"`
+	Deprecated bool     `json:"deprecated,omitempty"`
 }
 
 type resourceRegistration struct {
@@ -536,7 +539,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		})
 	}
 
-	bindings := newHTTPBindingCatalog(i.module, handlerSources)
+	bindings := newHTTPBindingCatalog(i.module, handlerSources, selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, spineImportPath))
 	for index := range i.contract.HTTP {
 		route := &i.contract.HTTP[index]
 		matches := signatures[route.Handler]
@@ -547,15 +550,8 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			i.contract.Diagnostics = append(i.contract.Diagnostics, diagnostics...)
 			route.Returns = matches[0].returns
 			i.contract.Diagnostics = append(i.contract.Diagnostics, bindings.returns(matches[0].httpSource, matches[0].httpResults, route.Handler)...)
-			pathKeys := contractPathKeys(route.Path)
-			boundPathCount := 0
-			for _, parameter := range route.Parameters {
-				if parameter.Binding == "path" {
-					boundPathCount++
-				}
-			}
-			if boundPathCount != len(pathKeys) {
-				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_BINDING_MISMATCH", Message: fmt.Sprintf("route %s %s declares %d path keys but the handler binds %d", route.Method, route.Path, len(pathKeys), boundPathCount), Source: route.Source})
+			if err := validateHTTPPathBindings(route.Parameters, route.Path); err != nil {
+				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_BINDING_MISMATCH", Message: fmt.Sprintf("route %s %s: %v", route.Method, route.Path, err), Source: route.Source})
 			}
 		} else if len(matches) == 0 {
 			i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_HANDLER_SIGNATURE_UNRESOLVED", Message: "could not resolve handler signature " + route.Handler + " from project source", Source: route.Source})
@@ -1080,7 +1076,11 @@ func runInspect(args []string, out, errOut io.Writer) int {
 	for _, route := range contract.HTTP {
 		fmt.Fprintf(out, "  %s %-24s %s (%s)\n", route.Method, route.Path, route.Handler, route.Source)
 		for _, parameter := range route.Parameters {
-			fmt.Fprintf(out, "    %s %s -> %s %s\n", parameter.Name, parameter.Type, parameter.Binding, parameter.Key)
+			key := parameter.Key
+			if len(parameter.Keys) > 0 {
+				key = strings.Join(parameter.Keys, ",")
+			}
+			fmt.Fprintf(out, "    %s %s -> %s %s\n", parameter.Name, parameter.Type, parameter.Binding, key)
 		}
 		for _, interceptor := range route.Interceptors {
 			fmt.Fprintf(out, "    route interceptor: %s\n", interceptor)

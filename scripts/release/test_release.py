@@ -21,7 +21,15 @@ SOURCE = "a" * 40
 RC_SOURCE = "b" * 40
 MAIN_SOURCE = "c" * 40
 TREE = "d" * 40
-POLICY = json.loads((Path(__file__).resolve().parents[2] / ".github/release-policy.json").read_text(encoding="utf-8"))
+REPOSITORY_POLICY = json.loads((Path(__file__).resolve().parents[2] / ".github/release-policy.json").read_text(encoding="utf-8"))
+# 채널 승격 자체의 검사는 저장소가 현재 선택한 Preview 레시피와 분리합니다.
+POLICY = copy.deepcopy(REPOSITORY_POLICY)
+POLICY["recipe"] = {"id": "platform-contracts-v0.6.5", "modules": {
+    "github.com/NARUBROWN/spine": "v0.6.5",
+    **{f"github.com/NARUBROWN/spine-{name}": "v0.1.0" for name in (
+        "echo-platform", "gorilla-platform", "kafka-platform", "rabbitmq-platform", "validator-playground")},
+    "github.com/labstack/echo/v5": "v5.4.4",
+}}
 
 
 class FakeGitHub:
@@ -154,6 +162,14 @@ class ReleasePolicyTests(unittest.TestCase):
         policy["recipe"]["modules"]["github.com/NARUBROWN/spine"] = "v0.6.6-rc.1"
         self.github.policy = policy
         release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
+        with self.assertRaisesRegex(release.ReleaseError, "정식 모듈"):
+            release.make_plan(self.github, policy, "stable", self.base, self.base+"-rc.1", now=NOW)
+
+    def test_repository_preview_recipe_cannot_ship_as_stable_default(self):
+        policy = copy.deepcopy(REPOSITORY_POLICY)
+        self.github.policy = policy
+        plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
+        self.assertEqual(plan["components"]["recipe"], policy["recipe"])
         with self.assertRaisesRegex(release.ReleaseError, "정식 모듈"):
             release.make_plan(self.github, policy, "stable", self.base, self.base+"-rc.1", now=NOW)
 

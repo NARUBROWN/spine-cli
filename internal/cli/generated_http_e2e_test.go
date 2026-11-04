@@ -59,7 +59,8 @@ func (*Controller) Create(req *Request) httpx.Response[map[string]int64] {
 func (*Controller) Detail(id path.Int) httpx.Response[map[string]int64] {
  return httpx.Response[map[string]int64]{Body: map[string]int64{"id":id.Value}}
 }
-func (*Controller) Wrapped(req *path.Int) httpx.Response[map[string]int64] {
+type WrapperBody struct { Value int64 }
+func (*Controller) Wrapped(req *WrapperBody) httpx.Response[map[string]int64] {
  return httpx.Response[map[string]int64]{Body: map[string]int64{"value":req.Value}}
 }
 func (*Controller) Fail() error { return errors.New("internal fixture failure") }
