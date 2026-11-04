@@ -257,7 +257,7 @@ func TestPlatformGoHonorsSavedConfigurationAndClearsSavedFlags(t *testing.T) {
 func TestDoctorAndContextExposeSelectedAdapter(t *testing.T) {
 	layeredProject(t)
 	report := inspectDoctorReport()
-	if !report.OK || report.HTTPAdapter == nil || report.HTTPAdapter.Provider != "echo" || selectedModuleVersion(report.HTTPAdapter.SelectedModules, echoPlatformPath) != echoPlatformVersion {
+	if !report.OK || report.HTTPAdapter == nil || report.HTTPAdapter.Provider != "echo" || selectedModuleVersion(report.HTTPAdapter.SelectedModules, echoPlatformPath) != previewPlatformVersion {
 		t.Fatalf("doctor lost adapter metadata: %+v", report)
 	}
 	var out, errOut bytes.Buffer

@@ -8,9 +8,11 @@ import (
 )
 
 const (
-	currentAssemblyRecipe       = "platform-contracts-v0.6.5"
+	currentAssemblyRecipe       = "platform-contracts-v0.7.0-preview.1"
+	stableAssemblyRecipe        = "platform-contracts-v0.6.5"
 	legacyWebSocketRecipe       = "platform-contracts-20261103"
-	currentAssemblySpineVersion = "v0.6.5"
+	currentAssemblySpineVersion = "v0.7.0-preview.1"
+	previewPlatformVersion      = "v0.2.0-preview.1"
 	releasedPlatformVersion     = "v0.1.0"
 	webSocketSpineVersion       = "v0.6.1-0.20261103040400-9b1321410211"
 	gorillaPlatformPath         = "github.com/NARUBROWN/spine-gorilla-platform"
@@ -27,14 +29,27 @@ func legacyWebSocketModules(options newProjectOptions) []selectedModule {
 	return modules
 }
 
-func currentAssemblyModules(options newProjectOptions) []selectedModule {
+func stableAssemblyModules(options newProjectOptions) []selectedModule {
 	modules := legacyWebSocketModules(options)
 	for index := range modules {
 		switch modules[index].Path {
 		case spineImportPath:
-			modules[index].Version = currentAssemblySpineVersion
+			modules[index].Version = "v0.6.5"
 		case kafkaPlatformPath, rabbitPlatformPath, validatorPlatformPath, gorillaPlatformPath:
 			modules[index].Version = releasedPlatformVersion
+		}
+	}
+	return modules
+}
+
+func currentAssemblyModules(options newProjectOptions) []selectedModule {
+	modules := stableAssemblyModules(options)
+	for index := range modules {
+		switch modules[index].Path {
+		case spineImportPath:
+			modules[index].Version = currentAssemblySpineVersion
+		case echoPlatformPath, kafkaPlatformPath, rabbitPlatformPath, validatorPlatformPath, gorillaPlatformPath:
+			modules[index].Version = previewPlatformVersion
 		}
 	}
 	return modules

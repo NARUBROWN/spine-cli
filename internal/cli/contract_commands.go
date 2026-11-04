@@ -233,6 +233,11 @@ func signatureContractText(parameters []handlerParameter, returns []string) stri
 		if parameter.Key != "" {
 			input += "[" + parameter.Key + "]"
 		}
+		if len(parameter.Keys) > 0 {
+			keys := append([]string(nil), parameter.Keys...)
+			sort.Strings(keys)
+			input += "[" + strings.Join(keys, ",") + "]"
+		}
 		inputs = append(inputs, input)
 	}
 	return " (" + strings.Join(inputs, ",") + ") -> (" + strings.Join(returns, ",") + ")"
@@ -372,6 +377,9 @@ func printHTTPExplanation(contract applicationContract, route httpRegistration, 
 		key := ""
 		if parameter.Key != "" {
 			key = " key=" + parameter.Key
+		}
+		if len(parameter.Keys) > 0 {
+			key = " keys=" + strings.Join(parameter.Keys, ",")
 		}
 		fmt.Fprintf(out, "  input: %s %s binding=%s%s\n", parameter.Name, parameter.Type, parameter.Binding, key)
 	}

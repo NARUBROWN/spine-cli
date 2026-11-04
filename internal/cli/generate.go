@@ -394,7 +394,7 @@ func New%sService(repository *%sRepository) *%sService {
 }
 
 func controllerTemplate(n resourceName) string {
-	return fmt.Sprintf(`package %s
+	return previewHTTPPathTemplate(fmt.Sprintf(`package %s
 
 import (
 	"github.com/NARUBROWN/spine/pkg/httpx"
@@ -410,7 +410,7 @@ func New%sController(service *%sService) *%sController {
 func (c *%sController) Get(id path.Int) httpx.Response[map[string]any] {
 	return httpx.Response[map[string]any]{Body: map[string]any{"id": id.Value}}
 }
-`, n.Package, n.Type, n.Type, n.Type, n.Type, n.Type, n.Type, n.Type)
+`, n.Package, n.Type, n.Type, n.Type, n.Type, n.Type, n.Type, n.Type), n.Type)
 }
 
 func standaloneRepositoryTemplate(n resourceName, packageName string, dependencies []componentDependency) string {
@@ -461,10 +461,14 @@ func (c *%[1]sController) Get(id path.Int) httpx.Response[map[string]any] {
 }
 `, n.Type)
 	}
-	return header + fmt.Sprintf(`type %[1]s%[2]s struct{%[3]s}
+	source := header + fmt.Sprintf(`type %[1]s%[2]s struct{%[3]s}
 
 func New%[1]s%[2]s(%[4]s) *%[1]s%[2]s {
 	return &%[1]s%[2]s%[5]s
 }
 `, n.Type, suffix, fields, parameters, values) + methods
+	if kind == "controller" {
+		return previewHTTPPathTemplate(source, n.Type)
+	}
+	return source
 }

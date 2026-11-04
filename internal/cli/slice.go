@@ -164,7 +164,7 @@ func (s *%sService) Get(id int64) (%s, bool) {
 }
 
 func sliceControllerTemplate(name resourceName) string {
-	return fmt.Sprintf(`package %[1]s
+	return previewHTTPPathTemplate(fmt.Sprintf(`package %[1]s
 
 import (
 	"net/http"
@@ -200,7 +200,7 @@ func (c *%[2]sController) Get(id path.Int) (httpx.Response[%[2]s], error) {
 	}
 	return httpx.Response[%[2]s]{Body: value}, nil
 }
-`, name.Package, name.Type)
+`, name.Package, name.Type), name.Type)
 }
 
 func sliceServiceTestTemplate(name resourceName, fields []sliceField) string {

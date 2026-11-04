@@ -178,7 +178,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	stages := []installationStage{{"scaffold", "pending"}, {"dependencies", "skipped"}, {"modules", "skipped"}, {"contract", "skipped"}, {"build", "skipped"}, {"publish", "pending"}}
 	modules := []selectedModule{}
 	dir := options.Name.Route
-	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "released", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
+	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
 	finish := func(code int, stage string, err error) int {
 		if err != nil {
 			for index := range stages {

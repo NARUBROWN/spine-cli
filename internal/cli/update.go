@@ -179,11 +179,14 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if config.Recipe == currentAssemblyRecipe {
 		recipe, targets = currentAssemblyRecipe, currentAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
 	}
+	if config.Recipe == stableAssemblyRecipe {
+		recipe, targets = stableAssemblyRecipe, stableAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
+	}
 	result["recipe"], result["target_modules"], result["platform"] = recipe, targets, config.Platform
-	if recipe == assemblyRecipe || recipe == legacyWebSocketRecipe {
+	if recipe == assemblyRecipe || recipe == legacyWebSocketRecipe || recipe == currentAssemblyRecipe {
 		result["stability"] = "prerelease"
 	}
-	if recipe == currentAssemblyRecipe {
+	if recipe == stableAssemblyRecipe {
 		result["stability"] = "released"
 	}
 	if !filepath.IsLocal(config.Entrypoint) {
