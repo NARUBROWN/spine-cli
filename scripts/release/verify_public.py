@@ -118,8 +118,9 @@ def verify(plan, query, work, env):
     recipe = plan["components"]["recipe"]
     cases = {"http": [], "websocket": ["--websocket-platform", "gorilla"],
              "all": ["--websocket-platform", "gorilla", "--event-platform", "kafka",
-                     "--event-platform", "rabbitmq", "--validator", "playground"],
-             "worker": ["--platform", "none", "--event-platform", "kafka"]}
+                     "--event-platform", "rabbitmq", "--event-platform", "nats", "--validator", "playground"],
+             "worker": ["--platform", "none", "--event-platform", "kafka"],
+             "nats-worker": ["--platform", "none", "--event-platform", "nats"]}
     for layout in ("legacy", "layered-v1"):
         for case, options in cases.items():
             name = layout + "-" + case

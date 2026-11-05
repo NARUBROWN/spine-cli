@@ -93,12 +93,15 @@ spine new worker --platform none --event-platform jobs:rabbitmq
 
 # 복수 이벤트 플랫폼
 spine new gateway --event-platform events:kafka --event-platform jobs:rabbitmq
+
+# NATS JetStream worker, Go 1.26 이상 필요
+spine new nats-worker --platform none --event-platform events:nats
 ```
 
 | 옵션 | 값과 기본 동작 |
 | --- | --- |
 | `--platform` | `echo` (기본값), `none` (이벤트 플랫폼 필요) |
-| `--event-platform` | 반복 가능한 `[name:]kafka` 또는 `[name:]rabbitmq`; 이름 생략 시 provider 이름 사용 |
+| `--event-platform` | 반복 가능한 `[name:]kafka`, `[name:]rabbitmq`, `[name:]nats`; 이름 생략 시 provider 이름 사용 |
 | `--websocket-platform` | `none` (기본값), `gorilla` (HTTP echo 필요) |
 | `--validator` | `none` (기본값), `playground` |
 
@@ -111,6 +114,16 @@ spine new gateway --event-platform events:kafka --event-platform jobs:rabbitmq
 RabbitMQ에는 `SPINE_EVENTS_URL`과 `SPINE_EVENTS_EXCHANGE`가 필요합니다. 두 플랫폼 모두
 `SPINE_EVENTS_TOPIC_PREFIX`, RabbitMQ에는 `SPINE_EVENTS_QUEUE_PREFIX`도 선택할 수 있습니다.
 기본 전송은 TLS이고 로컬 평문 브로커에는 `SPINE_EVENTS_ALLOW_INSECURE=true`를 명시합니다.
+
+NATS는 JetStream을 사용합니다. `SPINE_EVENTS_URLS` (쉼표로 구분), `SPINE_EVENTS_STREAM`,
+`SPINE_EVENTS_CONSUMER_PREFIX`가 필요하며 stream은 실행 전에 생성해야 합니다.
+`SPINE_EVENTS_TOPIC_PREFIX`와 인증용 `SPINE_EVENTS_USER`, `SPINE_EVENTS_PASSWORD`,
+`SPINE_EVENTS_TOKEN`, `SPINE_EVENTS_CREDENTIALS_FILE`을 선택할 수 있습니다. 인증 방식은 하나만 설정하세요.
+생성한 기본 실패 정책은 reject이며 NATS와 playground 검증기는 Go 1.26.0 이상이 필요합니다.
+Core NATS pub/sub와 request/reply, 자동 DLQ는 생성 범위에 포함하지 않습니다.
+
+플랫폼 이름과 생성 템플릿은 CLI가 정한 목록입니다. Preview에서 동적으로 조회하는 대상은
+지원 목록에 있는 선택 모듈의 버전이며, 새 플랫폼을 자동으로 발견하지 않습니다.
 설정 누락과 잘못된 boolean, factory 설정 오류는 실행 시 반환됩니다. 설치 중에는 설정 helper와 factory를 실행하지 않습니다.
 
 factory는 consume/publish를 모두 활성화합니다. consumer 생성은 `spine g consumer`로 별도 요청하고

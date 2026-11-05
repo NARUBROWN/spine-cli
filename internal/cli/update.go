@@ -166,6 +166,11 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if err != nil {
 		return finish(3, "snapshot", err)
 	}
+	for _, spec := range config.Events {
+		if spec.Provider == "nats" && config.Recipe != currentAssemblyRecipe {
+			return finish(3, "snapshot", fmt.Errorf("NATS requires the %s recipe; older recipes are not migrated automatically", currentAssemblyRecipe))
+		}
+	}
 	if config.Platform != "" && config.Platform != "echo" && config.Platform != "none" {
 		return finish(3, "snapshot", fmt.Errorf("unsupported platform: %s", config.Platform))
 	}

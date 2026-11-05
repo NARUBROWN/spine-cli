@@ -5,6 +5,10 @@ from pathlib import Path
 import sys
 
 REQUIRED = {"TestGeneratedAssemblyBrokerE2E", "TestGeneratedAssemblyMinimumToolchain",
+            "TestGeneratedNATSAssemblyE2E",
+            "TestGeneratedNATSAssemblyE2E/layered-v1/echo", "TestGeneratedNATSAssemblyE2E/layered-v1/none",
+            "TestGeneratedNATSAssemblyE2E/legacy/echo", "TestGeneratedNATSAssemblyE2E/legacy/none",
+            "TestGeneratedNATSAssemblyE2E/minimum-go",
             "TestGeneratedAssemblyPublicMatrix", "TestGeneratedWebSocketPublicAssembly",
             "TestStructuredHTTPInputContracts", "TestRuntimeOpenAPIGeneratedApplications",
             "TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn",

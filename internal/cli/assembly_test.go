@@ -24,6 +24,7 @@ func TestAssemblyArgumentsAndPlanIsolation(t *testing.T) {
 	for _, args := range [][]string{
 		{"new", "sample", "--skip-install", "--event-platform", "kafka", "--validator", "playground"},
 		{"new", "sample", "--skip-install", "--platform", "none", "--event-platform", "rabbitmq"},
+		{"new", "sample", "--skip-install", "--platform", "none", "--event-platform", "events:nats"},
 	} {
 		var out, errOut bytes.Buffer
 		if code := Run(append(append([]string{}, args...), "--dry-run", "--json"), &out, &errOut); code != 0 {

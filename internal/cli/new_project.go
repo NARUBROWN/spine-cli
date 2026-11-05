@@ -135,6 +135,8 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 			prefix := eventEnvPrefix(spec.Name)
 			if spec.Provider == "kafka" {
 				setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"BROKERS", "127.0.0.1:9092", prefix+"GROUP_ID", "generated-test")
+			} else if spec.Provider == "nats" {
+				setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\nt.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"URLS", "nats://127.0.0.1:4222", prefix+"STREAM", "EVENTS", prefix+"CONSUMER_PREFIX", "generated-test", prefix+"ALLOW_INSECURE", "true")
 			} else {
 				setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"URL", "amqp://guest:guest@127.0.0.1:5672/", prefix+"EXCHANGE", "generated-test", prefix+"ALLOW_INSECURE", "true")
 			}
@@ -179,7 +181,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 	stages := []installationStage{{"scaffold", "pending"}, {"dependencies", "skipped"}, {"modules", "skipped"}, {"contract", "skipped"}, {"build", "skipped"}, {"publish", "pending"}}
 	modules := []selectedModule{}
 	dir := options.Name.Route
-	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
+	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator, options.Events...), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
 	finish := func(code int, stage string, err error) int {
 		if err != nil {
 			for index := range stages {

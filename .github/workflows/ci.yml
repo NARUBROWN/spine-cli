@@ -98,10 +98,20 @@ jobs:
           docker logs cli-kafka
           exit 1
       - run: go vet ./...
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name cli-nats -p 127.0.0.1:4222:4222 nats:2.12.1-alpine -js
+          for attempt in $(seq 1 30); do
+            if docker logs cli-nats 2>&1 | grep -q 'Server is ready'; then exit 0; fi
+            sleep 1
+          done
+          docker logs cli-nats
+          exit 1
       - name: CLI race and generated public applications
         env:
           SPINE_TEST_KAFKA_BROKER: 127.0.0.1:19092
           SPINE_TEST_RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
+          SPINE_TEST_NATS_URL: nats://127.0.0.1:4222
         run: go test -race -json ./... -count=1 -timeout=30m > regression.jsonl
       - name: Require live broker and minimum Go evidence
         run: python3 scripts/release/check_tests.py regression.jsonl

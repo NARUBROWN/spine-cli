@@ -14,6 +14,8 @@ const (
 	kafkaPlatformVersion     = "v0.0.0-20261103001523-e4b87708f841"
 	rabbitPlatformPath       = "github.com/NARUBROWN/spine-rabbitmq-platform"
 	rabbitPlatformVersion    = "v0.0.0-20261103001525-b2be17ee8a11"
+	natsPlatformPath         = "github.com/NARUBROWN/spine-nats-platform"
+	natsPlatformVersion      = "v0.1.0-preview.1"
 	validatorPlatformPath    = "github.com/NARUBROWN/spine-validator-playground"
 	validatorPlatformVersion = "v0.0.0-20261103011253-5508c82a155e"
 )
@@ -34,7 +36,7 @@ func parseEventPlatform(value string) (eventPlatformSpec, error) {
 	if !eventPlatformName.MatchString(name) {
 		return spec, fmt.Errorf("event platform name %q must match [a-z][a-z0-9_]*", name)
 	}
-	if provider != "kafka" && provider != "rabbitmq" {
+	if provider != "kafka" && provider != "rabbitmq" && provider != "nats" {
 		return spec, fmt.Errorf("unsupported event platform: %s", provider)
 	}
 	return spec, nil
@@ -60,9 +62,14 @@ func validateAssemblySelection(http string, events []eventPlatformSpec, validato
 	return nil
 }
 
-func assemblyGoVersion(validator string) string {
+func assemblyGoVersion(validator string, events ...eventPlatformSpec) string {
 	if validator == "playground" {
 		return "1.26.0"
+	}
+	for _, spec := range events {
+		if spec.Provider == "nats" {
+			return "1.26.0"
+		}
 	}
 	return "1.25.5"
 }
@@ -82,6 +89,9 @@ func assemblyModules(http string, events []eventPlatformSpec, validator string) 
 	if providers["rabbitmq"] {
 		modules = append(modules, selectedModule{Path: rabbitPlatformPath, Version: rabbitPlatformVersion})
 	}
+	if providers["nats"] {
+		modules = append(modules, selectedModule{Path: natsPlatformPath, Version: natsPlatformVersion})
+	}
 	if validator == "playground" {
 		modules = append(modules, selectedModule{Path: validatorPlatformPath, Version: validatorPlatformVersion})
 	}
@@ -91,7 +101,7 @@ func assemblyModules(http string, events []eventPlatformSpec, validator string) 
 
 func assemblyGoMod(options newProjectOptions) string {
 	var source strings.Builder
-	fmt.Fprintf(&source, "module %s\n\ngo %s\n\nrequire (\n", options.Module, assemblyGoVersion(options.Validator))
+	fmt.Fprintf(&source, "module %s\n\ngo %s\n\nrequire (\n", options.Module, assemblyGoVersion(options.Validator, options.Events...))
 	targets := options.Modules
 	if targets == nil {
 		targets = previewAssemblyModules(options, currentAssemblySpineVersion)
@@ -124,12 +134,9 @@ func assemblyApplication(options newProjectOptions) (string, error) {
 	for _, spec := range options.Events {
 		providers[spec.Provider] = true
 	}
-	for _, provider := range []string{"kafka", "rabbitmq"} {
+	for _, provider := range []string{"kafka", "rabbitmq", "nats"} {
 		if providers[provider] {
-			path := kafkaPlatformPath
-			if provider == "rabbitmq" {
-				path = rabbitPlatformPath
-			}
+			path := providerModule(provider)
 			fmt.Fprintf(&source, "%splatform %q\n", provider, path)
 		}
 	}
@@ -198,12 +205,18 @@ func assemblyConfig(options newProjectOptions) string {
 	if providers["rabbitmq"] {
 		imports += "rabbitmqplatform \"" + rabbitPlatformPath + "\"\n"
 	}
+	if providers["nats"] {
+		imports += "natsplatform \"" + natsPlatformPath + "\"\n"
+	}
 	source := "package application\nimport (\n" + imports + ")\n" + generatedConfigHelpers
 	if providers["kafka"] {
 		source += generatedKafkaConfig
 	}
 	if providers["rabbitmq"] {
 		source += generatedRabbitConfig
+	}
+	if providers["nats"] {
+		source += generatedNATSConfig
 	}
 	return source
 }
@@ -251,9 +264,30 @@ func loadRabbitmqConfig(prefix string) (rabbitmqplatform.Config,error) {
 }
 `
 
+const generatedNATSConfig = `
+func loadNatsConfig(prefix string) (natsplatform.Config,error) {
+ config := natsplatform.Config{Consume:true,Publish:true,FailurePolicy:natsplatform.FailureReject}
+ urls,err := requiredPlatformEnv(prefix+"URLS"); if err != nil {return config,err}
+ for _,address := range strings.Split(urls,",") {
+  address = strings.TrimSpace(address)
+  if address == "" { return config,fmt.Errorf("%sURLS contains an empty address",prefix) }
+  config.URLs = append(config.URLs,address)
+ }
+ config.Stream,err = requiredPlatformEnv(prefix+"STREAM"); if err != nil {return config,err}
+ config.ConsumerPrefix,err = requiredPlatformEnv(prefix+"CONSUMER_PREFIX"); if err != nil {return config,err}
+ config.TopicPrefix = os.Getenv(prefix+"TOPIC_PREFIX")
+ config.User = os.Getenv(prefix+"USER")
+ config.Password = os.Getenv(prefix+"PASSWORD")
+ config.Token = os.Getenv(prefix+"TOKEN")
+ config.CredentialsFile = os.Getenv(prefix+"CREDENTIALS_FILE")
+ config.AllowInsecureTransport,err = platformInsecure(prefix)
+ return config,err
+}
+`
+
 func assemblyReadme(options newProjectOptions) string {
 	var source strings.Builder
-	fmt.Fprintf(&source, "# Spine application\n\n모듈: %s\n\nGo %s 이상이 필요합니다. 레시피 `%s`는 코어와 선택한 플랫폼의 `@preview` 브랜치를 조회하고 해석한 버전을 go.mod에 기록합니다. `spine update`로 Preview 브랜치를 다시 조회할 수 있습니다.\n\n", options.Module, assemblyGoVersion(options.Validator), currentAssemblyRecipe)
+	fmt.Fprintf(&source, "# Spine application\n\n모듈: %s\n\nGo %s 이상이 필요합니다. 레시피 `%s`는 코어와 선택한 플랫폼의 `@preview` 브랜치를 조회하고 해석한 버전을 go.mod에 기록합니다. `spine update`로 Preview 브랜치를 다시 조회할 수 있습니다.\n\n", options.Module, assemblyGoVersion(options.Validator, options.Events...), currentAssemblyRecipe)
 	source.WriteString("기본 생성은 의존성 설치, 정적 계약 검사, 빌드를 수행합니다. `--skip-install`도 Preview 버전 조회에 Go와 네트워크 또는 모듈 프록시 캐시가 필요하지만 설치와 빌드는 생략합니다. 생성 후 `go mod tidy`를 실행하세요. 생성 과정에서 앱과 factory는 실행하지 않습니다.\n\n")
 	if len(options.Events) > 0 {
 		source.WriteString("## 이벤트 설정\n\n실행과 `go test` 전에 다음 환경 변수를 설정하세요. 주소와 자격 증명은 소스에 저장하지 않습니다. 기본 전송은 TLS이며 로컬 평문 브로커에만 `ALLOW_INSECURE=true`를 명시합니다.\n\n")
@@ -262,6 +296,8 @@ func assemblyReadme(options newProjectOptions) string {
 			fmt.Fprintf(&source, "- `%s` (%s): ", spec.Name, spec.Provider)
 			if spec.Provider == "kafka" {
 				fmt.Fprintf(&source, "`%sBROKERS`, `%sGROUP_ID`; 선택 `%sTOPIC_PREFIX`, `%sALLOW_INSECURE`.\n", prefix, prefix, prefix, prefix)
+			} else if spec.Provider == "nats" {
+				fmt.Fprintf(&source, "`%sURLS`, `%sSTREAM`, `%sCONSUMER_PREFIX`; 선택 `%sTOPIC_PREFIX`, `%sALLOW_INSECURE`, `%sUSER`, `%sPASSWORD`, `%sTOKEN`, `%sCREDENTIALS_FILE`. JetStream stream을 먼저 생성해야 하며 실패 정책은 reject입니다.\n", prefix, prefix, prefix, prefix, prefix, prefix, prefix, prefix, prefix)
 			} else {
 				fmt.Fprintf(&source, "`%sURL`, `%sEXCHANGE`; 선택 `%sQUEUE_PREFIX`, `%sTOPIC_PREFIX`, `%sALLOW_INSECURE`. 실패 정책은 reject입니다.\n", prefix, prefix, prefix, prefix, prefix)
 			}
@@ -293,6 +329,8 @@ func assemblyConfigTest(options newProjectOptions) string {
 		prefix := eventEnvPrefix(spec.Name)
 		if spec.Provider == "kafka" {
 			setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"BROKERS", "127.0.0.1:9092", prefix+"GROUP_ID", "generated-test")
+		} else if spec.Provider == "nats" {
+			setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"URLS", "nats://127.0.0.1:4222", prefix+"STREAM", "EVENTS", prefix+"CONSUMER_PREFIX", "generated-test")
 		} else {
 			setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"URL", "amqp://guest:guest@127.0.0.1:5672/", prefix+"EXCHANGE", "generated-test")
 		}
@@ -305,11 +343,13 @@ func assemblyConfigTest(options newProjectOptions) string {
 		key, value := prefix+"BROKERS", "127.0.0.1:9092"
 		if spec.Provider == "rabbitmq" {
 			key, value = prefix+"URL", "amqp://guest:guest@127.0.0.1:5672/"
+		} else if spec.Provider == "nats" {
+			key, value = prefix+"URLS", "nats://127.0.0.1:4222"
 		}
 		for _, invalid := range []struct{ key, value, restore string }{{key, "", value}, {prefix + "ALLOW_INSECURE", "invalid", "true"}} {
 			source += fmt.Sprintf("t.Setenv(%q,%q)\nif app, _, err := BuildApplication(); err == nil || app != nil {t.Fatal(\"invalid platform configuration was accepted\")}\nt.Setenv(%q,%q)\n", invalid.key, invalid.value, invalid.key, invalid.restore)
 		}
-		if spec.Provider == "rabbitmq" {
+		if spec.Provider == "rabbitmq" || spec.Provider == "nats" {
 			source += fmt.Sprintf("t.Setenv(%q,\"invalid-url\")\nif app, _, err := BuildApplication(); err == nil || app != nil {t.Fatal(\"factory error was not returned\")}\nt.Setenv(%q,%q)\n", key, key, value)
 		}
 	}

@@ -58,7 +58,7 @@ func (i *contractInspector) inspectAssembly(config projectConfig, file *ast.File
 			names[item.Name] = true
 			if valid {
 				expression := assemblyValue(option.Args[1], function.Body, option.Pos())
-				for _, candidate := range []struct{ path, provider string }{{kafkaPlatformPath, "kafka"}, {rabbitPlatformPath, "rabbitmq"}} {
+				for _, candidate := range []struct{ path, provider string }{{kafkaPlatformPath, "kafka"}, {rabbitPlatformPath, "rabbitmq"}, {natsPlatformPath, "nats"}} {
 					if factory, ok := importedCall(expression, imports, candidate.path, "NewFactory"); ok && len(factory.Args) == 1 && !factory.Ellipsis.IsValid() {
 						item.Provider, item.CanonicalFactory = candidate.provider, candidate.path+".NewFactory"
 					}
@@ -122,10 +122,15 @@ func (i *contractInspector) inspectAssembly(config projectConfig, file *ast.File
 }
 
 func providerModule(provider string) string {
-	if provider == "kafka" {
+	switch provider {
+	case "kafka":
 		return kafkaPlatformPath
+	case "rabbitmq":
+		return rabbitPlatformPath
+	case "nats":
+		return natsPlatformPath
 	}
-	return rabbitPlatformPath
+	return ""
 }
 
 // 직접 대입한 지역 변수만 추적하며 재대입과 조건 분기, 외부 함수를 평가하지 않습니다.

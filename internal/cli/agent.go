@@ -93,7 +93,7 @@ func currentCommandSchema() commandSchema {
 		}
 		if c.Name == "new" {
 			c.Options["platform"] = optionDefinition{Type: "string", Enum: []string{"echo", "none"}}
-			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "kafka|rabbitmq or unique name:kafka|rabbitmq; environment prefix SPINE_<NAME>_"}
+			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "kafka|rabbitmq|nats or unique name:kafka|rabbitmq|nats; environment prefix SPINE_<NAME>_"}
 			c.Options["websocket-platform"] = optionDefinition{Type: "string", Enum: []string{"none", "gorilla"}, Description: "Default none; Gorilla requires HTTP echo"}
 			c.Options["validator"] = optionDefinition{Type: "string", Enum: []string{"none", "playground"}, Description: "Default none; playground requires Go 1.26.0+"}
 			c.Options["skip-install"] = optionDefinition{Type: "boolean", Description: "Resolve Preview branches and generate files without dependency installation or build verification; requires Go and may use network"}
