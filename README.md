@@ -40,14 +40,14 @@ go install ./cmd/spine
 spine version
 ```
 
-`v0.4.3-preview.2` 태그가 공개된 뒤에는 정확한 공개 버전으로 설치할 수 있습니다. 공개 설치본은 실제 태그 버전을 표시합니다.
+Preview 브랜치의 최신 CLI는 다음 명령으로 설치합니다. `spine version`은 Go가 해석한 태그 또는 pseudo-version을 표시합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.3-preview.2
+go install github.com/NARUBROWN/spine-cli/cmd/spine@preview
 spine version
 ```
 
-일반 정식 설치의 `@latest`와 Preview 설치 버전을 구분하세요. `v0.4.3-preview.1`은 설치 안내와 생성 템플릿의 명령 표기 회귀로 폐기했으며 같은 태그를 재사용하지 않습니다.
+`@preview`는 발행된 태그만이 아니라 Preview 브랜치의 최신 커밋을 선택합니다. 재현이 필요하면 `@v0.4.3-preview.3`처럼 공개 태그를 명시합니다. 일반 정식 설치는 `@latest`를 사용합니다.
 
 ## 빠른 시작
 
@@ -67,10 +67,10 @@ curl http://localhost:8080/health
 완료한 뒤 프로젝트를 생성합니다. 서버는 `spine dev`로 시작합니다. 설치 과정에서는
 애플리케이션 초기화, 테스트나 listener를 실행하지 않습니다.
 
-파일만 생성하려면 `spine new todo-api --skip-install`을 사용하고, 생성 후 `go mod tidy`를
-실행하세요. `--platform echo`는 기본 플랫폼을 명시합니다. 설치 포함 `--dry-run`은 정확한
-의존성 계획을 위해 네트워크와 Go 캐시를 사용할 수 있으며, 오프라인 계획은
-`--skip-install --dry-run`으로 확인합니다. `--force`는 `--skip-install`과 함께만 허용합니다.
+설치와 빌드를 생략하려면 `spine new todo-api --skip-install`을 사용하고, 생성 후 `go mod tidy`를
+실행하세요. Preview 브랜치 버전 조회에는 이 옵션에서도 Go와 네트워크 또는 모듈 프록시 캐시가 필요합니다. `--platform echo`는 기본 플랫폼을 명시합니다. 설치 포함 `--dry-run`은 정확한
+의존성 계획을 위해 네트워크와 Go 캐시를 사용할 수 있습니다.
+`--skip-install --dry-run`은 브랜치를 조회한 뒤 설치 없이 생성 파일을 보여줍니다. `--force`는 `--skip-install`과 함께만 허용합니다.
 활성 Go workspace는 설치 범위 밖이므로 `GOWORK=off`로 실행하거나 설치를 생략하세요.
 
 새 프로젝트에는 명시적인 `BuildApplication` composition root, `app.Validate`,
@@ -123,18 +123,9 @@ WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playgr
 
 ### 공개 버전 레시피
 
-새 앱의 `platform-contracts-v0.7.0-preview.2` 레시피는 다음 공개 Preview 태그를 고정합니다.
-이 레시피의 안정성 표시는 `prerelease`입니다. 기존 `platform-contracts-v0.6.5` 프로젝트의
-`update`는 기존 정식 버전 조합을 유지하며, 앱 소스를 자동으로 바꾸지 않습니다.
+새 앱의 `platform-contracts-preview` 레시피는 코어와 선택한 Echo, Gorilla, Kafka, RabbitMQ, playground 모듈을 `@preview`로 조회합니다. 해석된 태그 또는 pseudo-version을 `go.mod`와 JSON 결과의 `target_modules`에 기록하고, 원래 조회 조건은 `module_queries`에 제공합니다. `spine update`도 이 레시피에서는 브랜치를 다시 조회합니다.
 
-| 모듈 | 버전 |
-| --- | --- |
-| Spine | `v0.7.0-preview.2` |
-| Echo 플랫폼 | `v0.2.0-preview.1` |
-| Gorilla WS 플랫폼 | `v0.2.0-preview.1` |
-| Kafka 플랫폼 | `v0.2.0-preview.1` |
-| RabbitMQ 플랫폼 | `v0.2.0-preview.1` |
-| playground 검증기 | `v0.2.0-preview.1` |
+`--dry-run` 이후 브랜치가 이동해 생성 또는 업데이트 내용이 바뀌면 기존 해시를 이용한 적용은 실패합니다. 새 계획을 검토한 뒤 적용하세요. 기존 `platform-contracts-v0.7.0-preview.1`, `platform-contracts-v0.7.0-preview.2`와 정식 `platform-contracts-v0.6.5` 앱은 레시피를 직접 바꾸기 전까지 기존 버전 조합을 유지합니다.
 
 공개 계약은 `contract/http`, `contract/event`, `contract/websocket`, `contract/validator`입니다.
 이전 `adapter`, `adapter/http`, `adapter/event`, `wsadapter`는 호환 별칭입니다.
@@ -363,7 +354,7 @@ composition = "./internal/application"
 port = 8080
 layout = "layered-v1"
 platform = "echo"
-recipe = "platform-contracts-v0.7.0-preview.2"
+recipe = "platform-contracts-preview"
 validator = "none"
 websocket_platform = "none"
 # 이벤트 선택 시 예: event_platforms = ["events:kafka", "jobs:rabbitmq"]

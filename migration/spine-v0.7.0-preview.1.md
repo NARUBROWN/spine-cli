@@ -1,6 +1,6 @@
 # Spine v0.7.0 Preview 대응
 
-이 문서는 이번 변경을 포함한 CLI Preview 소스에서 새 앱을 만들거나 기존 입력을 전환하는 절차입니다. 새 생성 레시피 `platform-contracts-v0.7.0-preview.2`는 코어 `v0.7.0-preview.2`와 선택한 플랫폼의 `v0.2.0-preview.1`을 사용합니다. 정식 CLI의 `@latest` 설치에 이 변경이 포함됐다고 가정하지 마세요.
+이 문서는 이번 변경을 포함한 CLI Preview 소스에서 새 앱을 만들거나 기존 입력을 전환하는 절차입니다. 새 생성 레시피 `platform-contracts-preview`는 코어와 선택한 플랫폼을 `@preview`로 조회하고 실제 버전을 go.mod에 기록합니다. 정식 CLI의 `@latest` 설치에 이 변경이 포함됐다고 가정하지 마세요.
 
 ## 생성 레시피 확인
 
@@ -90,12 +90,12 @@ spine verify --json
 
 ## Preview 2 레시피와 문서 UI
 
-새 앱은 `platform-contracts-v0.7.0-preview.2` 레시피로 코어 `v0.7.0-preview.2`와 플랫폼 `v0.2.0-preview.1`을 선택합니다. 기존 `platform-contracts-v0.7.0-preview.1` 프로젝트는 `update`를 실행해도 코어 `v0.7.0-preview.1`을 유지합니다.
+새 앱은 `platform-contracts-preview` 레시피로 코어와 선택한 플랫폼의 `@preview` 브랜치를 조회합니다. 기존 `platform-contracts-v0.7.0-preview.1` 프로젝트는 `update`를 실행해도 코어 `v0.7.0-preview.1`을 유지합니다.
 
 기존 Preview 1 앱을 전환하려면 `spine.toml`의 `module`, `entrypoint`, `composition`, `port`, `layout`과 플랫폼 선택을 보존하면서 `recipe`만 다음 값으로 바꿉니다.
 
 ```toml
-recipe = "platform-contracts-v0.7.0-preview.2"
+recipe = "platform-contracts-preview"
 ```
 
 ```bash

@@ -10,7 +10,7 @@ import (
 
 func TestReleaseRecipeDoesNotChangeLegacyPins(t *testing.T) {
 	options := newProjectOptions{Platform: "echo", WebSocketPlatform: "gorilla", Events: []eventPlatformSpec{{Name: "events", Provider: "kafka"}}, Validator: "none"}
-	preview := currentAssemblyModules(options)
+	preview := previewAssemblyModules(options, currentAssemblySpineVersion)
 	if selectedModuleVersion(preview, spineImportPath) != "v0.7.0-preview.2" || selectedModuleVersion(preview, echoPlatformPath) != "v0.2.0-preview.1" || selectedModuleVersion(preview, gorillaPlatformPath) != "v0.2.0-preview.1" {
 		t.Fatalf("preview recipe: %+v", preview)
 	}

@@ -14,6 +14,8 @@ CLI를 `preview → rc → main` 순서로 승격하고 각 채널에서 태그�
 
 Preview와 RC는 `vX.Y.Z-preview.N`, `vX.Y.Z-rc.N`, 정식은 `vX.Y.Z` 태그를 사용합니다. 일반 설치의 `@latest`는 정식 버전을 우선합니다. [Go 버전 선택](https://go.dev/ref/mod#version-queries)
 
+Preview 기본 생성은 `platform-contracts-preview` 레시피로 각 Spine 모듈의 `@preview`를 조회합니다. 발행 계획은 조회 조건과 해석된 고정 버전을 manifest에 함께 기록합니다. 검증 중 브랜치가 이동해 계획과 생성 결과가 달라지면 발행을 중단하고 새 계획으로 다시 검증합니다.
+
 세 채널 모두 `release-preview`, `release-rc`, `release-stable` 승인 환경을 사용합니다. 지정 리뷰어가 태그, 검증 계획과 릴리스 노트 초안을 검토한 뒤 승인해야 태그를 만듭니다. 환경은 해당 채널 브랜치만 허용하며 관리자 우회를 허용하지 않습니다. [GitHub 승인 환경](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
 
 릴리스 계획 artifact의 `release-title.txt`, `release-notes.md`, `release-plan.json`을 승인 전에 확인합니다. 본문은 `release/notes/vX.Y.Z.md`와 계획의 버전, 소스, 이전 단계, 레시피 해시, 긴급 단축 사유로 구성합니다. 본문 해시를 계획에 저장하고 태그 생성 직전에 다시 계산합니다. Preview와 RC에서는 이 초안을 GitHub Release에 게시하지 않습니다. 본문을 수정하면 새 소스에서 새 계획을 검토해야 합니다. 테스트 결과는 성공을 확인한 뒤 manifest에 첨부합니다.

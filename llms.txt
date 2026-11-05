@@ -21,15 +21,15 @@
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
-- 새 프로젝트의 레시피: `platform-contracts-v0.7.0-preview.2` (코어와 플랫폼의 공개 Preview 태그, stability=prerelease)
+- 새 프로젝트의 레시피: `platform-contracts-preview` (코어와 선택한 플랫폼의 @preview 브랜치 조회, stability=prerelease)
 - recipe 미지정 기존 Echo 앱의 update 레시피: `echo-v0.1.0-spine-v0.6.0`
-- Gorilla WS: `v0.2.0-preview.1`
-- 새 앱 Spine: `github.com/NARUBROWN/spine v0.7.0-preview.2`
+- Gorilla WS: `@preview`
+- 새 앱 Spine: `github.com/NARUBROWN/spine@preview`
 - 기존 `platform-contracts-v0.7.0-preview.1` 앱의 `update`는 코어 `v0.7.0-preview.1`을 유지한다. `.2` 전환은 recipe를 명시적으로 바꾸고 dry-run/base_hash를 검토해 적용한다.
-- Kafka: `v0.2.0-preview.1`; RabbitMQ: `v0.2.0-preview.1`
-- playground: `v0.2.0-preview.1`
+- Kafka: `@preview`; RabbitMQ: `@preview`
+- playground: `@preview`
 - 기존 platform-contracts-v0.6.5 앱은 정식 조합을 유지한다. 이 Preview 소스의 기능을 정식 CLI @latest나 과거 코어에 있다고 가정하지 않는다.
-- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform v0.2.0-preview.1`
+- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform@preview`
 - Echo 플랫폼 설치, 프로젝트 의존성 갱신과 HTTP 반환형 진단은 CLI v0.3.0에서 제공한다.
 - CLI v0.4.0은 위 v0.6.0/v0.1.0 공개 조합과 adapter v2 계약을 지원한다. v0.3.0 태그는 이전 v1 레시피를 사용한다.
 - 라이선스: MIT
@@ -308,7 +308,7 @@ playground.New()를 사용하면 Go 1.26.0 이상이 필요하며 도구 체인�
 `--skip-install`은 플랫폼 코드, go.mod, spine.toml과 기존 프로젝트 파일만 생성한다.
 go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go mod tidy`와 `spine dev`다.
 기본 dry-run은 임시 프로젝트에서 네트워크와 Go 캐시를 사용할 수 있다.
-`--skip-install --dry-run`은 Go 명령 없이 오프라인으로 계획한다. 목적지 파일은 둘 다 변경하지 않는다.
+`--skip-install --dry-run`도 Preview 버전 해석을 위해 Go와 네트워크 또는 모듈 프록시 캐시를 사용하지만 설치와 빌드를 생략한다. 목적지 파일은 둘 다 변경하지 않는다.
 
 기본 설치는 기존 목적지를 덮어쓰지 않는다. `--force`는 `--skip-install`에만 허용한다.
 활성 workspace는 `GOWORK=off` 또는 설치 생략을 안내한다. go.work와 외부 모듈은 변경하지 않는다.
@@ -320,7 +320,7 @@ go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go m
 `BuildApplication → Validate → Run`, SPINE_PORT는 유지한다. legacy는 health를 composition에 선언한다.
 생성 README는 기본 실행을 spine dev부터 안내하고, skip-install에만 수동 tidy를 안내한다. layered-v1 README에는 DTO부터 핸들러, 오류 응답과 route/curl까지 이어지는 첫 API 예제가 포함된다.
 JSON `result`의 project, module, layout, directory, files, dry_run, base_hash, changes와 diff를 유지하며
-platform, event_platforms, validator, minimum_go, target_modules, recipe, stability, install_skipped, selected_modules, stages와 execution_boundary를 추가한다.
+platform, event_platforms, validator, minimum_go, target_modules, module_queries, dependency_channel, recipe, stability, install_skipped, selected_modules, stages와 execution_boundary를 추가한다.
 실패 시 failed_stage와 cause를 반환한다. new의 일반/JSON 종료코드는 2 사용법, 3 전제조건 및 다운로드,
 4 충돌, 5 계약 및 호환성 및 빌드, 10 내부 오류다.
 
@@ -1088,7 +1088,7 @@ Spine application의 실행 계약을 명시적으로 생성하고 검사하며,
 
 ## 독립 WebSocket 플랫폼
 
-새 프로젝트의 platform-contracts-v0.7.0-preview.2 레시피는 코어 v0.7.0-preview.2와 플랫폼 v0.2.0-preview.1을 사용한다. 기존 platform-contracts-v0.6.5 앱의 정식 핀도 보존한다. 기존 public-contracts-20261103과 recipe 없는 Echo 앱의 update 버전은 보존한다. --websocket-platform none|gorilla로 선택하며 gorilla는 HTTP echo가 필요하다. 설정은 spine.toml의 websocket_platform에 기록한다. HTTP 없는 worker는 WS 구현을 선택할 수 없다. HTTP와 event/validator의 확정 API는 바꾸지 않는다.
+새 프로젝트의 platform-contracts-preview 레시피는 코어와 선택한 플랫폼을 @preview로 조회하고 해석된 버전을 go.mod에 기록한다. 기존 버전별 Preview 레시피의 고정 버전은 유지한다. 기존 platform-contracts-v0.6.5 앱의 정식 핀도 보존한다. 기존 public-contracts-20261103과 recipe 없는 Echo 앱의 update 버전은 보존한다. --websocket-platform none|gorilla로 선택하며 gorilla는 HTTP echo가 필요하다. 설정은 spine.toml의 websocket_platform에 기록한다. HTTP 없는 worker는 WS 구현을 선택할 수 없다. HTTP와 event/validator의 확정 API는 바꾸지 않는다.
 
 websocket_adapter는 gorillaplatform.Option() 또는 spine.WithWebSocketAdapter(gorillaplatform.NewFactory())와 직접 지역 변수 factory를 정적으로 추적한다. custom/재대입/동적 옵션은 실행하지 않고 WEBSOCKET_ADAPTER_UNRESOLVED, 중복 선택은 WEBSOCKET_ADAPTER_DUPLICATE로 진단한다. 새 코어에서 WS 경로가 있고 구현이 없으면 WEBSOCKET_ADAPTER_MISSING이다. 기존 내장 WS 코어는 legacy-implicit로 구분한다. WS backend 선택은 semantic snapshot/diff에도 포함된다.
 
@@ -1101,3 +1101,5 @@ CLI v0.4.2의 platform-contracts-v0.6.5 레시피는 Spine v0.6.5와 각 독립 
 ## CLI 릴리스 채널
 
 운영 절차와 초기 전환은 `release/README.md`를 따른다. 모든 단계에서 태그를 발행하고 GitHub Release는 Production에서만 만든다. Preview와 RC의 승격은 성공한 Actions 실행과 태그별 manifest artifact로 검증한다. 공개 발행 전 태그, 계획과 릴리스 노트 초안을 검토하고 승인한다. 소스 트리나 생성 레시피가 바뀌면 새 Preview에서 검증한다. `SPINE_CLI_SHUTDOWN_TIMEOUT`은 run과 dev의 종료 대기 시간이며 기본값은 15초다.
+
+Preview CLI 설치: `go install github.com/NARUBROWN/spine-cli/cmd/spine@preview`. `@preview`는 브랜치 HEAD를 선택하며 실제 버전은 `spine version`으로 확인한다.

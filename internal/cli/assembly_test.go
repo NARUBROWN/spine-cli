@@ -27,7 +27,7 @@ func TestAssemblyArgumentsAndPlanIsolation(t *testing.T) {
 	} {
 		var out, errOut bytes.Buffer
 		if code := Run(append(append([]string{}, args...), "--dry-run", "--json"), &out, &errOut); code != 0 {
-			t.Fatalf("offline plan: %d %s", code, errOut.String())
+			t.Fatalf("resolved scaffold plan: %d %s", code, errOut.String())
 		}
 		var plan struct {
 			Schema string `json:"schema_version"`
@@ -49,7 +49,7 @@ func TestAssemblyArgumentsAndPlanIsolation(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(".")
 	if len(entries) != 0 {
-		t.Fatalf("offline failed plans wrote files: %v", entries)
+		t.Fatalf("failed plans wrote destination files: %v", entries)
 	}
 }
 

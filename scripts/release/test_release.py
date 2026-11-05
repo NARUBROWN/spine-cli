@@ -168,10 +168,41 @@ class ReleasePolicyTests(unittest.TestCase):
     def test_repository_preview_recipe_cannot_ship_as_stable_default(self):
         policy = copy.deepcopy(REPOSITORY_POLICY)
         self.github.policy = policy
-        plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
-        self.assertEqual(plan["components"]["recipe"], policy["recipe"])
+        with patch.object(release, "resolve_module_query", return_value="v0.7.0-preview.2"):
+            plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
+        recipe = plan["components"]["recipe"]
+        self.assertEqual(recipe["id"], "platform-contracts-preview")
+        self.assertEqual(recipe["modules"]["github.com/NARUBROWN/spine"], "v0.7.0-preview.2")
+        self.assertEqual(recipe["queries"]["github.com/NARUBROWN/spine"], "preview")
+        self.assertEqual(policy["recipe"]["modules"]["github.com/NARUBROWN/spine"], "preview")
         with self.assertRaisesRegex(release.ReleaseError, "정식 모듈"):
             release.make_plan(self.github, policy, "stable", self.base, self.base+"-rc.1", now=NOW)
+
+    def test_preview_branch_snapshot_changes_without_mutating_policy(self):
+        policy = copy.deepcopy(REPOSITORY_POLICY)
+        original = copy.deepcopy(policy)
+        with patch.object(release, "resolve_module_query", return_value="v0.7.0-preview.2"):
+            before = release.components(policy)
+        with patch.object(release, "resolve_module_query", return_value="v0.7.0-preview.3"):
+            after = release.components(policy)
+        self.assertNotEqual(before["recipe_sha256"], after["recipe_sha256"])
+        self.assertEqual(policy, original)
+        self.assertEqual(before["recipe"]["queries"], after["recipe"]["queries"])
+
+    def test_preview_query_rejects_wrong_paths_and_noncanonical_versions(self):
+        path = "github.com/NARUBROWN/spine"
+        for value in ({"Path": "example.com/other", "Version": "v0.7.0-preview.2"},
+                      {"Path": path, "Version": "preview"},
+                      {"Path": path, "Version": "v0.7.0-preview.2", "Replace": {"Path": "../spine"}}):
+            with self.subTest(value=value), patch.object(release, "run", return_value=json.dumps(value)):
+                with self.assertRaises(release.ReleaseError):
+                    release.resolve_module_query(path, "preview")
+
+    def test_preview_query_cannot_be_used_for_third_party_modules(self):
+        policy = copy.deepcopy(REPOSITORY_POLICY)
+        policy["recipe"]["modules"]["github.com/labstack/echo/v5"] = "preview"
+        with self.assertRaises(release.ReleaseError):
+            release.validate_policy(policy)
 
     def test_reused_or_lower_prerelease_number_is_rejected(self):
         self.github.tags[self.base+"-preview.3"] = SOURCE

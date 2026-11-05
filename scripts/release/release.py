@@ -73,9 +73,11 @@ def validate_policy(policy):
     recipe = policy.get("recipe", {})
     if not recipe.get("id") or "github.com/NARUBROWN/spine" not in recipe.get("modules", {}):
         raise ReleaseError("기본 생성 레시피와 모듈 버전을 고정해야 합니다")
-    for version in recipe["modules"].values():
+    for path, version in recipe["modules"].items():
+        if version == "preview" and recipe["id"] == "platform-contracts-preview" and path.startswith("github.com/NARUBROWN/spine"):
+            continue
         if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version):
-            raise ReleaseError("레시피에는 변경 가능한 브랜치 대신 모듈 버전을 지정해야 합니다")
+            raise ReleaseError("Preview 레시피 외에는 고정 모듈 버전을 지정해야 합니다")
     if policy.get("notes_path") != "release/notes/" + policy["next_version"] + ".md":
         raise ReleaseError("대상 버전의 릴리스 초안 경로가 필요합니다")
 
@@ -235,7 +237,7 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
     base, actual_channel, _ = parse_tag(version)
     if base != policy["next_version"] or channel != actual_channel:
         raise ReleaseError("대상 버전, 채널이 정책의 next_version과 일치하지 않습니다")
-    if channel == "stable" and any("-" in v for v in policy["recipe"]["modules"].values()):
+    if channel == "stable" and any(v == "preview" or "-" in v for v in policy["recipe"]["modules"].values()):
         raise ReleaseError("정식 CLI의 새 기본 레시피에는 정식 모듈만 사용할 수 있습니다. 레시피 변경 후 새 Preview가 필요합니다")
     reason = reason.strip()
     if reason and len(reason) < 20:
@@ -302,8 +304,26 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
     return plan
 
 
+def resolve_module_query(path, query):
+    with tempfile.TemporaryDirectory(prefix="spine-cli-preview-recipe-") as directory:
+        env = dict(os.environ, GOWORK="off", GOFLAGS=" ", GOTOOLCHAIN="local")
+        try:
+            value = json.loads(run("go", "list", "-m", "-json", path + "@" + query, cwd=directory, env=env))
+        except ValueError as exc:
+            raise ReleaseError("Preview 모듈 조회 결과가 올바른 JSON이 아닙니다") from exc
+    version = value.get("Version", "")
+    if value.get("Path") != path or value.get("Replace") or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version):
+        raise ReleaseError("Preview 모듈을 고정 버전으로 해석하지 못했습니다: " + path)
+    return version
+
+
 def components(policy):
-    recipe = policy["recipe"]
+    recipe = json.loads(json.dumps(policy["recipe"]))
+    queries = {path: version for path, version in recipe["modules"].items() if version == "preview"}
+    if queries:
+        recipe["queries"] = queries
+        for path, query in queries.items():
+            recipe["modules"][path] = resolve_module_query(path, query)
     digest = hashlib.sha256(json.dumps(recipe, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return {"recipe": recipe, "recipe_sha256": digest}
 

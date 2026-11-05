@@ -11,6 +11,10 @@ func TestPreviewCLIPreservesExistingStableAssemblyUpdate(t *testing.T) {
 	checkExistingRecipeUpdate(t, stableAssemblyRecipe, "v0.6.5", "v0.1.0", "released")
 }
 
+func TestPreviewCLIPreservesExistingPreview2AssemblyUpdate(t *testing.T) {
+	checkExistingRecipeUpdate(t, preview2AssemblyRecipe, "v0.7.0-preview.2", "v0.2.0-preview.1", "prerelease")
+}
+
 func TestPreviewCLIPreservesExistingPreview1AssemblyUpdate(t *testing.T) {
 	checkExistingRecipeUpdate(t, preview1AssemblyRecipe, "v0.7.0-preview.1", "v0.2.0-preview.1", "prerelease")
 	source := `import "github.com/NARUBROWN/spine/pkg/path"

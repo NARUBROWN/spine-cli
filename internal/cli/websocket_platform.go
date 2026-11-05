@@ -8,7 +8,8 @@ import (
 )
 
 const (
-	currentAssemblyRecipe        = "platform-contracts-v0.7.0-preview.2"
+	currentAssemblyRecipe        = "platform-contracts-preview"
+	preview2AssemblyRecipe       = "platform-contracts-v0.7.0-preview.2"
 	preview1AssemblyRecipe       = "platform-contracts-v0.7.0-preview.1"
 	stableAssemblyRecipe         = "platform-contracts-v0.6.5"
 	legacyWebSocketRecipe        = "platform-contracts-20261103"
@@ -45,11 +46,17 @@ func stableAssemblyModules(options newProjectOptions) []selectedModule {
 }
 
 func currentAssemblyModules(options newProjectOptions) []selectedModule {
-	return previewAssemblyModules(options, currentAssemblySpineVersion)
+	modules := previewAssemblyModules(options, currentAssemblySpineVersion)
+	for index := range modules {
+		if modules[index].Path != "github.com/labstack/echo/v5" {
+			modules[index].Version = "preview"
+		}
+	}
+	return modules
 }
 
 func isPreviewAssemblyRecipe(recipe string) bool {
-	return recipe == currentAssemblyRecipe || recipe == preview1AssemblyRecipe
+	return recipe == currentAssemblyRecipe || recipe == preview1AssemblyRecipe || recipe == preview2AssemblyRecipe
 }
 
 func previewAssemblyModules(options newProjectOptions, coreVersion string) []selectedModule {
