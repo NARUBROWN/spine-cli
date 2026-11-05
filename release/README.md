@@ -119,7 +119,7 @@ CLI 재설치는 생성 앱을 원복하지 않습니다. 프로젝트 소스, g
 
 ## Discord 태그 알림
 
-태그 생성에 성공하면 바로 [Spine 공통 Discord Action](https://github.com/NARUBROWN/spine/tree/4e53e0b5ba0bed84e3eadc9b49bc31bddcc64f4d/.github/actions/discord-tag)을 호출합니다. 알림 제목에 저장소 이름과 태그를 표시하고 태그 페이지와 발행 실행 기록으로 연결합니다. 이 알림은 태그 생성 시점의 기록이며 공개 설치 검증과 Release 게시 완료를 보장하지 않습니다.
+태그 생성에 성공하면 바로 [Spine 공통 Discord Action](https://github.com/NARUBROWN/spine/tree/b55c182f4d0722fca5aaf3b963bca20cf0dcc4d4/.github/actions/discord-tag)을 호출합니다. 알림 제목에 저장소 이름과 태그를 표시하고 태그 페이지와 발행 실행 기록으로 연결합니다. 이 알림은 태그 생성 시점의 기록이며 공개 설치 검증과 Release 게시 완료를 보장하지 않습니다.
 
 | 태그 형식 | GitHub Actions repository secret |
 | --- | --- |

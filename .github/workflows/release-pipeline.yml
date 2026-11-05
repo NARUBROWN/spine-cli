@@ -97,7 +97,7 @@ jobs:
           VERIFIED_SHA: ${{ needs.ci.outputs.verified_sha }}
         run: python3 scripts/release/release.py tag
       - name: Notify Discord of the new tag
-        uses: NARUBROWN/spine/.github/actions/discord-tag@4e53e0b5ba0bed84e3eadc9b49bc31bddcc64f4d
+        uses: NARUBROWN/spine/.github/actions/discord-tag@b55c182f4d0722fca5aaf3b963bca20cf0dcc4d4
         continue-on-error: true
         timeout-minutes: 1
         with:
