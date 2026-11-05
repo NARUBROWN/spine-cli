@@ -13,8 +13,8 @@ func TestAssemblyArgumentsAndPlanIsolation(t *testing.T) {
 	inTempDir(t)
 	t.Setenv("PATH", t.TempDir())
 	for _, options := range [][]string{
-		{"--platform", "none"}, {"--event-platform", "unknown"}, {"--event-platform", "events:kafka", "--event-platform", "events:rabbitmq"},
-		{"--event-platform", "bad-name:kafka"}, {"--validator", "unknown"}, {"--event-platform"}, {"--validator"},
+		{"--platform", "none"}, {"--event-platform", "bad/name"}, {"--event-platform", "events:kafka", "--event-platform", "events:rabbitmq"},
+		{"--event-platform", "bad-name:kafka"}, {"--validator", "bad/name"}, {"--event-platform"}, {"--validator"},
 	} {
 		var out, errOut bytes.Buffer
 		if code := Run(append([]string{"new", "sample", "--skip-install", "--json"}, options...), &out, &errOut); code != 2 {

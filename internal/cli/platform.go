@@ -24,10 +24,11 @@ const (
 )
 
 type selectedModule struct {
-	Path    string          `json:"path"`
-	Version string          `json:"version,omitempty"`
-	Dir     string          `json:"-"`
-	Replace *selectedModule `json:"replace,omitempty"`
+	Path     string          `json:"path"`
+	Version  string          `json:"version,omitempty"`
+	Dir      string          `json:"-"`
+	Indirect bool            `json:"indirect,omitempty"`
+	Replace  *selectedModule `json:"replace,omitempty"`
 }
 
 func goEnvironment(offline bool) []string {
@@ -163,15 +164,21 @@ func selectedModules(ctx context.Context, root string, offline bool) ([]selected
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	result := []selectedModule{}
 	for {
-		var module selectedModule
-		err := decoder.Decode(&module)
+		var listed struct {
+			Path, Version, Dir string
+			Replace            *selectedModule
+			Indirect           bool
+		}
+		err := decoder.Decode(&listed)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
-		if module.Path == spineImportPath || module.Path == echoPlatformPath || module.Path == "github.com/labstack/echo/v5" || module.Path == kafkaPlatformPath || module.Path == rabbitPlatformPath || module.Path == natsPlatformPath || module.Path == validatorPlatformPath || module.Path == gorillaPlatformPath {
+		module := selectedModule{Path: listed.Path, Version: listed.Version, Dir: listed.Dir, Replace: listed.Replace, Indirect: listed.Indirect}
+		kind, _ := platformModuleIdentity(module.Path)
+		if module.Path == spineImportPath || module.Path == echoPlatformPath || module.Path == "github.com/labstack/echo/v5" || kind != "" || module.Path == gorillaPlatformPath {
 			result = append(result, module)
 		}
 	}
@@ -206,7 +213,7 @@ func validateRecipeModules(modules, targets []selectedModule) error {
 		for _, target := range targets {
 			expected = expected || target.Path == module.Path
 		}
-		if !expected {
+		if !expected && !module.Indirect {
 			return fmt.Errorf("platform compatibility: unexpected platform module %s", module.Path)
 		}
 	}

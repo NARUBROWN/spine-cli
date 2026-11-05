@@ -167,9 +167,12 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 		return finish(3, "snapshot", err)
 	}
 	for _, spec := range config.Events {
-		if spec.Provider == "nats" && config.Recipe != currentAssemblyRecipe {
-			return finish(3, "snapshot", fmt.Errorf("NATS requires the %s recipe; older recipes are not migrated automatically", currentAssemblyRecipe))
+		if legacyPlatformDescriptor("event", spec.Provider) == nil && config.Recipe != currentAssemblyRecipe {
+			return finish(3, "snapshot", fmt.Errorf("event platform %s requires the %s recipe; older recipes are not migrated automatically", spec.Provider, currentAssemblyRecipe))
 		}
+	}
+	if config.Validator != "" && config.Validator != "none" && legacyPlatformDescriptor("validator", config.Validator) == nil && config.Recipe != currentAssemblyRecipe {
+		return finish(3, "snapshot", fmt.Errorf("validator %s requires the %s recipe; older recipes are not migrated automatically", config.Validator, currentAssemblyRecipe))
 	}
 	if config.Platform != "" && config.Platform != "echo" && config.Platform != "none" {
 		return finish(3, "snapshot", fmt.Errorf("unsupported platform: %s", config.Platform))
@@ -243,6 +246,14 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 		if err != nil {
 			return finish(3, "dependencies", err)
 		}
+		selection := newProjectOptions{Events: config.Events, Validator: config.Validator, Modules: targets}
+		if selection.Validator == "" {
+			selection.Validator = "none"
+		}
+		if err := resolveProjectDescriptors(ctx, &selection); err != nil {
+			return finish(3, "dependencies", err)
+		}
+		result["platform_descriptors"] = descriptorFingerprints(selection)
 		result["target_modules"] = targets
 	}
 	updated, requirements, err := updateRequirementsForRecipe(contents, config.Module, targets, recipe)
@@ -277,7 +288,12 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if currentHash != inputHash {
 		return finish(4, "publish", fmt.Errorf("project inputs changed during update; create a new dry-run"))
 	}
-	baseHash, err := updatePlanHash(changes, inputHash)
+	planInputs := inputHash
+	if descriptors, ok := result["platform_descriptors"]; ok {
+		metadata, _ := json.Marshal(descriptors)
+		planInputs += "\n" + string(metadata)
+	}
+	baseHash, err := updatePlanHash(changes, planInputs)
 	if err != nil {
 		return finish(3, "publish", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"golang.org/x/mod/semver"
 )
@@ -17,13 +18,13 @@ var previewModuleResolver = resolvePreviewModules
 // 목적지나 호출자의 go.mod를 바꾸지 않고 브랜치를 정규 모듈 버전으로 해석합니다.
 func resolvePreviewModules(ctx context.Context, targets []selectedModule) ([]selectedModule, error) {
 	resolved := append([]selectedModule(nil), targets...)
-	args := []string{"list", "-m", "-json"}
+	args := []string{"list", "-m", "-json", "-e"}
 	for _, target := range targets {
 		if target.Version == "preview" {
 			args = append(args, target.Path+"@preview")
 		}
 	}
-	if len(args) == 3 {
+	if len(args) == 4 {
 		return resolved, nil
 	}
 	root, err := os.MkdirTemp("", "spine-preview-modules-*")
@@ -38,11 +39,27 @@ func resolvePreviewModules(ctx context.Context, targets []selectedModule) ([]sel
 	versions := map[string]string{}
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	for {
-		var module selectedModule
+		var module struct {
+			Path, Version string
+			Replace       *selectedModule
+			Error         *struct{ Err string }
+		}
 		if err := decoder.Decode(&module); err == io.EOF {
 			break
 		} else if err != nil {
 			return nil, fmt.Errorf("invalid Preview module response: %w", err)
+		}
+		if module.Error != nil {
+			kind, _ := platformModuleIdentity(module.Path)
+			if kind != "" {
+				reason := "platform repository lookup failed"
+				message := strings.ToLower(module.Error.Err)
+				if strings.Contains(message, "not found") || strings.Contains(message, "404") || strings.Contains(message, "unknown revision") || strings.Contains(message, "terminal prompts disabled") || strings.Contains(message, "no such file") {
+					reason = "platform repository or preview branch not found or inaccessible"
+				}
+				return nil, fmt.Errorf("%s: %s@preview: %s", reason, module.Path, module.Error.Err)
+			}
+			return nil, fmt.Errorf("resolve Preview branch %s: %s", module.Path, module.Error.Err)
 		}
 		if !semver.IsValid(module.Version) || module.Replace != nil || versions[module.Path] != "" {
 			return nil, fmt.Errorf("invalid Preview version for %s: %s", module.Path, module.Version)

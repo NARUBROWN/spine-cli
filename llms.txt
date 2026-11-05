@@ -284,8 +284,8 @@ spine new <project>
   [--module <module-path>]
   [--layout <layered-v1|legacy>]
   [--platform echo|none]
-  [--event-platform [name:]kafka|rabbitmq|nats ...]
-  [--validator none|playground]
+  [--event-platform [name:]provider ...]
+  [--validator none|provider]
   [--websocket-platform none|gorilla]
   [--skip-install]
   [--dry-run]
@@ -297,10 +297,10 @@ spine new <project>
 `--module` 생략 시 `github.com/your-org/<project>`를 사용한다. 기본 layout은 layered-v1이다.
 `new`는 `spine.New(echoplatform.Option(), spine.WithEventAdapter(name, factory), spine.WithValidator(validator))`로 선택한 구현을 조립한다.
 기본값은 HTTP echo, WebSocket none, 이벤트 없음, validator none이다. --websocket-platform gorilla는 gorillaplatform.Option()을 추가하며 HTTP echo가 필요하다. --platform none은 이벤트 플랫폼이 필요하며 Echo 의존성, HTTP 옵션, health를 생략한다.
---event-platform은 반복할 수 있고 [name:]kafka, [name:]rabbitmq, [name:]nats를 받는다. 이름 생략 시 provider 이름을 사용하며 이름은 [a-z][a-z0-9_]*, 중복 이름은 오류다.
+--event-platform은 반복 가능한 [name:]provider이며 NARUBROWN/spine-<provider>-platform@preview를 조회한다. --validator provider는 NARUBROWN/spine-validator-<provider>@preview를 조회하며 none은 검증기를 생략한다. provider는 소문자로 시작하고 소문자, 숫자와 연속하지 않는 -/_를 사용한다. 이벤트 등록 이름은 [a-z][a-z0-9_]*이며 기본 이름에서는 -를 _로 바꾼다. 중복 이름은 오류다.
 NATS는 JetStream이며 <PREFIX>URLS, <PREFIX>STREAM, <PREFIX>CONSUMER_PREFIX가 필요하다. stream은 실행 전에 생성한다. <PREFIX>TOPIC_PREFIX와 USER, PASSWORD, TOKEN, CREDENTIALS_FILE 인증 설정은 선택이다. 기본 실패 정책은 reject이며 NATS 앱은 Go 1.26.0 이상이 필요하다. Core NATS pub/sub, request/reply, 자동 DLQ는 포함하지 않는다.
-플랫폼 이름과 생성 템플릿은 CLI에 등록된 목록이다. @preview 조회는 선택 모듈의 버전을 해석하며 새 플랫폼을 자동으로 발견하지 않는다.
-NewFactory(Config)와 playground.New()의 오류를 반환한다. 두 layout에 생성자, Route, Consumers().Register 연결 방식을 유지한다.
+이벤트와 validator는 선택한 모듈 버전의 spine-platform.json 메타데이터로 생성자, 설정 필드와 최소 Go를 읽는다. 새 provider 등록에 CLI 패치가 필요하지 않다. 저장소/Preview 조회 실패와 메타데이터 누락을 구분해 원인과 모듈 경로를 표시하고 프로젝트를 만들지 않는다. Kafka, RabbitMQ와 playground의 메타데이터 없는 버전에는 호환 설명을 사용한다. 형식은 PLATFORMS.md를 참고한다.
+메타데이터에 선언한 생성자의 오류를 반환한다. 두 layout에 생성자, Route, Consumers().Register 연결 방식을 유지한다.
 선택한 플랫폼과 검증기만 직접 require하며 core와 모든 선택 모듈의 실제 선택 버전 및 replace를 검사한다.
 playground.New()를 사용하면 Go 1.26.0 이상이 필요하며 도구 체인을 자동 설치하지 않는다. 낮은 로컬 Go에서는 설치 단계를 실패시키고 목적지를 게시하지 않는다.
 공개 계약 경로는 contract/http, contract/event, contract/websocket, contract/validator이다. adapter, adapter/http, adapter/event는 같은 타입의 호환 별칭이다.
@@ -1096,7 +1096,7 @@ websocket_adapter는 gorillaplatform.Option() 또는 spine.WithWebSocketAdapter(
 
 생성 앱의 두 layout × validator none/playground WS E2E 4개, 두 layout × Kafka/RabbitMQ × HTTP/worker/WebSocket 브로커 E2E 12개를 별도로 실행한다. 공개 모듈만 사용하며 원래 BuildApplication 소스는 변경하지 않는다. playground 없는 WS 조합은 실제 Go 1.25.5 설치를 검사하고 playground는 낮은 toolchain에서 목적지를 게시하지 않는다.
 
-NATS는 TestGeneratedNATSAssemblyE2E에서 두 layout × HTTP/worker 네 조합의 생성, 정적 계약, 부분 probe, 실제 JetStream 전달과 ACK/reject, 정상 종료와 소스를 보존하는 update를 검사한다. SPINE_TEST_NATS_URL이 필요하다. 플랫폼 공개 전 검증과 플랫폼 자체 CI는 SPINE_TEST_NATS_MODULE_DIR의 소스를 별도 프록시와 캐시에 넣을 수 있으며 이를 공개 설치 증거로 해석하지 않는다. 생성 앱에 replace는 추가하지 않는다. CI는 네 조합과 최소 Go 검사의 누락이나 skip을 거부한다.
+동적 이벤트와 validator는 TestGeneratedDynamicPlatformE2E에서 CLI에 등록하지 않은 모듈 이름과 생성자, 설정 구조체, 간접 validator 의존성을 검사한다. NATS는 TestGeneratedNATSAssemblyE2E에서 두 layout × HTTP/worker 네 조합의 생성, 정적 계약, 부분 probe, 실제 JetStream 전달과 ACK/reject, 정상 종료와 소스를 보존하는 update를 검사한다. SPINE_TEST_NATS_URL이 필요하다. 플랫폼 공개 전 검증과 플랫폼 자체 CI는 SPINE_TEST_NATS_MODULE_DIR의 소스를 별도 프록시와 캐시에 넣을 수 있으며 이를 공개 설치 증거로 해석하지 않는다. 생성 앱에 replace는 추가하지 않는다. CI는 네 조합과 최소 Go 검사의 누락이나 skip을 거부한다.
 
 ## v0.4.2 정식 버전 고정
 

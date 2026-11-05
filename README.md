@@ -101,12 +101,12 @@ spine new nats-worker --platform none --event-platform events:nats
 | 옵션 | 값과 기본 동작 |
 | --- | --- |
 | `--platform` | `echo` (기본값), `none` (이벤트 플랫폼 필요) |
-| `--event-platform` | 반복 가능한 `[name:]kafka`, `[name:]rabbitmq`, `[name:]nats`; 이름 생략 시 provider 이름 사용 |
+| `--event-platform` | 반복 가능한 `[name:]provider`; `spine-<provider>-platform@preview` 조회 |
 | `--websocket-platform` | `none` (기본값), `gorilla` (HTTP echo 필요) |
-| `--validator` | `none` (기본값), `playground` |
+| `--validator` | `none` (기본값) 또는 provider; `spine-validator-<provider>@preview` 조회 |
 
 이벤트 이름은 `[a-z][a-z0-9_]*`이며 중복을 거부합니다. 같은 provider도 서로 다른 이름으로 등록할 수 있습니다.
-선택한 플랫폼과 검증기만 직접 의존성으로 추가하고, `NewFactory(Config)`와 `playground.New()`의
+선택한 플랫폼과 검증기만 직접 의존성으로 추가하고, 메타데이터에 선언한 생성자의
 오류를 `BuildApplication`에서 반환합니다. HTTP 없는 worker에는 Echo와 HTTP health 경로를 넣지 않습니다.
 
 이벤트 설정은 `internal/application/platform_config.go`에서 이름별 환경 변수로 읽습니다.
@@ -122,14 +122,17 @@ NATS는 JetStream을 사용합니다. `SPINE_EVENTS_URLS` (쉼표로 구분), `S
 생성한 기본 실패 정책은 reject이며 NATS와 playground 검증기는 Go 1.26.0 이상이 필요합니다.
 Core NATS pub/sub와 request/reply, 자동 DLQ는 생성 범위에 포함하지 않습니다.
 
-플랫폼 이름과 생성 템플릿은 CLI가 정한 목록입니다. Preview에서 동적으로 조회하는 대상은
-지원 목록에 있는 선택 모듈의 버전이며, 새 플랫폼을 자동으로 발견하지 않습니다.
+이벤트와 validator는 `NARUBROWN`의 저장소 명명 규칙과 선택 버전의 `spine-platform.json`으로 조회합니다.
+저장소나 Preview 브랜치를 찾지 못하면 조회 경로와 원인을 표시하고 프로젝트를 만들지 않습니다.
+새 provider의 설정과 생성자, 최소 Go 버전은 메타데이터로 읽으므로 CLI를 패치할 필요가 없습니다.
+기존 Kafka, RabbitMQ와 playground의 메타데이터 없는 버전은 호환 경로를 유지합니다.
+[메타데이터 형식과 조회 규칙](PLATFORMS.md)을 참고하세요. `--skip-install`도 메타데이터 조회를 위해 모듈을 캐시에 내려받을 수 있습니다.
 설정 누락과 잘못된 boolean, factory 설정 오류는 실행 시 반환됩니다. 설치 중에는 설정 helper와 factory를 실행하지 않습니다.
 
-factory는 consume/publish를 모두 활성화합니다. consumer 생성은 `spine g consumer`로 별도 요청하고
+기본 Kafka, RabbitMQ와 NATS 설정은 consume/publish를 모두 활성화합니다. consumer 생성은 `spine g consumer`로 별도 요청하고
 생성된 미구현 핸들러를 작성하세요. 여러 플랫폼은 같은 consumer registry를 사용하므로
 각 브로커의 topic/prefix와 중복 처리 정책을 함께 설계해야 합니다. RabbitMQ의 기본 실패 정책은 reject입니다.
-검증기를 선택한 앱은 DTO의 `validate` 태그를 HTTP JSON, 폼, WS와 consumer 핸들러 전에 검사합니다.
+playground를 선택한 앱은 DTO의 `validate` 태그를 HTTP JSON, 폼, WS와 consumer 핸들러 전에 검사합니다. 다른 validator의 규칙과 태그는 해당 모듈의 문서를 따릅니다.
 `none`이면 이 자동 검증을 생략합니다.
 
 WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playground`로 독립 WS 구현을 선택합니다. `gorillaplatform.Option()`은 HTTP 옵션과 별개로 등록합니다. 기존 이벤트 factory, validator 오류 처리와 API는 유지합니다. WS 경로를 등록하기 전에 구현을 선택해야 하며 `none` 상태의 새 코어는 암묵적으로 Gorilla를 포함하지 않습니다.

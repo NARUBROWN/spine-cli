@@ -28,6 +28,7 @@ type newProjectOptions struct {
 	Validator                string
 	WebSocketPlatform        string
 	Modules                  []selectedModule
+	ValidatorDescriptor      *platformDescriptor
 	SkipInstall, JSON        bool
 	Write                    writeOptions
 }
@@ -129,18 +130,8 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 		files["src/controller/health_controller.go"] = layeredHealthController
 		files["src/route/route.go"] = strings.ReplaceAll(layeredHealthRoute, "{{MODULE}}", options.Module)
 	}
-	if len(options.Events) > 0 {
-		setup := ""
-		for _, spec := range options.Events {
-			prefix := eventEnvPrefix(spec.Name)
-			if spec.Provider == "kafka" {
-				setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"BROKERS", "127.0.0.1:9092", prefix+"GROUP_ID", "generated-test")
-			} else if spec.Provider == "nats" {
-				setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\nt.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"URLS", "nats://127.0.0.1:4222", prefix+"STREAM", "EVENTS", prefix+"CONSUMER_PREFIX", "generated-test", prefix+"ALLOW_INSECURE", "true")
-			} else {
-				setup += fmt.Sprintf("t.Setenv(%q, %q)\nt.Setenv(%q, %q)\nt.Setenv(%q, %q)\n", prefix+"URL", "amqp://guest:guest@127.0.0.1:5672/", prefix+"EXCHANGE", "generated-test", prefix+"ALLOW_INSECURE", "true")
-			}
-		}
+	if len(platformBindings(options)) > 0 {
+		setup := descriptorTestSetup(options)
 		files["internal/application/application_test.go"] = strings.Replace(projectApplicationTest, "app, options, err := BuildApplication()", setup+"app, options, err := BuildApplication()", 1)
 		files["internal/application/platform_config.go"] = assemblyConfig(options)
 		files["internal/application/platform_config_test.go"] = assemblyConfigTest(options)
@@ -217,6 +208,11 @@ func runNew(args []string, out, errOut io.Writer) int {
 	if err != nil {
 		return finish(3, "dependencies", err)
 	}
+	if err := resolveProjectDescriptors(ctx, &options); err != nil {
+		return finish(3, "dependencies", err)
+	}
+	result["minimum_go"] = projectGoVersion(options)
+	result["platform_descriptors"] = descriptorFingerprints(options)
 	result["target_modules"] = options.Modules
 	files, err := newProjectFiles(options)
 	if err != nil {
@@ -265,6 +261,8 @@ func runNew(args []string, out, errOut io.Writer) int {
 	// 생성 모드와 최종 내용도 해시에 넣어 다른 레시피의 계획을 재사용하지 못하게 합니다.
 	digest := sha256.New()
 	fmt.Fprintf(digest, "%s\n%s\n%s\n%t\n%t\n", state, currentAssemblyRecipe, options.Platform, options.SkipInstall, options.Write.Force)
+	metadata, _ := json.Marshal(descriptorFingerprints(options))
+	digest.Write(metadata)
 	for _, path := range paths {
 		fmt.Fprintf(digest, "%d:%s%d:%s", len(path), path, len(files[path]), files[path])
 	}

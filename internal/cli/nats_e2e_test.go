@@ -5,17 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"fmt"
-	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"golang.org/x/mod/module"
-	modzip "golang.org/x/mod/zip"
 )
+
+const natsPlatformPath = "github.com/NARUBROWN/spine-nats-platform"
+const natsPlatformVersion = "v0.1.0-preview.1"
 
 // 모듈 공개 전에는 명시한 로컬 소스를 별도 프록시와 캐시에 넣습니다.
 // 생성 앱에 replace를 넣지 않으며 공개 설치 증거로 해석하지 않습니다.
@@ -25,67 +22,7 @@ func localNATSModuleProxy(t *testing.T) {
 	if root == "" {
 		return
 	}
-	root, err := filepath.Abs(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	path, err := module.EscapePath(natsPlatformPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proxy := t.TempDir()
-	directory := filepath.Join(proxy, filepath.FromSlash(path), "@v")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	info := fmt.Sprintf(`{"Version":%q,"Time":"2026-11-05T00:00:00Z"}`, natsPlatformVersion)
-	for name, contents := range map[string][]byte{
-		"preview.info": []byte(info), natsPlatformVersion + ".info": []byte(info),
-		natsPlatformVersion + ".mod": mod, "list": []byte(natsPlatformVersion + "\n"),
-	} {
-		if err := os.WriteFile(filepath.Join(directory, name), contents, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	archive, err := os.Create(filepath.Join(directory, natsPlatformVersion+".zip"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = modzip.CreateFromDir(archive, module.Version{Path: natsPlatformPath, Version: natsPlatformVersion}, root)
-	closeErr := archive.Close()
-	if err != nil || closeErr != nil {
-		t.Fatalf("prepare NATS module archive: %v %v", err, closeErr)
-	}
-	proxyURL := url.URL{Scheme: "file", Path: filepath.ToSlash(proxy)}
-	if filepath.VolumeName(proxy) != "" {
-		proxyURL.Path = "/" + proxyURL.Path
-	}
-	upstream := os.Getenv("GOPROXY")
-	if upstream == "" {
-		upstream = "https://proxy.golang.org,direct"
-	}
-	t.Setenv("GOPROXY", proxyURL.String()+","+upstream)
-	t.Setenv("GONOSUMDB", strings.Trim(os.Getenv("GONOSUMDB")+","+natsPlatformPath, ","))
-	cache := t.TempDir()
-	t.Setenv("GOMODCACHE", cache)
-	t.Cleanup(func() {
-		// Go가 읽기 전용으로 만든 모듈 디렉터리도 테스트 종료 시 제거합니다.
-		if err := filepath.WalkDir(cache, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() {
-				return os.Chmod(path, 0o700)
-			}
-			return nil
-		}); err != nil {
-			t.Error(err)
-		}
-	})
+	isolatedModuleProxy(t, moduleProxySource{natsPlatformPath, natsPlatformVersion, root})
 	t.Log("using an isolated local NATS module proxy; this is not public installation evidence")
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -11,6 +12,7 @@ import (
 func TestNATSAssemblySelection(t *testing.T) {
 	for _, value := range []string{"nats", "events:nats"} {
 		spec, err := parseEventPlatform(value)
+		spec.Descriptor, _ = testNATSDescriptor()
 		if err != nil || spec.Provider != "nats" || spec.Name == "" {
 			t.Fatalf("selection %q: %+v %v", value, spec, err)
 		}
@@ -31,7 +33,7 @@ func TestNATSAssemblySelection(t *testing.T) {
 		for path, expected := range map[string][]string{
 			"go.mod":                                       {"go 1.26.0", natsPlatformPath},
 			"internal/application/application.go":          {"natsplatform.NewFactory", `spine.WithEventAdapter("` + spec.Name + `"`},
-			"internal/application/platform_config.go":      {"loadNatsConfig", "CONSUMER_PREFIX", "CREDENTIALS_FILE", "FailureReject"},
+			"internal/application/platform_config.go":      {"loadNatsConfig", "CONSUMER_PREFIX", "CREDENTIALS_FILE", `"reject"`},
 			"internal/application/platform_config_test.go": {eventEnvPrefix(spec.Name) + "URLS", eventEnvPrefix(spec.Name) + "STREAM"},
 			"internal/application/application_test.go":     {eventEnvPrefix(spec.Name) + "CONSUMER_PREFIX", "nats://127.0.0.1:4222"},
 		} {
@@ -66,11 +68,16 @@ func TestNATSPlanIsolationAndLegacyRecipeGuard(t *testing.T) {
 	before, _ := os.ReadFile("go.mod")
 	out.Reset()
 	errOut.Reset()
-	if code := runUpdate([]string{"--dry-run", "--json"}, &out, &errOut); code != 3 || !strings.Contains(errOut.String(), "NATS requires") {
+	if code := runUpdate([]string{"--dry-run", "--json"}, &out, &errOut); code != 3 || !strings.Contains(errOut.String(), "event platform nats requires") {
 		t.Fatalf("legacy NATS recipe was accepted: %d %s %s", code, out.String(), errOut.String())
 	}
 	after, _ := os.ReadFile(filepath.Clean("go.mod"))
 	if !bytes.Equal(before, after) {
 		t.Fatal("rejected update changed go.mod")
 	}
+}
+
+func testNATSDescriptor() (*platformDescriptor, error) {
+	_, file, _, _ := runtime.Caller(0)
+	return readPlatformDescriptor(filepath.Join(filepath.Dir(file), "testdata", "nats"), "event", "nats")
 }

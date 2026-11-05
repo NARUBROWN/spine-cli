@@ -116,13 +116,19 @@ CI는 네 조합과 최소 Go 검사의 누락이나 skip을 실패로 처리합
 모듈 게시 전이나 플랫폼 자체 CI에서는 `SPINE_TEST_NATS_MODULE_DIR`로 로컬 NATS 모듈을 지정할 수 있습니다.
 이때 별도 모듈 프록시와 캐시를 사용하고 `replace`는 넣지 않습니다. 이 결과를 공개 저장소의 설치 증거로 보고하지 않습니다.
 
+`TestGeneratedDynamicPlatformE2E`는 제품 코드에 등록하지 않은 이벤트 이름과 validator 이름으로 같은 네 조합을 생성합니다.
+이벤트의 다른 생성자와 설정 구조체, 설정형 validator의 문자열, 배열, boolean, 정수와 기간 설정을 메타데이터에서 읽습니다.
+다른 validator 모듈을 간접 의존성으로 사용하는 경우도 포함합니다. 실제 NATS 전달과 validator의 DTO 차단,
+ACK/reject, 종료와 update 소스 보존을 검사하며 CI는 이 네 조합의 누락과 skip도 거부합니다.
+[조회와 메타데이터 규칙](../../PLATFORMS.md)은 제품 코드의 고정 허용 목록 없이 적용됩니다.
+
 | 구분 | 근거 | 확인 범위 |
 | --- | --- | --- |
 | CLI 회귀 | 전체 `go test -race`, vet, diff 검사 | 생성, 분석, 해시, rollback, 기존 HTTP/native hook, 등록 동작 |
 | 생성 결과 | 공개 모듈 matrix 14개 구성 | 설치, 버전, 정적 검사, build/test, update 소스 보존 |
 | HTTP/검증기 | 생성 앱의 실제 HTTP/WS 테스트 | JSON, 폼, WS, 규칙 오류, 핸들러 차단, 생략 동작 |
 | 최소 도구 체인 | 실제 Go 1.25.5 설치/verify | 이벤트 앱 통과, playground Go 1.26 요구와 목적지 미게시 |
-| 외부 E2E | 생성 앱의 실제 Kafka/RabbitMQ 12개 경로와 NATS 4개 경로 | 발행, consumer, 결과, settlement, 실패 정책, 종료 |
+| 외부 E2E | Kafka/RabbitMQ 12개, NATS 4개와 미등록 이벤트/validator 4개 경로 | 발행, consumer, 결과, settlement, 실패 정책, 종료 |
 
 현재 checkout에서 다시 실행한 결과만 이번 Preview의 증거로 사용합니다. 이전 버전에서 통과한 결과를 이번 조합의 검증으로 대신하지 않습니다. 실제 실행 로그는 작업 결과와 PR에 구분해 보고합니다.
 
