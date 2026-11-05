@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/format"
@@ -1820,6 +1821,20 @@ func TestDependenciesRejectTestFilesWrongPackagesAndDuplicates(t *testing.T) {
 
 func inTempDir(t *testing.T) {
 	t.Helper()
+	previousResolver := previewModuleResolver
+	previewModuleResolver = func(_ context.Context, targets []selectedModule) ([]selectedModule, error) {
+		resolved := append([]selectedModule(nil), targets...)
+		for index := range resolved {
+			if resolved[index].Version == "preview" {
+				resolved[index].Version = previewPlatformVersion
+				if resolved[index].Path == spineImportPath {
+					resolved[index].Version = currentAssemblySpineVersion
+				}
+			}
+		}
+		return resolved, nil
+	}
+	t.Cleanup(func() { previewModuleResolver = previousResolver })
 	previous, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

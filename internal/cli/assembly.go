@@ -92,7 +92,11 @@ func assemblyModules(http string, events []eventPlatformSpec, validator string) 
 func assemblyGoMod(options newProjectOptions) string {
 	var source strings.Builder
 	fmt.Fprintf(&source, "module %s\n\ngo %s\n\nrequire (\n", options.Module, assemblyGoVersion(options.Validator))
-	for _, module := range currentAssemblyModules(options) {
+	targets := options.Modules
+	if targets == nil {
+		targets = previewAssemblyModules(options, currentAssemblySpineVersion)
+	}
+	for _, module := range targets {
 		// Echo 자체는 플랫폼을 통해 선택되며 앱에서 직접 가져올 때 tidy가 직접 의존성으로 바꿉니다.
 		if module.Path == "github.com/labstack/echo/v5" {
 			continue
@@ -249,8 +253,8 @@ func loadRabbitmqConfig(prefix string) (rabbitmqplatform.Config,error) {
 
 func assemblyReadme(options newProjectOptions) string {
 	var source strings.Builder
-	fmt.Fprintf(&source, "# Spine application\n\n모듈: %s\n\nGo %s 이상이 필요합니다. 레시피 `%s`는 코어 `%s`와 플랫폼 `%s`의 공개 Preview 태그를 사용합니다.\n\n", options.Module, assemblyGoVersion(options.Validator), currentAssemblyRecipe, currentAssemblySpineVersion, previewPlatformVersion)
-	source.WriteString("기본 생성은 의존성 설치, 정적 계약 검사, 빌드를 수행합니다. `--skip-install`은 파일만 생성하므로 먼저 `go mod tidy`를 실행하세요. 생성 과정에서 앱과 factory는 실행하지 않습니다.\n\n")
+	fmt.Fprintf(&source, "# Spine application\n\n모듈: %s\n\nGo %s 이상이 필요합니다. 레시피 `%s`는 코어와 선택한 플랫폼의 `@preview` 브랜치를 조회하고 해석한 버전을 go.mod에 기록합니다. `spine update`로 Preview 브랜치를 다시 조회할 수 있습니다.\n\n", options.Module, assemblyGoVersion(options.Validator), currentAssemblyRecipe)
+	source.WriteString("기본 생성은 의존성 설치, 정적 계약 검사, 빌드를 수행합니다. `--skip-install`도 Preview 버전 조회에 Go와 네트워크 또는 모듈 프록시 캐시가 필요하지만 설치와 빌드는 생략합니다. 생성 후 `go mod tidy`를 실행하세요. 생성 과정에서 앱과 factory는 실행하지 않습니다.\n\n")
 	if len(options.Events) > 0 {
 		source.WriteString("## 이벤트 설정\n\n실행과 `go test` 전에 다음 환경 변수를 설정하세요. 주소와 자격 증명은 소스에 저장하지 않습니다. 기본 전송은 TLS이며 로컬 평문 브로커에만 `ALLOW_INSECURE=true`를 명시합니다.\n\n")
 		for _, spec := range options.Events {

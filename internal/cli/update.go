@@ -179,6 +179,9 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if config.Recipe == currentAssemblyRecipe {
 		recipe, targets = currentAssemblyRecipe, currentAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
 	}
+	if config.Recipe == preview2AssemblyRecipe {
+		recipe, targets = preview2AssemblyRecipe, previewAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform}, currentAssemblySpineVersion)
+	}
 	if config.Recipe == preview1AssemblyRecipe {
 		recipe, targets = preview1AssemblyRecipe, previewAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform}, preview1AssemblySpineVersion)
 	}
@@ -228,6 +231,14 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	contents, err := os.ReadFile(filepath.Join(staging, "go.mod"))
 	if err != nil {
 		return finish(3, "snapshot", err)
+	}
+	if recipe == currentAssemblyRecipe {
+		result["module_queries"], result["dependency_channel"] = targets, "preview"
+		targets, err = previewModuleResolver(ctx, targets)
+		if err != nil {
+			return finish(3, "dependencies", err)
+		}
+		result["target_modules"] = targets
 	}
 	updated, requirements, err := updateRequirementsForRecipe(contents, config.Module, targets, recipe)
 	if err != nil {

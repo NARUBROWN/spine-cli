@@ -27,6 +27,7 @@ type newProjectOptions struct {
 	Events                   []eventPlatformSpec
 	Validator                string
 	WebSocketPlatform        string
+	Modules                  []selectedModule
 	SkipInstall, JSON        bool
 	Write                    writeOptions
 }
@@ -206,12 +207,19 @@ func runNew(args []string, out, errOut io.Writer) int {
 	} else if !os.IsNotExist(err) {
 		return finish(3, "publish", err)
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	queries := currentAssemblyModules(options)
+	result["module_queries"], result["dependency_channel"] = queries, "preview"
+	options.Modules, err = previewModuleResolver(ctx, queries)
+	if err != nil {
+		return finish(3, "dependencies", err)
+	}
+	result["target_modules"] = options.Modules
 	files, err := newProjectFiles(options)
 	if err != nil {
 		return finish(10, "scaffold", err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	staging := ""
 	if !options.SkipInstall {
 		workspace, err := activeWorkspace(".")
@@ -231,7 +239,7 @@ func runNew(args []string, out, errOut io.Writer) int {
 			return finish(10, "scaffold", err)
 		}
 		var failure *installationFailure
-		modules, failure = installAssemblyProject(ctx, staging, files, stages, currentAssemblyModules(options))
+		modules, failure = installAssemblyProject(ctx, staging, files, stages, options.Modules)
 		if failure != nil {
 			return finish(failure.Code, failure.Stage, failure.Cause)
 		}
