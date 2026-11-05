@@ -6,11 +6,11 @@
 
 ## 공개 레시피와 Go 버전
 
-`platform-contracts-v0.7.0-preview.1` 레시피는 다음 공개 Preview 모듈을 사용합니다. 생성 프로젝트에는 local `replace`가 없습니다.
+`platform-contracts-v0.7.0-preview.2` 레시피는 다음 공개 Preview 모듈을 사용합니다. 생성 프로젝트에는 local `replace`가 없습니다.
 
 | 모듈 | 버전 |
 | --- | --- |
-| Spine | `v0.7.0-preview.1` |
+| Spine | `v0.7.0-preview.2` |
 | Echo 플랫폼 | `v0.2.0-preview.1` |
 | Gorilla WS 플랫폼 | `v0.2.0-preview.1` |
 | Kafka 플랫폼 | `v0.2.0-preview.1` |
@@ -26,7 +26,7 @@ SPINE_TEST_GO125=/absolute/path/to/go1.25.5/bin/go \
   go test ./internal/cli -run '^TestGeneratedAssemblyMinimumToolchain$' -count=1 -v
 ```
 
-이번 Preview 조합은 [코어 PR #24](https://github.com/NARUBROWN/spine/pull/24)의 공개 태그를 사용합니다. 기존 정식 레시피와 이전 개발 레시피는 별도 회귀 검사로 보존합니다.
+이번 Preview 조합은 [코어 v0.7.0-preview.2](https://github.com/NARUBROWN/spine/tree/v0.7.0-preview.2)의 공개 태그를 사용합니다. 기존 정식 레시피와 이전 개발 레시피는 별도 회귀 검사로 보존합니다.
 
 ## 회귀 테스트와 생성 matrix
 

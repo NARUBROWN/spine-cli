@@ -8,7 +8,7 @@ import (
 // Preview로 생성한 프로젝트에서는 새 path DTO를 사용하고 기존 프로젝트의 템플릿은 보존합니다.
 func previewHTTPPathTemplate(source, name string) string {
 	config, err := loadProjectConfig()
-	if err != nil || config.Recipe != currentAssemblyRecipe {
+	if err != nil || !isPreviewAssemblyRecipe(config.Recipe) {
 		return source
 	}
 	source = strings.ReplaceAll(source, `"github.com/NARUBROWN/spine/pkg/path"`, "")

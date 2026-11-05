@@ -8,6 +8,22 @@ import (
 )
 
 func TestPreviewCLIPreservesExistingStableAssemblyUpdate(t *testing.T) {
+	checkExistingRecipeUpdate(t, stableAssemblyRecipe, "v0.6.5", "v0.1.0", "released")
+}
+
+func TestPreviewCLIPreservesExistingPreview1AssemblyUpdate(t *testing.T) {
+	checkExistingRecipeUpdate(t, preview1AssemblyRecipe, "v0.7.0-preview.1", "v0.2.0-preview.1", "prerelease")
+	source := `import "github.com/NARUBROWN/spine/pkg/path"
+type SampleController struct{}
+func (*SampleController) Get(id path.Int) int64 { return id.Value }`
+	generated := previewHTTPPathTemplate(source, "Sample")
+	if !strings.Contains(generated, "params *SamplePath") || !strings.Contains(generated, "params.ID") {
+		t.Fatalf("Preview 1 path DTO generation changed: %s", generated)
+	}
+}
+
+func checkExistingRecipeUpdate(t *testing.T, recipe, coreVersion, platformVersion, stability string) {
+	t.Helper()
 	if err := prepareTestModuleCache(); err != nil {
 		t.Fatal(err)
 	}
@@ -23,31 +39,31 @@ func TestPreviewCLIPreservesExistingStableAssemblyUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeE2EFile(t, "spine.toml", strings.ReplaceAll(string(config), currentAssemblyRecipe, stableAssemblyRecipe))
+	writeE2EFile(t, "spine.toml", strings.ReplaceAll(string(config), currentAssemblyRecipe, recipe))
 	mod, err := os.ReadFile("go.mod")
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeE2EFile(t, "go.mod", strings.ReplaceAll(strings.ReplaceAll(string(mod), currentAssemblySpineVersion, "v0.6.5"), previewPlatformVersion, "v0.1.0"))
+	writeE2EFile(t, "go.mod", strings.ReplaceAll(strings.ReplaceAll(string(mod), currentAssemblySpineVersion, coreVersion), previewPlatformVersion, platformVersion))
 	before, _ := os.ReadFile("internal/application/application.go")
 	plan, code := updateTestResult(t, "--dry-run")
-	if code != 0 || plan["recipe"] != stableAssemblyRecipe || plan["stability"] != "released" {
-		t.Fatalf("stable assembly plan changed: %d %+v", code, plan)
+	if code != 0 || plan["recipe"] != recipe || plan["stability"] != stability {
+		t.Fatalf("existing recipe plan changed: %d %+v", code, plan)
 	}
 	if result, code := updateTestResult(t, "--if-match", plan["base_hash"].(string)); code != 0 {
-		t.Fatalf("stable assembly update failed: %d %+v", code, result)
+		t.Fatalf("existing recipe update failed: %d %+v", code, result)
 	}
 	after, _ := os.ReadFile("internal/application/application.go")
 	if !bytes.Equal(before, after) {
-		t.Fatal("stable assembly update rewrote the composition")
+		t.Fatal("existing recipe update rewrote the composition")
 	}
 	mod, _ = os.ReadFile("go.mod")
-	if strings.Contains(string(mod), "-preview.") || !strings.Contains(string(mod), spineImportPath+" v0.6.5") {
-		t.Fatalf("stable assembly was migrated implicitly: %s", mod)
+	if !strings.Contains(string(mod), spineImportPath+" "+coreVersion) {
+		t.Fatalf("existing recipe was migrated implicitly: %s", mod)
 	}
 	for _, module := range []string{echoPlatformPath, gorillaPlatformPath, kafkaPlatformPath, rabbitPlatformPath} {
-		if !strings.Contains(string(mod), module+" v0.1.0") {
-			t.Fatalf("stable assembly module was lost: %s\n%s", module, mod)
+		if !strings.Contains(string(mod), module+" "+platformVersion) {
+			t.Fatalf("existing recipe module was lost: %s\n%s", module, mod)
 		}
 	}
 }

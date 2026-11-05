@@ -11,8 +11,12 @@ import (
 func TestReleaseRecipeDoesNotChangeLegacyPins(t *testing.T) {
 	options := newProjectOptions{Platform: "echo", WebSocketPlatform: "gorilla", Events: []eventPlatformSpec{{Name: "events", Provider: "kafka"}}, Validator: "none"}
 	preview := currentAssemblyModules(options)
-	if selectedModuleVersion(preview, spineImportPath) != "v0.7.0-preview.1" || selectedModuleVersion(preview, echoPlatformPath) != "v0.2.0-preview.1" || selectedModuleVersion(preview, gorillaPlatformPath) != "v0.2.0-preview.1" {
+	if selectedModuleVersion(preview, spineImportPath) != "v0.7.0-preview.2" || selectedModuleVersion(preview, echoPlatformPath) != "v0.2.0-preview.1" || selectedModuleVersion(preview, gorillaPlatformPath) != "v0.2.0-preview.1" {
 		t.Fatalf("preview recipe: %+v", preview)
+	}
+	previousPreview := previewAssemblyModules(options, preview1AssemblySpineVersion)
+	if selectedModuleVersion(previousPreview, spineImportPath) != "v0.7.0-preview.1" || selectedModuleVersion(previousPreview, echoPlatformPath) != "v0.2.0-preview.1" {
+		t.Fatalf("Preview 1 recipe changed: %+v", previousPreview)
 	}
 	stable := stableAssemblyModules(options)
 	if selectedModuleVersion(stable, spineImportPath) != "v0.6.5" || selectedModuleVersion(stable, gorillaPlatformPath) != "v0.1.0" || selectedModuleVersion(stable, kafkaPlatformPath) != "v0.1.0" {
