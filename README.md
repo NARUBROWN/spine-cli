@@ -123,13 +123,13 @@ WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playgr
 
 ### 공개 버전 레시피
 
-새 앱의 `platform-contracts-v0.7.0-preview.1` 레시피는 다음 공개 Preview 태그를 고정합니다.
+새 앱의 `platform-contracts-v0.7.0-preview.2` 레시피는 다음 공개 Preview 태그를 고정합니다.
 이 레시피의 안정성 표시는 `prerelease`입니다. 기존 `platform-contracts-v0.6.5` 프로젝트의
 `update`는 기존 정식 버전 조합을 유지하며, 앱 소스를 자동으로 바꾸지 않습니다.
 
 | 모듈 | 버전 |
 | --- | --- |
-| Spine | `v0.7.0-preview.1` |
+| Spine | `v0.7.0-preview.2` |
 | Echo 플랫폼 | `v0.2.0-preview.1` |
 | Gorilla WS 플랫폼 | `v0.2.0-preview.1` |
 | Kafka 플랫폼 | `v0.2.0-preview.1` |
@@ -363,7 +363,7 @@ composition = "./internal/application"
 port = 8080
 layout = "layered-v1"
 platform = "echo"
-recipe = "platform-contracts-v0.7.0-preview.1"
+recipe = "platform-contracts-v0.7.0-preview.2"
 validator = "none"
 websocket_platform = "none"
 # 이벤트 선택 시 예: event_platforms = ["events:kafka", "jobs:rabbitmq"]
