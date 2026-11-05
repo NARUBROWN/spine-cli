@@ -1007,7 +1007,8 @@ func importPathsByAlias(file *ast.File) map[string]string {
 			continue
 		}
 		alias := filepath.Base(path)
-		if path == echoPlatformPath || path == kafkaPlatformPath || path == rabbitPlatformPath {
+		kind, _ := platformModuleIdentity(path)
+		if path == echoPlatformPath || kind == "event" {
 			alias = "platform"
 		}
 		if path == validatorPlatformPath {

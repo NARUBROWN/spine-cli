@@ -1,0 +1,24 @@
+{
+  "schema_version": "spine.platform/v1",
+  "kind": "event",
+  "provider": "nats",
+  "contract_version": "spine.event-adapter/v1",
+  "package": "platform",
+  "factory": "NewFactory",
+  "config_type": "Config",
+  "minimum_go": "1.26.0",
+  "fields": [
+    {"field": "URLs", "type": "strings", "env": "URLS", "required": true, "example": ["nats://127.0.0.1:4222"]},
+    {"field": "Stream", "type": "string", "env": "STREAM", "required": true, "example": "EVENTS"},
+    {"field": "ConsumerPrefix", "type": "string", "env": "CONSUMER_PREFIX", "required": true, "example": "generated-test"},
+    {"field": "TopicPrefix", "type": "string", "env": "TOPIC_PREFIX"},
+    {"field": "AllowInsecureTransport", "type": "bool", "env": "ALLOW_INSECURE", "default": false, "example": true},
+    {"field": "User", "type": "string", "env": "USER"},
+    {"field": "Password", "type": "string", "env": "PASSWORD"},
+    {"field": "Token", "type": "string", "env": "TOKEN"},
+    {"field": "CredentialsFile", "type": "string", "env": "CREDENTIALS_FILE"},
+    {"field": "FailurePolicy", "type": "string", "default": "reject"},
+    {"field": "Consume", "type": "bool", "default": true},
+    {"field": "Publish", "type": "bool", "default": true}
+  ]
+}

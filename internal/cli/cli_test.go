@@ -1822,6 +1822,17 @@ func TestDependenciesRejectTestFilesWrongPackagesAndDuplicates(t *testing.T) {
 func inTempDir(t *testing.T) {
 	t.Helper()
 	previousResolver := previewModuleResolver
+	previousDescriptorResolver := platformDescriptorResolver
+	platformDescriptorResolver = func(_ context.Context, kind, provider string, _ selectedModule, _ bool) (*platformDescriptor, error) {
+		if kind == "event" && provider == "nats" {
+			return testNATSDescriptor()
+		}
+		if descriptor := legacyPlatformDescriptor(kind, provider); descriptor != nil {
+			return descriptor, nil
+		}
+		return nil, fmt.Errorf("platform metadata not found: %s", provider)
+	}
+	t.Cleanup(func() { platformDescriptorResolver = previousDescriptorResolver })
 	previewModuleResolver = func(_ context.Context, targets []selectedModule) ([]selectedModule, error) {
 		resolved := append([]selectedModule(nil), targets...)
 		for index := range resolved {

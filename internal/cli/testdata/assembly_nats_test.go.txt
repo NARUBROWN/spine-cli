@@ -1,0 +1,118 @@
+package application
+
+import (
+ "bytes"
+ "context"
+ "crypto/sha256"
+ "encoding/json"
+ "fmt"
+ "net"
+ "net/http"
+ "os"
+ "sync/atomic"
+ "testing"
+ "time"
+
+ natsplatform "github.com/NARUBROWN/spine-nats-platform"
+ event "github.com/NARUBROWN/spine/contract/event"
+ "github.com/NARUBROWN/spine/pkg/event/publish"
+ "github.com/NARUBROWN/spine/pkg/httpx"
+ "github.com/nats-io/nats.go"
+ "github.com/nats-io/nats.go/jetstream"
+)
+
+type natsDTO struct {
+ Email string `json:"email" validate:"required,email"`
+ Age int `json:"age" validate:"gte=18"`
+}
+type natsEvent struct { natsDTO; topic string }
+func(e natsEvent) Name() string {return e.topic}
+func(e natsEvent) OccurredAt() time.Time {return time.Now()}
+type natsController struct{handled atomic.Int32}
+func(c *natsController) Emit(ctx context.Context,input *natsDTO) httpx.Response[string] {
+ publish.Event(ctx,natsEvent{natsDTO:*input,topic:"order.created"})
+ return httpx.Response[string]{Body:"accepted"}
+}
+func(c *natsController) Handle(ctx context.Context,input natsDTO) {
+ c.handled.Add(1)
+ publish.Event(ctx,natsEvent{natsDTO:input,topic:"order.completed"})
+}
+
+func TestGeneratedNATSRuntime(t *testing.T) {
+ address:=os.Getenv("SPINE_TEST_NATS_URL")
+ if address=="" {t.Fatal("SPINE_TEST_NATS_URL is required")}
+ ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second);defer cancel()
+ nc,err:=nats.Connect(address);if err!=nil{t.Fatal(err)};defer nc.Close()
+ js,err:=jetstream.New(nc);if err!=nil{t.Fatal(err)}
+ stream:=fmt.Sprintf("SPINE_CLI_%d",time.Now().UnixNano())
+ if _,err:=js.CreateStream(ctx,jetstream.StreamConfig{Name:stream,Subjects:[]string{stream+".>"}});err!=nil{t.Fatal(err)}
+ defer js.DeleteStream(context.Background(),stream)
+ t.Setenv("SPINE_EVENTS_URLS",address)
+ t.Setenv("SPINE_EVENTS_STREAM",stream)
+ t.Setenv("SPINE_EVENTS_CONSUMER_PREFIX","worker")
+ t.Setenv("SPINE_EVENTS_TOPIC_PREFIX",stream+".")
+ t.Setenv("SPINE_EVENTS_ALLOW_INSECURE","true")
+ config,err:=loadNatsConfig("SPINE_EVENTS_");if err!=nil{t.Fatal(err)}
+ config.ConsumerPrefix="observer"
+ factory,err:=natsplatform.NewFactory(config);if err!=nil{t.Fatal(err)}
+ observer,err:=factory.NewReader(ctx,event.Subscription{Topic:"order.completed"});if err!=nil{t.Fatal(err)}
+ defer observer.Close(context.Background())
+ publisher,err:=factory.NewPublisher(ctx);if err!=nil{t.Fatal(err)};defer publisher.Close(context.Background())
+ app,options,err:=BuildApplication();if err!=nil{t.Fatal(err)}
+ controller:=&natsController{}
+ app.Constructor(func()*natsController{return controller})
+ if err:=app.Consumers().Register("order.created",(*natsController).Handle);err!=nil{t.Fatal(err)}
+ endpoint:=""
+ if options.HTTP!=nil {
+  listener,err:=net.Listen("tcp","127.0.0.1:0");if err!=nil{t.Fatal(err)}
+  options.Address=listener.Addr().String();listener.Close()
+  endpoint="http://"+options.Address
+  app.Route("POST","/orders",(*natsController).Emit)
+ }
+ options.EnableGracefulShutdown=true;options.ShutdownTimeout=3*time.Second
+ runCtx,stop:=context.WithCancel(ctx)
+ done:=make(chan error,1)
+ go func(){done<-app.RunContext(runCtx,options)}()
+ stopped:=false
+ shutdown:=func(){
+  if stopped{return};stop()
+  select{case err:=<-done:if err!=nil{t.Error(err)};stopped=true
+  case<-time.After(5*time.Second):t.Error("generated NATS app did not stop")}
+ }
+ defer shutdown()
+ hash:=sha256.Sum256([]byte(stream+".order.created"))
+ consumerName:=fmt.Sprintf("worker-%x",hash[:16])
+ var consumer jetstream.Consumer
+ for {
+  consumer,err=js.Consumer(ctx,stream,consumerName)
+  if err==nil {break}
+  select{case<-ctx.Done():t.Fatal(ctx.Err());case<-time.After(10*time.Millisecond):}
+ }
+ if endpoint!="" {
+  client:=&http.Client{Timeout:time.Second}
+  for {
+   response,err:=client.Get(endpoint+"/health")
+   if err==nil {response.Body.Close();if response.StatusCode==200{break}}
+   select{case<-ctx.Done():t.Fatal(ctx.Err());case<-time.After(10*time.Millisecond):}
+  }
+  request,err:=http.NewRequestWithContext(ctx,"POST",endpoint+"/orders",bytes.NewBufferString(`{"email":"kim@example.com","age":20}`));if err!=nil{t.Fatal(err)}
+  request.Header.Set("Content-Type","application/json")
+  response,err:=client.Do(request);if err!=nil{t.Fatal(err)};response.Body.Close()
+  if response.StatusCode!=200{t.Fatalf("HTTP status %d",response.StatusCode)}
+ } else {
+  if err:=publisher.Publish(ctx,event.Message{EventName:"order.created",Payload:[]byte(`{"email":"kim@example.com","age":20}`)});err!=nil{t.Fatal(err)}
+ }
+ result,err:=observer.Read(ctx);if err!=nil{t.Fatal(err)}
+ var received natsDTO
+ if err:=json.Unmarshal(result.Message().Payload,&received);err!=nil||received.Email!="kim@example.com"||received.Age!=20{t.Fatalf("result: %+v %v",received,err)}
+ if err:=result.Ack(ctx);err!=nil{t.Fatal(err)}
+ if err:=publisher.Publish(ctx,event.Message{EventName:"order.created",Payload:[]byte(`{"email":"invalid","age":0}`)});err!=nil{t.Fatal(err)}
+ for {
+  info,err:=consumer.Info(ctx)
+  if err==nil && info.Delivered.Consumer>=2 && info.NumAckPending==0 && info.NumPending==0 {break}
+  select{case<-ctx.Done():t.Fatalf("NATS ACK/reject not completed: %v",ctx.Err());case<-time.After(10*time.Millisecond):}
+ }
+ shutdown()
+ if !stopped || controller.handled.Load()!=1{t.Fatalf("invalid DTO reached handler or shutdown failed: calls=%d",controller.handled.Load())}
+ t.Log("generated CLI application: valid input ACKed, invalid external DTO rejected, result event confirmed, runtime stopped")
+}

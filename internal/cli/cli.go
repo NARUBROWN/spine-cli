@@ -155,7 +155,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, `Spine CLI - scaffold explicit, execution-centric Spine applications.
 
 Usage:
-  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo|none] [--event-platform [name:]kafka|rabbitmq ...] [--validator none|playground] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
+  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo|none] [--event-platform [name:]provider ...] [--validator none|provider] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
   spine update [--dry-run] [--if-match <hash>] [--json]
   spine g domain <[group/]name> [--field name:type]
   spine g dto <[group/]name> [--field name:type]
