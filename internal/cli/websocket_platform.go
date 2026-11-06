@@ -94,7 +94,7 @@ func (i *contractInspector) inspectWebSocketAdapter(config projectConfig, import
 		option, optionOK := importedCall(arg, imports, gorillaPlatformPath, "Option")
 		if !directOK && !optionOK {
 			known := false
-			for _, owner := range [][2]string{{spineImportPath, "WithHTTPAdapter"}, {spineImportPath, "WithEventAdapter"}, {spineImportPath, "WithValidator"}, {echoPlatformPath, "Option"}} {
+			for _, owner := range [][2]string{{spineImportPath, "WithHTTPAdapter"}, {spineImportPath, "WithEventAdapter"}, {spineImportPath, "WithValidator"}, {echoPlatformPath, "Option"}, {nethttpPlatformPath, "Option"}} {
 				if _, ok := importedCall(arg, imports, owner[0], owner[1]); ok {
 					known = true
 				}

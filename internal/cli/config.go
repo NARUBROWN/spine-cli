@@ -81,7 +81,7 @@ func loadProjectConfig() (projectConfig, error) {
 			} else if key == "composition" {
 				config.Composition = unquoted
 			} else if key == "platform" {
-				if unquoted != "echo" && unquoted != "none" {
+				if unquoted != "echo" && unquoted != "nethttp" && unquoted != "none" {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported platform %q", lineNumber+1, unquoted)
 				}
 				config.Platform = unquoted
@@ -134,8 +134,8 @@ func loadProjectConfig() (projectConfig, error) {
 	if config.Module == "" {
 		return projectConfig{}, fmt.Errorf("spine.toml: module is required")
 	}
-	if config.WebSocketPlatform == "gorilla" && config.Platform != "echo" {
-		return config, fmt.Errorf("WebSocket platform requires HTTP echo")
+	if config.WebSocketPlatform == "gorilla" && config.Platform != "echo" && config.Platform != "nethttp" {
+		return config, fmt.Errorf("WebSocket platform requires HTTP echo or nethttp")
 	}
 	validator := config.Validator
 	if validator == "" {

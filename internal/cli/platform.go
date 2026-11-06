@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	nethttpPlatformPath  = "github.com/NARUBROWN/spine-nethttp-platform"
 	echoPlatformPath     = "github.com/NARUBROWN/spine-echo-platform"
 	echoPlatformVersion  = "v0.1.0"
 	platformSpineVersion = "v0.6.0"
@@ -58,10 +59,14 @@ func goEnvironment(offline bool) []string {
 }
 
 func platformGo(ctx context.Context, root string, offline bool, args ...string) ([]byte, error) {
+	return platformGoWithEnv(ctx, root, goEnvironment(offline), args...)
+}
+
+func platformGoWithEnv(ctx context.Context, root string, environment []string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", args...)
-	command.Dir, command.Env = root, goEnvironment(offline)
+	command.Dir, command.Env = root, environment
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {

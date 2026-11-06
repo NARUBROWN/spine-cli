@@ -107,6 +107,7 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 
 const firstAPIGuideHTTPTest = `package application
 import (
+ "github.com/NARUBROWN/spine"
  "context"
  "net/http/httptest"
  "strings"
@@ -116,7 +117,8 @@ func TestDocumentedProductAPI(t *testing.T) {
  app,options,err:=BuildApplication();if err!=nil {t.Fatal(err)}
  prepared,err:=app.Prepare(context.Background(),options);if err!=nil {t.Fatal(err)}
  defer prepared.Close(context.Background())
- server:=httptest.NewServer(prepared.Handler());defer server.Close()
+ handler,err:=spine.NetHTTPHandler(prepared);if err!=nil {t.Fatal(err)}
+ server:=httptest.NewServer(handler);defer server.Close()
  for _,scenario:=range []struct {body string;status int}{
   {"{\"name\":\"Bolt\",\"quantity\":5}",201},
   {"{\"name\":\"\",\"quantity\":-1}",400},

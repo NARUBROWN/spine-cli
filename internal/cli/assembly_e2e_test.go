@@ -78,6 +78,8 @@ func TestGeneratedAssemblyPublicMatrix(t *testing.T) {
 			validator bool
 		}{
 			{"http", nil, false},
+			{"nethttp", []string{"--platform", "nethttp"}, false},
+			{"nethttp-validator", []string{"--platform", "nethttp", "--validator", "playground", "--websocket-platform", "gorilla"}, true},
 			{"kafka", []string{"--event-platform", "kafka"}, false},
 			{"rabbitmq", []string{"--event-platform", "rabbitmq"}, false},
 			{"worker", []string{"--platform", "none", "--event-platform", "events:kafka"}, false},
@@ -101,10 +103,10 @@ func TestGeneratedAssemblyPublicMatrix(t *testing.T) {
 				assertE2ESuccess(t, runE2E(binary, project, nil, "context", "--json"), "generated context")
 				assertE2ESuccess(t, runE2E(binary, project, nil, "contract", "check", "--json"), "generated static contract")
 				fixture := ""
-				if scenario.name == "validator" {
+				if scenario.name == "validator" || scenario.name == "nethttp-validator" {
 					fixture = "assembly_http_test.go.txt"
 				}
-				if scenario.name == "http" {
+				if scenario.name == "http" || scenario.name == "nethttp" {
 					fixture = "assembly_no_validator_test.go.txt"
 				}
 				if fixture != "" {

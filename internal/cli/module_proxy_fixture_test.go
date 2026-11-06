@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -83,4 +85,55 @@ func isolatedModuleProxy(t *testing.T, sources ...moduleProxySource) string {
 		}
 	})
 	return proxyURL.String()
+}
+
+// Snapshot public branch metadata before adding a test-only proxy. Module zips
+// and checksums still come from the public upstream; only the fake providers
+// bypass checksum verification. This keeps the fixture independent of stale
+// branch responses cached by the fallback proxy during tag publication.
+func isolatedDynamicPlatformProxy(t *testing.T, sources ...moduleProxySource) {
+	t.Helper()
+	targets, err := resolvePreviewModules(context.Background(), []selectedModule{{Path: spineImportPath, Version: "preview"}, {Path: echoPlatformPath, Version: "preview"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string][]byte{}
+	for _, target := range targets {
+		output, err := platformGo(context.Background(), t.TempDir(), false, "list", "-m", "-json", target.Path+"@"+target.Version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var info struct {
+			Version string
+			Time    json.RawMessage
+		}
+		if err := json.Unmarshal(output, &info); err != nil {
+			t.Fatal(err)
+		}
+		metadata[target.Path], err = json.Marshal(info)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	proxy, err := url.Parse(isolatedModuleProxy(t, sources...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyRoot := filepath.FromSlash(proxy.Path)
+	if len(proxy.Path) > 1 && filepath.VolumeName(filepath.FromSlash(proxy.Path[1:])) != "" {
+		proxyRoot = filepath.FromSlash(proxy.Path[1:])
+	}
+	for path, data := range metadata {
+		escaped, err := module.EscapePath(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		directory := filepath.Join(proxyRoot, filepath.FromSlash(escaped), "@v")
+		if err := os.MkdirAll(directory, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "preview.info"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

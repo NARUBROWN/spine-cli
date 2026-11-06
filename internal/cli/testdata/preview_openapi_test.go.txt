@@ -1,6 +1,7 @@
 package application
 
 import (
+ "github.com/NARUBROWN/spine"
     "context"
     "encoding/json"
     "io"
@@ -27,7 +28,8 @@ func TestPreviewHTTPAndExportedOpenAPI(t *testing.T) {
         if enabled { options.HTTP.OpenAPI.Path = "/schema.json" }
         prepared, err := app.Prepare(context.Background(), options)
         if err != nil { t.Fatal(err) }
-        srv := httptest.NewServer(prepared.Handler())
+        handler,err:=spine.NetHTTPHandler(prepared);if err!=nil {t.Fatal(err)}
+        srv := httptest.NewServer(handler)
         srv.Client().Timeout = 5*time.Second
         t.Cleanup(func() { srv.Close(); if err := prepared.Close(context.Background()); err != nil { t.Error(err) } })
         request := func(path string) (int, []byte) {

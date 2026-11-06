@@ -6,6 +6,7 @@ import (
  "crypto/sha256"
  "encoding/json"
  "fmt"
+ "io"
  "net"
  "net/http"
  "os"
@@ -89,16 +90,19 @@ func TestGeneratedNATSRuntime(t *testing.T) {
   select{case<-ctx.Done():t.Fatal(ctx.Err());case<-time.After(10*time.Millisecond):}
  }
  if endpoint!="" {
-  client:=&http.Client{Timeout:time.Second}
+  transport:=http.DefaultTransport.(*http.Transport).Clone()
+  defer transport.CloseIdleConnections()
+  client:=&http.Client{Timeout:time.Second,Transport:transport}
   for {
    response,err:=client.Get(endpoint+"/health")
-   if err==nil {response.Body.Close();if response.StatusCode==200{break}}
+   if err==nil {io.Copy(io.Discard,response.Body);response.Body.Close();if response.StatusCode==200{break}}
    select{case<-ctx.Done():t.Fatal(ctx.Err());case<-time.After(10*time.Millisecond):}
   }
   request,err:=http.NewRequestWithContext(ctx,"POST",endpoint+"/orders",bytes.NewBufferString(`{"email":"kim@example.com","age":20}`));if err!=nil{t.Fatal(err)}
   request.Header.Set("Content-Type","application/json")
-  response,err:=client.Do(request);if err!=nil{t.Fatal(err)};response.Body.Close()
+  response,err:=client.Do(request);if err!=nil{t.Fatal(err)};io.Copy(io.Discard,response.Body);response.Body.Close()
   if response.StatusCode!=200{t.Fatalf("HTTP status %d",response.StatusCode)}
+  transport.CloseIdleConnections()
  } else {
   if err:=publisher.Publish(ctx,event.Message{EventName:"order.created",Payload:[]byte(`{"email":"kim@example.com","age":20}`)});err!=nil{t.Fatal(err)}
  }

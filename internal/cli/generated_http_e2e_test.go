@@ -38,7 +38,8 @@ func TestGeneratedProjectsHandleHTTPInputErrors(t *testing.T) {
 			apply(workspace, "new", "todo", "--module", "example.com/todo", "--layout", layout, "--websocket-platform", "gorilla")
 			project := filepath.Join(workspace, "todo")
 			mod, _ := os.ReadFile(filepath.Join(project, "go.mod"))
-			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+currentAssemblySpineVersion) {
+			selected := strings.TrimSpace(generatedGo(t, project, "list", "-m", "-f", "{{.Version}}", spineImportPath))
+			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+selected) || selected == "" {
 				t.Fatalf("generated project uses an unfixed runtime: %s", mod)
 			}
 			if err := os.MkdirAll(filepath.Join(project, "handlers"), 0o755); err != nil {

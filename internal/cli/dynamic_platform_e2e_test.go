@@ -66,7 +66,7 @@ func TestGeneratedDynamicPlatformE2E(t *testing.T) {
 	writeTestDescriptor(t, validatorRoot, validatorDescriptor)
 	writeE2EFile(t, filepath.Join(validatorRoot, "go.mod"), "module "+validationPath+"\n\ngo 1.26.0\n\nrequire (\n github.com/NARUBROWN/spine "+currentAssemblySpineVersion+"\n "+validatorPlatformPath+" "+previewPlatformVersion+"\n)\n")
 	writeE2EFile(t, filepath.Join(validatorRoot, "validator.go"), dynamicValidatorSource)
-	isolatedModuleProxy(t, moduleProxySource{eventPath, "v0.1.0", eventRoot}, moduleProxySource{validationPath, "v0.1.0", validatorRoot})
+	isolatedDynamicPlatformProxy(t, moduleProxySource{eventPath, "v0.1.0", eventRoot}, moduleProxySource{validationPath, "v0.1.0", validatorRoot})
 	t.Setenv(validatorEnvPrefix(validatorProvider)+"RULE", "email")
 	binary := buildUpdateCLI(t)
 	data, err := os.ReadFile("testdata/assembly_nats_test.go.txt")
