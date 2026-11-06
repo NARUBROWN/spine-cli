@@ -22,7 +22,7 @@ func localNATSModuleProxy(t *testing.T) {
 	if root == "" {
 		return
 	}
-	isolatedModuleProxy(t, moduleProxySource{natsPlatformPath, natsPlatformVersion, root})
+	isolatedDynamicPlatformProxy(t, moduleProxySource{natsPlatformPath, natsPlatformVersion, root})
 	t.Log("using an isolated local NATS module proxy; this is not public installation evidence")
 }
 
