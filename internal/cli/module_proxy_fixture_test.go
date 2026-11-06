@@ -119,12 +119,16 @@ func isolatedDynamicPlatformProxy(t *testing.T, sources ...moduleProxySource) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	proxyRoot := filepath.FromSlash(proxy.Path)
+	if len(proxy.Path) > 1 && filepath.VolumeName(filepath.FromSlash(proxy.Path[1:])) != "" {
+		proxyRoot = filepath.FromSlash(proxy.Path[1:])
+	}
 	for path, data := range metadata {
 		escaped, err := module.EscapePath(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		directory := filepath.Join(filepath.FromSlash(proxy.Path), filepath.FromSlash(escaped), "@v")
+		directory := filepath.Join(proxyRoot, filepath.FromSlash(escaped), "@v")
 		if err := os.MkdirAll(directory, 0755); err != nil {
 			t.Fatal(err)
 		}
