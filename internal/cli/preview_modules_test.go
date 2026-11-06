@@ -108,7 +108,7 @@ func TestPreviewQueryHonorsCustomProxy(t *testing.T) {
 			want = "direct"
 		}
 		found := false
-		for _, entry := range previewQueryEnvironment() {
+		for _, entry := range previewQueryEnvironment(proxy) {
 			if entry == "GOPROXY="+want {
 				found = true
 			}
