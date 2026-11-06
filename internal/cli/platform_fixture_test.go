@@ -3,6 +3,7 @@ package cli
 // 공개 모듈을 사용하는 생성 프로젝트에서 실행하는 HTTP와 WS 수명 검증입니다.
 const generatedPlatformLifecycleTest = `package application
 import (
+ "github.com/NARUBROWN/spine"
  "context"
  "net"
  "net/http"
@@ -78,18 +79,19 @@ func TestPreparedHandlerAndExternalListenerOwnership(t *testing.T) {
  ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
  defer cancel()
  defer prepared.Close(ctx)
+ handler,err:=spine.NetHTTPHandler(prepared);if err!=nil {t.Fatal(err)}
  if !hookCalled { t.Fatal("native hook was not called") }
  response := httptest.NewRecorder()
- prepared.Handler().ServeHTTP(response, httptest.NewRequest("GET", "/health", nil))
+ handler.ServeHTTP(response, httptest.NewRequest("GET", "/health", nil))
  if response.Code != 200 { t.Fatalf("prepared handler status %d", response.Code) }
  native := httptest.NewRecorder()
- prepared.Handler().ServeHTTP(native,httptest.NewRequest("GET","/native",nil))
+ handler.ServeHTTP(native,httptest.NewRequest("GET","/native",nil))
  if native.Code != 200 || native.Body.String()!="native" { t.Fatalf("native route status %d body %q",native.Code,native.Body.String()) }
- server := httptest.NewServer(prepared.Handler())
+ server := httptest.NewServer(handler)
  defer server.Close()
  if err := prepared.Close(ctx); err != nil { t.Fatal(err) }
  response = httptest.NewRecorder()
- prepared.Handler().ServeHTTP(response, httptest.NewRequest("GET", "/health", nil))
+ handler.ServeHTTP(response, httptest.NewRequest("GET", "/health", nil))
  if response.Code != 503 { t.Fatalf("closed handler status %d", response.Code) }
  client := &http.Client{Timeout:time.Second}
  external, err := client.Get(server.URL+"/health")
