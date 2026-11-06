@@ -99,3 +99,22 @@ func TestResolvePreviewModulesUsesGoProxyAndCanonicalVersions(t *testing.T) {
 		t.Fatal("missing Preview branch was silently replaced")
 	}
 }
+
+func TestPreviewQueryHonorsCustomProxy(t *testing.T) {
+	for _, proxy := range []string{"", "https://proxy.golang.org,direct", "https://proxy.example", "file:///offline", "off"} {
+		t.Setenv("GOPROXY", proxy)
+		want := proxy
+		if want == "" || want == "https://proxy.golang.org,direct" {
+			want = "direct"
+		}
+		found := false
+		for _, entry := range previewQueryEnvironment() {
+			if entry == "GOPROXY="+want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("proxy %q was not respected", proxy)
+		}
+	}
+}

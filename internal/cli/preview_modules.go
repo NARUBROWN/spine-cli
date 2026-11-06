@@ -32,7 +32,7 @@ func resolvePreviewModules(ctx context.Context, targets []selectedModule) ([]sel
 		return nil, err
 	}
 	defer os.RemoveAll(root)
-	output, err := platformGo(ctx, root, false, args...)
+	output, err := platformGoWithEnv(ctx, root, previewQueryEnvironment(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("resolve Preview branches: %w", err)
 	}
@@ -77,4 +77,23 @@ func resolvePreviewModules(ctx context.Context, targets []selectedModule) ([]sel
 		resolved[index].Version = version
 	}
 	return resolved, nil
+}
+
+// Resolve moving branches against the source when using the default Go proxy.
+// A proxy can cache a pre-tag pseudo-version while dependencies already require
+// the new tag. Downloads still use the normal proxy and checksum database.
+// Custom proxies, including offline test proxies, remain authoritative.
+func previewQueryEnvironment() []string {
+	environment := goEnvironment(false)
+	proxy := os.Getenv("GOPROXY")
+	if proxy != "" && proxy != "https://proxy.golang.org,direct" {
+		return environment
+	}
+	for index, entry := range environment {
+		if strings.HasPrefix(entry, "GOPROXY=") {
+			environment[index] = "GOPROXY=direct"
+			return environment
+		}
+	}
+	return append(environment, "GOPROXY=direct")
 }
