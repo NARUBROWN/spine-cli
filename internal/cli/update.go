@@ -174,7 +174,7 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if config.Validator != "" && config.Validator != "none" && legacyPlatformDescriptor("validator", config.Validator) == nil && config.Recipe != currentAssemblyRecipe {
 		return finish(3, "snapshot", fmt.Errorf("validator %s requires the %s recipe; older recipes are not migrated automatically", config.Validator, currentAssemblyRecipe))
 	}
-	if config.Platform != "" && config.Platform != "echo" && config.Platform != "none" {
+	if config.Platform != "" && config.Platform != "echo" && config.Platform != "nethttp" && config.Platform != "none" {
 		return finish(3, "snapshot", fmt.Errorf("unsupported platform: %s", config.Platform))
 	}
 	recipe, targets := echoRecipe, echoRecipeModules()

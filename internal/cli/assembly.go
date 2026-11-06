@@ -78,6 +78,9 @@ func assemblyGoVersion(validator string, events ...eventPlatformSpec) string {
 
 func assemblyModules(http string, events []eventPlatformSpec, validator string) []selectedModule {
 	modules := []selectedModule{{Path: spineImportPath, Version: assemblySpineVersion}}
+	if http == "nethttp" {
+		modules = append(modules, selectedModule{Path: nethttpPlatformPath, Version: "preview"})
+	}
 	if http == "echo" {
 		modules = append(modules, selectedModule{Path: echoPlatformPath, Version: echoPlatformVersion}, selectedModule{Path: "github.com/labstack/echo/v5", Version: platformEchoVersion})
 	}
@@ -125,8 +128,13 @@ func assemblyGoMod(options newProjectOptions) string {
 func assemblyApplication(options newProjectOptions) (string, error) {
 	var source strings.Builder
 	source.WriteString("package application\n\nimport (\n\"github.com/NARUBROWN/spine\"\n\"github.com/NARUBROWN/spine/pkg/boot\"\n")
-	if options.Platform == "echo" {
-		source.WriteString("\"os\"\nechoplatform \"" + echoPlatformPath + "\"\n")
+	if options.Platform == "echo" || options.Platform == "nethttp" {
+		source.WriteString("\"os\"\n")
+		if options.Platform == "nethttp" {
+			source.WriteString("nethttpplatform \"" + nethttpPlatformPath + "\"\n")
+		} else {
+			source.WriteString("echoplatform \"" + echoPlatformPath + "\"\n")
+		}
 		if options.Layout == layeredLayout {
 			fmt.Fprintf(&source, "controller %q\nroute %q\n", options.Module+"/src/controller", options.Module+"/src/route")
 		} else {
@@ -156,7 +164,7 @@ func assemblyApplication(options newProjectOptions) (string, error) {
 		fmt.Fprintf(&source, "%s %q\n", descriptorAlias(descriptor), validatorModule(options.Validator))
 	}
 	source.WriteString(")\n\n")
-	if options.Layout == "legacy" && options.Platform == "echo" {
+	if options.Layout == "legacy" && (options.Platform == "echo" || options.Platform == "nethttp") {
 		source.WriteString(`type HealthController struct{}
 func NewHealthController() *HealthController { return &HealthController{} }
 func (*HealthController) Get() httpx.Response[map[string]string] {
@@ -181,12 +189,12 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 		}
 		fmt.Fprintf(&source, "validator, err := %s.%s(%s)\nif err != nil { return nil, boot.Options{}, err }\n", descriptorAlias(descriptor), descriptor.Factory, argument)
 	}
-	if options.Platform == "echo" && len(options.Events) == 0 && options.Validator == "none" && options.WebSocketPlatform != "gorilla" {
-		source.WriteString("app := spine.New(echoplatform.Option())\n")
+	if (options.Platform == "echo" || options.Platform == "nethttp") && len(options.Events) == 0 && options.Validator == "none" && options.WebSocketPlatform != "gorilla" {
+		fmt.Fprintf(&source, "app := spine.New(%splatform.Option())\n", options.Platform)
 	} else {
 		source.WriteString("app := spine.New(\n")
-		if options.Platform == "echo" {
-			source.WriteString("echoplatform.Option(),\n")
+		if options.Platform == "echo" || options.Platform == "nethttp" {
+			fmt.Fprintf(&source, "%splatform.Option(),\n", options.Platform)
 		}
 		if options.WebSocketPlatform == "gorilla" {
 			source.WriteString("gorillaplatform.Option(),\n")
@@ -199,7 +207,7 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 		}
 		source.WriteString(")\n")
 	}
-	if options.Platform == "echo" {
+	if options.Platform == "echo" || options.Platform == "nethttp" {
 		if options.Layout == layeredLayout {
 			source.WriteString("app.Constructor(controller.NewHealthController)\nif err := route.Register(app); err != nil { return nil, boot.Options{}, err }\n")
 		} else {
@@ -260,11 +268,14 @@ func assemblyReadme(options newProjectOptions) string {
 		source.WriteString("\n검증기를 생략했습니다. DTO의 `validate` 태그는 자동 검사되지 않습니다.\n")
 	}
 	source.WriteString("\n## 실행과 검사\n\n```sh\nspine contract check\nspine verify\nspine dev\n```\n")
+	if options.Platform == "echo" || options.Platform == "nethttp" {
+		source.WriteString("\n`GET /health`를 제공합니다. `SPINE_PORT` 또는 CLI의 `spine.toml` port로 포트를 정합니다.\n")
+	}
 	if options.Platform == "echo" {
-		source.WriteString("\n`GET /health`를 제공합니다. `SPINE_PORT` 또는 CLI의 `spine.toml` port로 포트를 정합니다. Echo native 설정은 `echoplatform.Option(echoplatform.WithEcho(func(*echo.Echo) { ... }))`에 추가합니다.\n")
+		source.WriteString("Echo native 설정은 `echoplatform.Option(echoplatform.WithEcho(func(*echo.Echo) { ... }))`에 추가합니다.\n")
 	}
 	source.WriteString("\n`spine update --dry-run --json`으로 의존성 변경을 검토하고 `--if-match`로 적용합니다. update는 앱 소스를 바꾸지 않습니다. 정적 검사와 build/test는 실제 브로커 연결, ACK/NACK, 배포 검증을 뜻하지 않습니다.\n")
-	if options.Layout == layeredLayout && options.Platform == "echo" {
+	if options.Layout == layeredLayout && (options.Platform == "echo" || options.Platform == "nethttp") {
 		source.WriteString(strings.ReplaceAll(generatedFirstAPIGuide(), "{{MODULE}}", options.Module))
 	}
 	return source.String()

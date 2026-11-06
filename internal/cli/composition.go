@@ -53,6 +53,16 @@ func adapterSelection(expression ast.Expr, imports map[string]string) string {
 	}
 	selection := "missing"
 	for _, argument := range call.Args {
+		if option, ok := importedCall(argument, imports, nethttpPlatformPath, "Option"); ok && len(option.Args) == 0 && !option.Ellipsis.IsValid() {
+			selection = "nethttp"
+			continue
+		}
+		if option, ok := importedCall(argument, imports, spineImportPath, "WithHTTPAdapter"); ok && len(option.Args) == 1 && !option.Ellipsis.IsValid() {
+			if factory, ok := importedCall(option.Args[0], imports, nethttpPlatformPath, "NewFactory"); ok && len(factory.Args) == 0 && !factory.Ellipsis.IsValid() {
+				selection = "nethttp"
+				continue
+			}
+		}
 		if option, ok := importedCall(argument, imports, echoPlatformPath, "Option"); ok && !option.Ellipsis.IsValid() && echoOptions(option.Args, imports) {
 			selection = "echo"
 			continue

@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	nethttpPlatformPath  = "github.com/NARUBROWN/spine-nethttp-platform"
 	echoPlatformPath     = "github.com/NARUBROWN/spine-echo-platform"
 	echoPlatformVersion  = "v0.1.0"
 	platformSpineVersion = "v0.6.0"

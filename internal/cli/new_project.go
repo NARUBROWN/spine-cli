@@ -86,14 +86,14 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	if options.Layout != layeredLayout && options.Layout != "legacy" {
 		return options, fmt.Errorf("unsupported layout: %s", options.Layout)
 	}
-	if options.Platform != "echo" && options.Platform != "none" {
+	if options.Platform != "echo" && options.Platform != "nethttp" && options.Platform != "none" {
 		return options, fmt.Errorf("unsupported platform: %s", options.Platform)
 	}
 	if options.WebSocketPlatform != "none" && options.WebSocketPlatform != "gorilla" {
 		return options, fmt.Errorf("unsupported WebSocket platform: %s", options.WebSocketPlatform)
 	}
-	if options.WebSocketPlatform == "gorilla" && options.Platform != "echo" {
-		return options, fmt.Errorf("--websocket-platform gorilla requires --platform echo")
+	if options.WebSocketPlatform == "gorilla" && options.Platform != "echo" && options.Platform != "nethttp" {
+		return options, fmt.Errorf("--websocket-platform gorilla requires --platform echo or nethttp")
 	}
 	if err := validateAssemblySelection(options.Platform, options.Events, options.Validator); err != nil {
 		return options, err
@@ -126,7 +126,7 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 		"spine.toml": projectConfigTemplate(config),
 		".gitignore": ".env\nbin/\ncoverage.out\n",
 	}
-	if options.Layout == layeredLayout && options.Platform == "echo" {
+	if options.Layout == layeredLayout && (options.Platform == "echo" || options.Platform == "nethttp") {
 		files["src/controller/health_controller.go"] = layeredHealthController
 		files["src/route/route.go"] = strings.ReplaceAll(layeredHealthRoute, "{{MODULE}}", options.Module)
 	}
