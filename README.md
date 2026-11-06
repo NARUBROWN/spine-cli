@@ -424,3 +424,23 @@ git diff --check
 CLI의 Preview, RC, Production 전환과 공개 설치 검증은 [릴리스 운영 절차](release/README.md)를 참고하세요. 모든 단계에서 태그를 발행하고 GitHub Release는 Production에서만 만듭니다. 공개 설치는 실제 설치 버전을 표시하고 로컬 빌드는 개발 버전으로 구분합니다.
 
 `run`과 `dev`의 종료 대기는 기본 15초입니다. `SPINE_CLI_SHUTDOWN_TIMEOUT=30s`처럼 설정할 수 있습니다. 생성 HTTP 앱은 정상 종료를 활성화하며 기존 앱에는 `EnableGracefulShutdown: true`를 직접 적용해야 합니다. Windows의 자식 종료는 강제 종료 fallback을 사용합니다.
+
+## 컨트롤러 경로 등록 후보
+
+현재 CLI 소스는 코어 `v0.7.0-preview.5` 이상을 선택한 layered 프로젝트에서 `RegisterRoutes(*api.Registry)`를 생성합니다. 공개 Preview가 아직 이 코어를 포함하지 않으면 기존 생성 방식을 사용합니다. 소스 구현과 공개 설치 지원은 별도로 확인하세요.
+
+`new`는 해당 코어에서 `route.go` 없이 Health 컨트롤러와 구체 생성자 등록을 만듭니다. `g controller`와 `g resource`도 같은 계약을 사용합니다. 기존 메서드를 대상으로 한 `g route --handler package/path:Type.Method`는 사용자 본문을 보존하고 같은 컨트롤러의 `RegisterRoutes` 안에 typed callback을 추가합니다. 새 방식에서는 비공개 핸들러 메서드도 같은 패키지에서 호출할 수 있습니다. dry-run의 파일, diff와 base_hash를 검토한 뒤 if-match로 적용합니다. 이전 코어와 수동 app.Route 프로젝트는 기존 방식을 유지합니다.
+
+정적 검사는 실제 Go 타입으로 인터페이스 구현, DI 반환 타입, 상수 경로와 Registry를 전달하는 보조 호출을 해석합니다. 함수 리터럴의 업무 코드를 등록 코드로 실행하지 않으며 생성자와 init도 실행하지 않습니다. 동적 경로와 함수 값, 재귀 및 미확정 조건은 분석 불완전으로 진단합니다. 선택한 core의 pkg/api와 의존성이 설치돼 있어야 합니다.
+
+`input.Path[T]`, `input.Query[T]`, `input.Body[T]`의 payload와 입력 키를 정적 계약과 OpenAPI에 반영합니다. Path와 Query의 기본 lowerCamel 이름은 명시 source 태그보다 우선하지 않습니다. 수동 검증 규칙과 동적 응답 상태는 추측하지 않습니다.
+
+새 컨트롤러의 `--source runtime` 내보내기는 Prepare를 자동 실행하지 않습니다. 수집 전에는 명시적 오류와 정적 내보내기 안내를 반환합니다. 실제 준비가 필요한 앱에서는 호출자가 `spine.DescribePreparedHTTP`를 사용합니다.
+
+소스 후보 설치, 실제 HTTP와 정적 계약을 함께 검증하려면 짝이 맞는 코어 체크아웃을 지정합니다.
+
+```sh
+SPINE_CONTROLLER_CORE_SOURCE=/path/to/spine go test ./internal/cli -run TestControllerCandidateEndToEnd -count=1
+```
+
+이 검사는 로컬 소스 조합 검증이며 공개 태그 조합 검증을 대체하지 않습니다.

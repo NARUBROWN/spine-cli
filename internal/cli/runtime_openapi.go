@@ -50,6 +50,9 @@ func executeRuntimeOpenAPIContext(ctx context.Context) ([]byte, error) {
 		if message == "" {
 			message = err.Error()
 		}
+		if strings.Contains(message, "controller routes require a prepared application") {
+			return nil, fmt.Errorf("controller routes are not collected: use --source static or DescribePreparedHTTP on an explicitly prepared application; runtime export did not call Prepare or execute DI constructors")
+		}
 		return nil, fmt.Errorf("runtime OpenAPI export failed: %s\nSpine v0.7.0-preview.1 or compatible DescribeHTTP and pkg/openapi APIs are required. Use --source static for offline source export", message)
 	}
 	marker := bytes.LastIndex(stdout.Bytes(), []byte("\n"+runtimeOpenAPIMarker))

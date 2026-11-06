@@ -46,14 +46,15 @@ type contractRegistration struct {
 }
 
 type httpRegistration struct {
-	schemaSource string
-	Method       string             `json:"method"`
-	Path         string             `json:"path"`
-	Handler      string             `json:"handler"`
-	Interceptors []string           `json:"interceptors,omitempty"`
-	Parameters   []handlerParameter `json:"parameters,omitempty"`
-	Returns      []string           `json:"returns,omitempty"`
-	Source       string             `json:"source"`
+	delegatedMethod string
+	schemaSource    string
+	Method          string             `json:"method"`
+	Path            string             `json:"path"`
+	Handler         string             `json:"handler"`
+	Interceptors    []string           `json:"interceptors,omitempty"`
+	Parameters      []handlerParameter `json:"parameters,omitempty"`
+	Returns         []string           `json:"returns,omitempty"`
+	Source          string             `json:"source"`
 }
 
 type namedRegistration struct {
@@ -65,14 +66,23 @@ type namedRegistration struct {
 	Source       string             `json:"source"`
 }
 
+type handlerInputField struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	source string
+}
+
 type handlerParameter struct {
-	Name       string   `json:"name"`
-	Type       string   `json:"type"`
-	Binding    string   `json:"binding"`
-	Key        string   `json:"key,omitempty"`
-	Keys       []string `json:"keys,omitempty"`
-	SourceDTO  bool     `json:"source_dto,omitempty"`
-	Deprecated bool     `json:"deprecated,omitempty"`
+	Payload       string              `json:"payload_type,omitempty"`
+	InputFields   []handlerInputField `json:"fields,omitempty"`
+	payloadSource string
+	Name          string   `json:"name"`
+	Type          string   `json:"type"`
+	Binding       string   `json:"binding"`
+	Key           string   `json:"key,omitempty"`
+	Keys          []string `json:"keys,omitempty"`
+	SourceDTO     bool     `json:"source_dto,omitempty"`
+	Deprecated    bool     `json:"deprecated,omitempty"`
 }
 
 type resourceRegistration struct {
@@ -98,11 +108,12 @@ type contractDiagnostic struct {
 }
 
 type contractInspector struct {
-	contract  *applicationContract
-	module    string
-	seen      map[string]bool
-	qualified bool
-	sources   layoutSources
+	contract           *applicationContract
+	module             string
+	seen               map[string]bool
+	qualified          bool
+	sources            layoutSources
+	controllerHandlers map[string]staticHandlerSignature
 }
 
 func inspectApplication() (applicationContract, error) {
@@ -135,7 +146,21 @@ func inspectApplication() (applicationContract, error) {
 		inspector.inspectHTTPAdapter(config, file, fset, function, index)
 	}
 	inspector.resolveConstructorDependencies()
+	priorRoutes := len(inspector.contract.HTTP)
+	inspector.inspectControllerRoutes()
 	inspector.resolveHandlerSignatures()
+	if len(inspector.contract.HTTP) > priorRoutes {
+		diagnostics := inspector.contract.Diagnostics[:0]
+		for _, diagnostic := range inspector.contract.Diagnostics {
+			switch diagnostic.Code {
+			case "HTTP_ROUTE_DUPLICATE", "HTTP_ROUTE_AMBIGUOUS", "CONSUMER_DUPLICATE", "WEBSOCKET_DUPLICATE":
+				continue
+			}
+			diagnostics = append(diagnostics, diagnostic)
+		}
+		inspector.contract.Diagnostics = diagnostics
+		inspector.addDuplicateDiagnostics()
+	}
 	inspector.sort()
 	inspector.contract.Complete = !contractHasErrors(*inspector.contract)
 	return *inspector.contract, nil
@@ -473,6 +498,9 @@ type staticHandlerSignature struct {
 
 func (i *contractInspector) resolveHandlerSignatures() {
 	signatures := map[string][]staticHandlerSignature{}
+	for key, signature := range i.controllerHandlers {
+		signatures[key] = []staticHandlerSignature{signature}
+	}
 	handlerSources := layoutSources{}
 	collect := func(path string, file *ast.File, fset *token.FileSet) {
 		source := &layoutSource{Path: path, File: file, Fset: fset, Package: filepath.ToSlash(filepath.Dir(path))}

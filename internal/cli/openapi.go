@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -135,6 +136,12 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 		var parameters []any
 		var unresolved []string
 		for _, parameter := range route.Parameters {
+			if parameter.SourceDTO && len(parameter.InputFields) > 0 {
+				for _, field := range parameter.InputFields {
+					parameters = append(parameters, map[string]any{"name": field.Name, "in": parameter.Binding, "required": parameter.Binding == "path", "schema": catalog.schema(field.Type, field.source)})
+				}
+				continue
+			}
 			switch parameter.Binding {
 			case "path":
 				if parameter.SourceDTO {
@@ -147,8 +154,12 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 					"name": parameter.Key, "in": "path", "required": true, "schema": pathParameterSchema(parameter.Type),
 				})
 			case "body":
+				payload, source := parameter.Type, route.schemaSource
+				if parameter.Payload != "" {
+					payload, source = parameter.Payload, parameter.payloadSource
+				}
 				operation["requestBody"] = map[string]any{
-					"content": map[string]any{"application/json": map[string]any{"schema": catalog.schema(parameter.Type, route.schemaSource)}},
+					"content": map[string]any{"application/json": map[string]any{"schema": catalog.schema(payload, source)}},
 				}
 			case "query", "header", "value":
 				unresolved = append(unresolved, parameter.Name+":"+parameter.Type+"@"+parameter.Binding)
@@ -193,6 +204,10 @@ func openAPIPath(path string) string {
 }
 
 func operationID(route httpRegistration) string {
+	if strings.Contains(route.Handler, ".RegisterRoutes[") {
+		digest := sha256.Sum256([]byte(route.Method + " " + route.Path))
+		return fmt.Sprintf("%s_%x", strings.ToLower(route.Method), digest[:8])
+	}
 	var result strings.Builder
 	for _, character := range route.Handler {
 		if unicode.IsLetter(character) || unicode.IsDigit(character) {

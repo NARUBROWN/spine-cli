@@ -127,8 +127,12 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 		".gitignore": ".env\nbin/\ncoverage.out\n",
 	}
 	if options.Layout == layeredLayout && (options.Platform == "echo" || options.Platform == "nethttp") {
-		files["src/controller/health_controller.go"] = layeredHealthController
-		files["src/route/route.go"] = strings.ReplaceAll(layeredHealthRoute, "{{MODULE}}", options.Module)
+		if controllerRoutesScaffold(options) {
+			files["src/controller/health_controller.go"] = registeredHealthController
+		} else {
+			files["src/controller/health_controller.go"] = layeredHealthController
+			files["src/route/route.go"] = strings.ReplaceAll(layeredHealthRoute, "{{MODULE}}", options.Module)
+		}
 	}
 	if len(platformBindings(options)) > 0 {
 		setup := descriptorTestSetup(options)

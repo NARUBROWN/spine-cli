@@ -1107,3 +1107,14 @@ CLI v0.4.2의 platform-contracts-v0.6.5 레시피는 Spine v0.6.5와 각 독립 
 운영 절차와 초기 전환은 `release/README.md`를 따른다. 모든 단계에서 태그를 발행하고 GitHub Release는 Production에서만 만든다. Preview와 RC의 승격은 성공한 Actions 실행과 태그별 manifest artifact로 검증한다. 공개 발행 전 태그, 계획과 릴리스 노트 초안을 검토하고 승인한다. 소스 트리나 생성 레시피가 바뀌면 새 Preview에서 검증한다. `SPINE_CLI_SHUTDOWN_TIMEOUT`은 run과 dev의 종료 대기 시간이며 기본값은 15초다.
 
 Preview CLI 설치: `go install github.com/NARUBROWN/spine-cli/cmd/spine@preview`. `@preview`는 브랜치 HEAD를 선택하며 실제 버전은 `spine version`으로 확인한다.
+
+## Controller route source candidate
+
+Core >=v0.7.0-preview.5 selects controller-owned RegisterRoutes scaffolds; earlier cores retain route.go generation.
+The schema exposes controller_routes and capabilities list contract.controller-routes/generation.controller-routes.
+Static analysis uses installed Go type information, aliases, constant paths and Registry forwarding helpers without running init or constructors.
+Dynamic paths/targets, recursive or asynchronous registration and unknown conditions fail completeness.
+Path/Query/Body struct payloads and wire names are shared by route validation and static OpenAPI.
+Use dry-run/diff/base_hash and if-match for controller and route AST changes. No user route.go is deleted automatically.
+Runtime OpenAPI for uncollected controllers fails explicitly and never invokes Prepare; use static export or explicit DescribePreparedHTTP.
+Candidate source E2E is TestControllerCandidateEndToEnd with SPINE_CONTROLLER_CORE_SOURCE. Public installation still needs matching published tags.

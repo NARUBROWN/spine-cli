@@ -14,7 +14,7 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 		return fmt.Errorf("handler requires package/path:Type.Method")
 	}
 	typ, method, ok := strings.Cut(handler, ".")
-	if !ok || !token.IsIdentifier(method) || !ast.IsExported(method) {
+	if !ok || !token.IsIdentifier(method) || !ast.IsExported(method) && !controllerRoutesProject() {
 		return fmt.Errorf("handler requires package/path:Type.Method")
 	}
 	dir, name, err := parseTypeReference(pkg + ":" + typ)
@@ -22,6 +22,8 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 		return err
 	}
 	found := 0
+	var handlerSource *layoutSource
+	var handlerFunction *ast.FuncDecl
 	for _, s := range p.Sources {
 		if s.Package != dir {
 			continue
@@ -35,6 +37,7 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 				continue
 			}
 			found++
+			handlerSource, handlerFunction = s, f
 			if f.Type.TypeParams != nil {
 				return fmt.Errorf("generic handlers are unsupported")
 			}
@@ -72,6 +75,9 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 	}
 	if err = p.registerConstructor(dir, dependency.Factory); err != nil {
 		return err
+	}
+	if controllerRoutesProject() {
+		return p.addControllerRoute(r, dir, name, method, handlerSource, handlerFunction)
 	}
 	path := layeredRoutePath
 	s := p.Sources[path]

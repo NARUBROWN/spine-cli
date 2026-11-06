@@ -217,7 +217,7 @@ func runLayeredGenerate(args []string, config projectConfig, out, errOut io.Writ
 	registered := p.Register
 	details := p.details(r)
 	if r.JSON {
-		return encodeIndentedJSON(map[string]any{"layout": layeredLayout, "kind": r.Kind, "name": r.Name.Name.Type, "group": r.Name.Group, "roles": generationRoles(), "files": files, "registered": registered, "dry_run": r.Options.DryRun, "base_hash": baseHash, "inputs_hash": inputHash, "changes": plan, "diff": diff, "types": details.Types, "registrations": details.Registrations, "routes": details.Routes}, out, errOut)
+		return encodeIndentedJSON(map[string]any{"layout": layeredLayout, "kind": r.Kind, "name": r.Name.Name.Type, "group": r.Name.Group, "roles": projectGenerationRoles(), "files": files, "registered": registered, "dry_run": r.Options.DryRun, "base_hash": baseHash, "inputs_hash": inputHash, "changes": plan, "diff": diff, "types": details.Types, "registrations": details.Registrations, "routes": details.Routes}, out, errOut)
 	}
 	if r.Options.DryRun {
 		fmt.Fprintf(out, "Would generate %s %s (%s)\n%s", r.Kind, r.Name.Name.Type, layeredLayout, diff)
@@ -315,6 +315,12 @@ func (p *layeredPlanner) addComponent(kind string, name generationName, fields [
 		fieldsUsed[dep.Field] = true
 		deps = append(deps, dep)
 	}
+	registered := kind == "controller" && controllerRoutesProject()
+	apiAlias := ""
+	if registered {
+		apiAlias = chooseAlias(imports, "api", spineImportPath+"/pkg/api")
+		imports[apiAlias] = spineImportPath + "/pkg/api"
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "package %s\n\n", pkg)
 	writeImports(&b, imports)
@@ -335,6 +341,9 @@ func (p *layeredPlanner) addComponent(kind string, name generationName, fields [
 		fmt.Fprintf(&b, "%s: %s,", dep.Field, dep.Field)
 	}
 	b.WriteString("}\n}\n")
+	if registered {
+		fmt.Fprintf(&b, "\nvar _ %s.Controller = (*%s)(nil)\nfunc (c *%s) RegisterRoutes(r *%s.Registry) {}\n", apiAlias, typeName, typeName, apiAlias)
+	}
 	if err = p.put(path, b.String(), false); err != nil {
 		return err
 	}
