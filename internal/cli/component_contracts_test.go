@@ -52,11 +52,11 @@ func(*fixtureApp)Constructor(...any){}
 }
 
 func TestInterceptorContractRejectsInvalidOrMissingDefinition(t *testing.T) {
-	for _, tc := range []struct{ name, contract, reference, code string }{
+	for _, tc := range []struct{ name, contract, reference, reason string }{
 		{"interface", "type Interceptor interface{Accept()}", "Interceptor", ""},
-		{"struct", "type Interceptor struct{}", "Interceptor", "COMPONENT_CONTRACT_INVALID"},
-		{"missing definition", "type Placeholder struct{}", "Placeholder", "COMPONENT_CONTRACT_INVALID"},
-		{"unloaded package", "", "", "COMPONENT_CONTRACT_INVALID"},
+		{"struct", "type Interceptor struct{}", "Interceptor", "not an interface"},
+		{"missing definition", "type Placeholder struct{}", "Placeholder", "does not provide core.Interceptor"},
+		{"unloaded package", "", "", "package is not loaded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := `func(*UserController)RegisterRoutes(r *api.Registry){r.POST(endpoint,func(a input.Body[DTO])httpx.Response[DTO]{return httpx.Response[DTO]{Body:DTO{Name:a.Name}}})}
@@ -89,13 +89,13 @@ func(*ProbeInterceptor)Accept(){}
 			inspector.inspectControllerRoutes()
 			found := false
 			for _, diagnostic := range inspector.contract.Diagnostics {
-				found = found || diagnostic.Code == tc.code
-				if tc.code == "" && diagnostic.Severity == "error" {
+				found = found || diagnostic.Code == "COMPONENT_CONTRACT_INVALID" && strings.Contains(diagnostic.Message, tc.reason)
+				if tc.reason == "" && diagnostic.Severity == "error" {
 					t.Fatal(diagnostic)
 				}
 			}
-			if tc.code != "" && !found {
-				t.Fatalf("missing %s: %+v", tc.code, inspector.contract.Diagnostics)
+			if tc.reason != "" && !found {
+				t.Fatalf("missing diagnostic for %q: %+v", tc.reason, inspector.contract.Diagnostics)
 			}
 		})
 	}
