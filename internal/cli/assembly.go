@@ -137,6 +137,9 @@ func assemblyApplication(options newProjectOptions) (string, error) {
 		}
 		if options.Layout == layeredLayout {
 			fmt.Fprintf(&source, "controller %q\n", options.Module+"/src/controller")
+			if controllerRoutesScaffold(options) {
+				fmt.Fprintf(&source, "%q\n", constructorImportPath)
+			}
 			if !controllerRoutesScaffold(options) {
 				fmt.Fprintf(&source, "route %q\n", options.Module+"/src/route")
 			}
@@ -213,7 +216,7 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 	if options.Platform == "echo" || options.Platform == "nethttp" {
 		if options.Layout == layeredLayout {
 			if controllerRoutesScaffold(options) {
-				source.WriteString("app.ControllerConstructor(&controller.HealthController{})\n")
+				source.WriteString("app.Constructor(\nconstructor.Controller(&controller.HealthController{}),\n)\n")
 			} else {
 				source.WriteString("app.Constructor(controller.NewHealthController)\n")
 			}

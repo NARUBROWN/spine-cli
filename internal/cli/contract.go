@@ -234,22 +234,31 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 		registrationCall := false
 		if selector, ok := directAppCall(call, appName); ok {
 			switch selector {
-			case "Constructor", "ControllerConstructor", "ServiceConstructor", "RepositoryConstructor", "InterceptorConstructor":
+			case "Constructor":
 				registrationCall = true
 				for _, argument := range call.Args {
+					role, value, marked := componentRoleArgument(argument, imports)
+					if marked {
+						if value == nil {
+							i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role markers require exactly one object prototype or Custom factory.", source)
+							continue
+						}
+						argument = value
+					}
 					target, object := i.objectConstructorTarget(argument, file, fset)
-					role := ""
-					if selector != "Constructor" {
-						role = strings.TrimSuffix(selector, "Constructor")
-					} else if object {
+					if !marked && object {
 						role = "Custom"
 					}
 					if !object {
 						target = i.registrationExpression(argument, file, fset)
+						if marked {
+							pkg := modulePackage(i.module, filepath.ToSlash(filepath.Dir(fset.Position(file.Package).Filename)))
+							target = qualifiedExpression(argument, imports, pkg, fset)
+						}
 					}
 					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: target, Source: source, Role: role, object: object})
-					if role != "" && !object {
-						i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role constructors require a statically known pointer-to-struct prototype.", source)
+					if role != "" && role != "Custom" && !object {
+						i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role markers require a statically known pointer-to-struct prototype; only Custom accepts factory functions.", source)
 					}
 				}
 				if packageName, importPath, ok := directResourceConstructor(call, imports, i.module); ok {
@@ -490,7 +499,7 @@ func (i *contractInspector) resolveConstructorDependencies() {
 	})
 	for index := range i.contract.Constructors {
 		constructor := &i.contract.Constructors[index]
-		if constructor.object {
+		if constructor.object || constructor.Role != "" {
 			continue
 		}
 		matches := signatures[constructor.Target]
@@ -995,7 +1004,7 @@ func containsAppContractCall(root ast.Node, appName string) bool {
 		}
 		if selector, direct := directAppCall(call, appName); direct {
 			switch selector {
-			case "Constructor", "ControllerConstructor", "ServiceConstructor", "RepositoryConstructor", "InterceptorConstructor", "Route", "Interceptor", "InterceptorFor":
+			case "Constructor", "Route", "Interceptor", "InterceptorFor":
 				found = true
 				return false
 			}

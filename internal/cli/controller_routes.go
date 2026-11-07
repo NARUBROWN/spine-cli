@@ -42,9 +42,11 @@ func (i *contractInspector) inspectControllerRoutes() {
 	}
 	needed := controllerRoutesVersion(selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, spineImportPath))
 	importedAPI := false
+	hasComponents := false
 	for _, provider := range i.contract.Constructors {
-		if provider.object {
+		if provider.object || provider.Role != "" {
 			needed = true
+			hasComponents = true
 		}
 	}
 	overlay := map[string][]byte{}
@@ -84,7 +86,7 @@ func (i *contractInspector) inspectControllerRoutes() {
 	packages.Visit(loaded, func(pkg *packages.Package) bool { all[pkg.PkgPath] = pkg; return true }, nil)
 	apiPackage := all[spineImportPath+"/pkg/api"]
 	if apiPackage == nil || apiPackage.Types == nil {
-		if !importedAPI {
+		if !importedAPI && !hasComponents {
 			return
 		}
 		i.controllerDiagnostic("CONTROLLER_TYPECHECK_UNRESOLVED", "The selected core must provide pkg/api. Install project dependencies before controller inspection.", "")
@@ -134,7 +136,7 @@ func (i *contractInspector) inspectControllerRoutes() {
 		provider := &i.contract.Constructors[index]
 		output, signature, problem := typedComponentConstructor(*provider, all)
 		if problem != "" {
-			if provider.object {
+			if provider.object || provider.Role != "" {
 				i.controllerDiagnostic("COMPONENT_CONSTRUCTOR_INVALID", problem, provider.Source)
 			}
 			continue
@@ -144,7 +146,7 @@ func (i *contractInspector) inspectControllerRoutes() {
 		}
 		outputs[index] = output
 		signatures[index] = signature
-		if provider.object {
+		if provider.object || provider.Role != "" {
 			provider.Dependencies = []string{}
 			for n := 0; n < signature.Params().Len(); n++ {
 				provider.Dependencies = append(provider.Dependencies, componentTypeName(signature.Params().At(n).Type()))
@@ -167,7 +169,7 @@ func (i *contractInspector) inspectControllerRoutes() {
 			}
 		}
 
-		if provider.object && provider.Role != "Controller" {
+		if provider.Role != "" && provider.Role != "Controller" {
 			continue
 		}
 		if _, abstract := output.Underlying().(*types.Interface); abstract && types.Implements(output, contract) {

@@ -11,6 +11,40 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+const constructorImportPath = spineImportPath + "/pkg/constructor"
+
+// componentRoleArgument는 공식 역할 표식을 import 경로로 구분합니다.
+// 같은 이름의 사용자 함수나 지역 변수는 표식으로 취급하지 않습니다.
+func componentRoleArgument(expression ast.Expr, imports map[string]string) (string, ast.Expr, bool) {
+	for {
+		parenthesized, ok := expression.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		expression = parenthesized.X
+	}
+	call, ok := expression.(*ast.CallExpr)
+	if !ok {
+		return "", expression, false
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return "", expression, false
+	}
+	alias, ok := selector.X.(*ast.Ident)
+	if !ok || alias.Obj != nil || imports[alias.Name] != constructorImportPath {
+		return "", expression, false
+	}
+	switch selector.Sel.Name {
+	case "Custom", "Repository", "Service", "Controller", "Interceptor":
+		if len(call.Args) == 1 && !call.Ellipsis.IsValid() {
+			return selector.Sel.Name, call.Args[0], true
+		}
+		return selector.Sel.Name, nil, true
+	}
+	return "", expression, false
+}
+
 // objectConstructorTarget는 명시적 타입 표식만 읽고 임의 객체 식을 실행하지 않습니다.
 func (i *contractInspector) objectConstructorTarget(expression ast.Expr, file *ast.File, fset *token.FileSet) (string, bool) {
 	for {
@@ -68,6 +102,9 @@ func typedComponentConstructor(provider contractRegistration, all map[string]*pa
 	if !provider.object {
 		signature, ok := object.Type().(*types.Signature)
 		if !ok || signature.Results().Len() != 1 {
+			if provider.Role != "" {
+				return nil, nil, "component factory must return exactly one value: " + target
+			}
 			return nil, nil, ""
 		}
 		return types.Unalias(signature.Results().At(0).Type()), signature, ""
@@ -93,7 +130,7 @@ func componentTypeName(t types.Type) string {
 func validateTypedComponentGraph(i *contractInspector, outputs map[int]types.Type, signatures map[int]*types.Signature) {
 	enabled := false
 	for _, p := range i.contract.Constructors {
-		enabled = enabled || p.object
+		enabled = enabled || p.object || p.Role != ""
 	}
 	if !enabled {
 		return

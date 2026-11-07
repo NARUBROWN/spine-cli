@@ -13,6 +13,22 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 - HTTP, DI, interceptor, consumer, WebSocket 실행 계약 검사
 - 계약 검증, snapshot/diff, OpenAPI와 AsyncAPI 내보내기
 
+## 역할별 생성자 등록 후보
+
+코어 `v0.7.0-preview.5` 후보를 대상으로 하는 생성기는 다섯 역할을 하나의 `app.Constructor(...)` 호출에 모읍니다. `constructor`의 import 경로는 `github.com/NARUBROWN/spine/pkg/constructor`입니다.
+
+```go
+app.Constructor(
+    constructor.Custom(database.NewBunDB),
+    constructor.Repository(&repository.UserRepository{}),
+    constructor.Service(&service.UserService{}),
+    constructor.Controller(&controller.UserController{}),
+    constructor.Interceptor(&interceptor.TxInterceptor{}),
+)
+```
+
+`Custom`은 기존 생성자 함수나 객체 표식을 받으며 나머지 역할은 객체 표식을 받습니다. CLI는 역할 계약과 의존성을 정적으로 검사합니다. 이전 코어의 생성 방식은 유지하며, 후보 소스 검증이 공개 코어와 CLI 태그의 설치 검증을 뜻하지는 않습니다.
+
 ## 권장 환경과 설치
 
 - CLI와 검증기 없는 생성 앱: Go 1.25.5 이상

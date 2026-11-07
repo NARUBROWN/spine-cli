@@ -78,7 +78,24 @@ func TestControllerCandidateEndToEnd(t *testing.T) {
 	if !strings.Contains(contract.HTTP[0].Handler, "RegisterRoutes") {
 		t.Fatal(contract.HTTP)
 	}
+	applicationPath := filepath.Join(root, "internal/application/application.go")
+	application, err := os.ReadFile(applicationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliased := strings.ReplaceAll(string(application), "constructor.", "makers.")
+	aliased = strings.Replace(aliased, `"github.com/NARUBROWN/spine/pkg/constructor"`, `makers "github.com/NARUBROWN/spine/pkg/constructor"`, 1)
+	if err := os.WriteFile(applicationPath, []byte(aliased), 0644); err != nil {
+		t.Fatal(err)
+	}
 	layeredGenerate(t, "controller", "audit")
+	application, err = os.ReadFile(applicationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(application), "app.Constructor(") != 1 || !strings.Contains(string(application), "makers.Controller(&controller.AuditController{})") || strings.Contains(string(application), "), makers.Controller(") {
+		t.Fatalf("generation did not retain one aliased role registration block:\n%s", application)
+	}
 	handlers := `package controller
  import("context";models "github.com/NARUBROWN/spine/pkg/httpx")
  type AuditBody struct{Name string ` + "`json:\"name\"`" + `}
