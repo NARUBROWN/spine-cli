@@ -136,9 +136,11 @@ func (i *contractInspector) inspectControllerRoutes() {
 		provider := &i.contract.Constructors[index]
 		output, signature, problem := typedComponentConstructor(*provider, all)
 		if problem != "" {
+			code := "CONSTRUCTOR_SIGNATURE_UNRESOLVED"
 			if provider.object || provider.Role != "" {
-				i.controllerDiagnostic("COMPONENT_CONSTRUCTOR_INVALID", problem, provider.Source)
+				code = "COMPONENT_CONSTRUCTOR_INVALID"
 			}
+			i.controllerDiagnostic(code, problem, provider.Source)
 			continue
 		}
 		if output == nil {
@@ -163,9 +165,16 @@ func (i *contractInspector) inspectControllerRoutes() {
 					}
 				}
 			}
-			if required != nil && !types.Implements(output, required.Underlying().(*types.Interface)) {
-				i.controllerDiagnostic("COMPONENT_CONTRACT_INVALID", "Component does not implement its "+provider.Role+" contract: "+provider.Output, provider.Source)
-				continue
+			if required != nil {
+				requiredInterface, ok := required.Underlying().(*types.Interface)
+				if !ok {
+					i.controllerDiagnostic("COMPONENT_CONTRACT_INVALID", "The selected core's "+provider.Role+" contract is not an interface.", provider.Source)
+					continue
+				}
+				if !types.Implements(output, requiredInterface) {
+					i.controllerDiagnostic("COMPONENT_CONTRACT_INVALID", "Component does not implement its "+provider.Role+" contract: "+provider.Output, provider.Source)
+					continue
+				}
 			}
 		}
 
@@ -197,6 +206,8 @@ func (i *contractInspector) controllerDiagnostic(code, message, source string) {
 	hint := "Use statically resolved Registry calls and typed callbacks; inspect installed project dependencies. User code is never executed to infer routes."
 	if strings.HasPrefix(code, "COMPONENT_") {
 		hint = "Implement Constructor(dependencies...) *Self, satisfy the selected role contract and register unique dependencies. User code is never executed for inspection."
+	} else if strings.HasPrefix(code, "CONSTRUCTOR_") {
+		hint = "Register a statically resolved constructor function with one return value. User code is never executed for inspection."
 	}
 	i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: code, Message: message, Source: source, Hint: hint})
 }

@@ -381,8 +381,11 @@ spine generate|g <domain|dto|repository|service|controller|resource|route|consum
 | route | `src/route/route.go` | HTTP 등록 |
 | application | `internal/application/` | 생성자와 Register 호출 연결 |
 
-`spine schema --json`의 `generation_roles`와 `spine context --json`의 `generation_roles`는
-같은 정의를 사용한다. context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
+`spine schema --json`의 `generation_roles`는 프로젝트와 무관한 기본값이다.
+`spine context --json`의 `generation_roles`는 선택한 코어와 레이아웃을 반영한다.
+컨트롤러 등록 API를 지원하는 layered 프로젝트의 route 경로는 `src/controller`이며,
+기존 버전의 기본 경로는 `src/route/route.go`다. 프로젝트 변경에는 context의 값을 우선한다.
+context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
 `role`, `group`, `package`, `type`으로 현재 구성 요소를 찾는다. `package`는 모듈 경로까지 포함한다.
 route와 application은 고정 연결 위치이며 composition은 설정의 `composition`을 따른다.
 

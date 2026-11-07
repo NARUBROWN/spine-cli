@@ -82,8 +82,39 @@ func (i *contractInspector) objectConstructorTarget(expression ast.Expr, file *a
 	return qualifiedExpression(payload, imports, pkg, fset) + ".Constructor", true
 }
 
+// legacyFactoryTarget은 공개 target 표현을 유지하며 타입 검사에 쓸 함수 이름만 한정합니다.
+// 지역 변수와 패키지 별칭을 가린 식은 같은 이름의 패키지 함수로 추측하지 않습니다.
+func legacyFactoryTarget(expression ast.Expr, file *ast.File, fset *token.FileSet, module string) string {
+	for {
+		parenthesized, ok := expression.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		expression = parenthesized.X
+	}
+	imports := importPathsByAlias(file)
+	switch value := expression.(type) {
+	case *ast.Ident:
+		if value.Obj != nil && value.Obj.Kind != ast.Fun {
+			return ""
+		}
+	case *ast.SelectorExpr:
+		alias, ok := value.X.(*ast.Ident)
+		if !ok || alias.Obj != nil || imports[alias.Name] == "" {
+			return ""
+		}
+	default:
+		return ""
+	}
+	pkg := modulePackage(module, filepath.ToSlash(filepath.Dir(fset.Position(file.Package).Filename)))
+	return qualifiedExpression(expression, imports, pkg, fset)
+}
+
 func typedComponentConstructor(provider contractRegistration, all map[string]*packages.Package) (types.Type, *types.Signature, string) {
 	target := provider.Target
+	if provider.typedTarget != "" {
+		target = provider.typedTarget
+	}
 	if provider.object {
 		target = strings.TrimSuffix(target, ".Constructor")
 	}
@@ -102,10 +133,7 @@ func typedComponentConstructor(provider contractRegistration, all map[string]*pa
 	if !provider.object {
 		signature, ok := object.Type().(*types.Signature)
 		if !ok || signature.Results().Len() != 1 {
-			if provider.Role != "" {
-				return nil, nil, "component factory must return exactly one value: " + target
-			}
-			return nil, nil, ""
+			return nil, nil, "component factory must return exactly one value: " + target
 		}
 		return types.Unalias(signature.Results().At(0).Type()), signature, ""
 	}

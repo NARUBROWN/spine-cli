@@ -42,6 +42,7 @@ type contractRegistration struct {
 	Role         string `json:"role,omitempty"`
 	Output       string `json:"output,omitempty"`
 	object       bool
+	typedTarget  string
 	Target       string   `json:"target"`
 	Scope        string   `json:"scope,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
@@ -256,7 +257,11 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 							target = qualifiedExpression(argument, imports, pkg, fset)
 						}
 					}
-					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: target, Source: source, Role: role, object: object})
+					typedTarget := target
+					if !object && !marked && !i.qualified {
+						typedTarget = legacyFactoryTarget(argument, file, fset, i.module)
+					}
+					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: target, Source: source, Role: role, object: object, typedTarget: typedTarget})
 					if role != "" && role != "Custom" && !object {
 						i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role markers require a statically known pointer-to-struct prototype; only Custom accepts factory functions.", source)
 					}

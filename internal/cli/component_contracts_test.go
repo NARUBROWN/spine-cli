@@ -5,9 +5,93 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLegacyFactoryParticipatesInTypedDependencyGraph(t *testing.T) {
+	for _, tc := range []struct{ name, factory, registration, code string }{
+		{"registered", `func NewDTO()*DTO{panic("must not run")}`, `app.Constructor(NewDTO,&UserController{})`, ""},
+		{"wrong dependency", `func NewDTO()*PathDTO{panic("must not run")}`, `app.Constructor(NewDTO,&UserController{})`, "COMPONENT_DEPENDENCIES_INVALID"},
+		{"invalid factory", `func NewDTO()(*DTO,error){panic("must not run")}`, `app.Constructor(NewDTO,&UserController{})`, "CONSTRUCTOR_SIGNATURE_UNRESOLVED"},
+		{"shadowed factory", `func NewDTO()*DTO{panic("must not run")}`, `NewDTO:=func()*PathDTO{panic("must not run")};app.Constructor(NewDTO,&UserController{})`, "CONSTRUCTOR_SIGNATURE_UNRESOLVED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `func(*UserController)Constructor(*DTO)*UserController{panic("must not run")}
+func(*UserController)RegisterRoutes(r *api.Registry){r.POST(endpoint,func(a input.Body[DTO])httpx.Response[DTO]{return httpx.Response[DTO]{Body:DTO{Name:a.Name}}})}
+type fixtureApp struct{}
+func(*fixtureApp)Constructor(...any){}
+` + tc.factory + "\nfunc Configure(){app:=&fixtureApp{};" + tc.registration + "}"
+			inspector := controllerFixture(t, body)
+			inspector.qualified = false
+			inspector.contract.Constructors = nil
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "controller.go", nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inspector.inspectFile(file, fset, file.Decls[len(file.Decls)-1].(*ast.FuncDecl).Body, "app")
+			inspector.resolveConstructorDependencies()
+			inspector.inspectControllerRoutes()
+			if inspector.contract.Constructors[0].Target != "NewDTO" {
+				t.Fatal("legacy public target changed", inspector.contract.Constructors)
+			}
+			found := false
+			for _, diagnostic := range inspector.contract.Diagnostics {
+				found = found || diagnostic.Code == tc.code
+				if tc.code == "" && diagnostic.Severity == "error" {
+					t.Fatal(diagnostic)
+				}
+			}
+			if tc.code != "" && !found {
+				t.Fatalf("missing %s: %+v", tc.code, inspector.contract.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestInterceptorContractRejectsNonInterfaceWithoutPanic(t *testing.T) {
+	for _, tc := range []struct{ name, contract, code string }{
+		{"interface", "type Interceptor interface{Accept()}", ""},
+		{"struct", "type Interceptor struct{}", "COMPONENT_CONTRACT_INVALID"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inspector := controllerFixture(t, `func(*UserController)RegisterRoutes(r *api.Registry){r.POST(endpoint,func(a input.Body[DTO])httpx.Response[DTO]{return httpx.Response[DTO]{Body:DTO{Name:a.Name}}})}
+type ProbeInterceptor struct{}
+func(*ProbeInterceptor)Constructor()*ProbeInterceptor{panic("must not run")}
+func(*ProbeInterceptor)Accept(){}
+type ImportedContract=core.Interceptor`)
+			if err := os.MkdirAll(filepath.Join("core", "core"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join("core", "core", "interceptor.go"), []byte("package core\n"+tc.contract), 0644); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile("controller.go")
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := strings.Replace(string(data), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api";"github.com/NARUBROWN/spine/core"`, 1)
+			if err := os.WriteFile("controller.go", []byte(text), 0644); err != nil {
+				t.Fatal(err)
+			}
+			inspector.sources = nil
+			inspector.contract.Constructors = []contractRegistration{{Target: "example.com/typed.ProbeInterceptor.Constructor", Role: "Interceptor", object: true}}
+			inspector.inspectControllerRoutes()
+			found := false
+			for _, diagnostic := range inspector.contract.Diagnostics {
+				found = found || diagnostic.Code == tc.code
+				if tc.code == "" && diagnostic.Severity == "error" {
+					t.Fatal(diagnostic)
+				}
+			}
+			if tc.code != "" && !found {
+				t.Fatalf("missing %s: %+v", tc.code, inspector.contract.Diagnostics)
+			}
+		})
+	}
+}
 
 func TestComponentMethodConstructorsStaticContracts(t *testing.T) {
 	base := `func(c *UserController)RegisterRoutes(r *api.Registry){r.POST(endpoint,func(a input.Body[DTO])httpx.Response[DTO]{return httpx.Response[DTO]{Body:DTO{Name:a.Name}}})}`
