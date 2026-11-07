@@ -117,6 +117,10 @@ func importPathInto(s *layoutSource, preferred, importPath string) (string, erro
 }
 
 func (p *layeredPlanner) registerConstructor(dir, name string) error {
+	return p.registerConstructorRole(dir, name, "")
+}
+
+func (p *layeredPlanner) registerConstructorRole(dir, name, requiredRole string) error {
 	s, f, index, appName, err := p.composition()
 	if err != nil {
 		return err
@@ -130,6 +134,9 @@ func (p *layeredPlanner) registerConstructor(dir, name string) error {
 	}
 	for _, constructor := range inspector.contract.Constructors {
 		if constructor.Target == modulePackage(p.Module, dir)+"."+name {
+			if requiredRole != "" && constructor.Role != requiredRole {
+				return fmt.Errorf("constructor %s is already registered as %s; register it as %s to collect controller routes", name, constructor.Role, requiredRole)
+			}
 			return nil
 		}
 	}
@@ -148,6 +155,9 @@ func (p *layeredPlanner) registerConstructor(dir, name string) error {
 				break
 			}
 		}
+	}
+	if requiredRole != "" {
+		roleName = requiredRole
 	}
 	if controllerRoutesProject() {
 		markerAlias, err := importPathInto(s, "constructor", constructorImportPath)
