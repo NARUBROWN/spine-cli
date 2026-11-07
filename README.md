@@ -116,9 +116,9 @@ spine new nats-worker --platform none --event-platform events:nats
 
 | 옵션 | 값과 기본 동작 |
 | --- | --- |
-| `--platform` | `echo` (기본값), `none` (이벤트 플랫폼 필요) |
+| `--platform` | HTTP provider, `echo` (기본값), `none` (이벤트 플랫폼 필요) |
 | `--event-platform` | 반복 가능한 `[name:]provider`; `spine-<provider>-platform@preview` 조회 |
-| `--websocket-platform` | `none` (기본값), `gorilla` (HTTP echo 필요) |
+| `--websocket-platform` | WebSocket provider 또는 `none` (기본값), provider 선택 시 HTTP 필요 |
 | `--validator` | `none` (기본값) 또는 provider; `spine-validator-<provider>@preview` 조회 |
 
 이벤트 이름은 `[a-z][a-z0-9_]*`이며 중복을 거부합니다. 같은 provider도 서로 다른 이름으로 등록할 수 있습니다.
@@ -138,7 +138,7 @@ NATS는 JetStream을 사용합니다. `SPINE_EVENTS_URLS` (쉼표로 구분), `S
 생성한 기본 실패 정책은 reject이며 NATS와 playground 검증기는 Go 1.26.0 이상이 필요합니다.
 Core NATS pub/sub와 request/reply, 자동 DLQ는 생성 범위에 포함하지 않습니다.
 
-이벤트와 validator는 `NARUBROWN`의 저장소 명명 규칙과 선택 버전의 `spine-platform.json`으로 조회합니다.
+HTTP, WebSocket, 이벤트와 validator는 `NARUBROWN`의 저장소 명명 규칙과 선택 버전의 `spine-platform.json`으로 조회합니다.
 저장소나 Preview 브랜치를 찾지 못하면 조회 경로와 원인을 표시하고 프로젝트를 만들지 않습니다.
 새 provider의 설정과 생성자, 최소 Go 버전은 메타데이터로 읽으므로 CLI를 패치할 필요가 없습니다.
 기존 Kafka, RabbitMQ와 playground의 메타데이터 없는 버전은 호환 경로를 유지합니다.

@@ -47,6 +47,10 @@ func (i *contractInspector) inspectHTTPAdapter(config projectConfig, file *ast.F
 	} else if selectedModuleVersion(a.SelectedModules, spineImportPath) == "" {
 		add("MODULE_GRAPH_UNAVAILABLE", "the selected module graph does not contain Spine")
 	}
+	if selection == "unresolved" && !applicationVariableReassigned(function.Body, assignment) && !returnsDifferentApplication(function.Body, assignment.Lhs[0].(*ast.Ident)) {
+		selection = dynamicAdapterSelection(assignment.Rhs[0], importPathsByAlias(file), a.SelectedModules)
+		a.Selection = selection
+	}
 	legacy := false
 	for _, module := range a.SelectedModules {
 		if module.Path == spineImportPath && module.Replace != nil && selection == "missing" && (a.Enabled == nil || *a.Enabled) {
@@ -79,6 +83,14 @@ func (i *contractInspector) inspectHTTPAdapter(config projectConfig, file *ast.F
 			a.Provider, a.Selection, a.CanonicalFactory = "echo", "explicit", echoPlatformPath+".NewFactory"
 			if selectedModuleVersion(a.SelectedModules, echoPlatformPath) == "" && err == nil {
 				add("MODULE_GRAPH_UNAVAILABLE", "the selected module graph does not contain the Echo platform")
+			}
+		} else if selection != "missing" && selection != "unresolved" {
+			path := providerModule(selection)
+			d, descriptorErr := staticPlatformDescriptor("http", selection, path, a.SelectedModules)
+			if descriptorErr != nil || d.ContractVersion != a.ExpectedContract {
+				add("HTTP_ADAPTER_UNRESOLVED", "HTTP platform metadata or contract is unavailable or incompatible")
+			} else {
+				a.Provider, a.Selection, a.CanonicalFactory = selection, "explicit", path+"."+d.Factory
 			}
 		} else if selection == "unresolved" {
 			add("HTTP_ADAPTER_UNRESOLVED", "the HTTP adapter option or factory cannot be resolved statically")

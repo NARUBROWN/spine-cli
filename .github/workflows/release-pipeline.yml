@@ -61,6 +61,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.plan.outputs.sha }}
+      channel: ${{ inputs.channel }}
   public-before-tag:
     needs: plan
     uses: ./.github/workflows/release-public-check.yml

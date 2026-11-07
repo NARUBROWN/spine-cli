@@ -173,6 +173,12 @@ func descriptorReadmeFields(d *platformDescriptor, prefix string) string {
 
 func descriptorFingerprints(options newProjectOptions) map[string]string {
 	result := map[string]string{}
+	if d := options.HTTPDescriptor; d != nil {
+		result[providerModule(options.Platform)] = d.SHA256
+	}
+	if d := options.WebSocketDescriptor; d != nil {
+		result[providerModule(options.WebSocketPlatform)] = d.SHA256
+	}
 	for _, spec := range options.Events {
 		if d := eventDescriptor(spec); d != nil {
 			result[providerModule(spec.Provider)] = d.SHA256

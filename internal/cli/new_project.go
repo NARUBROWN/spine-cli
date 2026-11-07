@@ -29,6 +29,8 @@ type newProjectOptions struct {
 	WebSocketPlatform        string
 	Modules                  []selectedModule
 	ValidatorDescriptor      *platformDescriptor
+	HTTPDescriptor           *platformDescriptor
+	WebSocketDescriptor      *platformDescriptor
 	SkipInstall, JSON        bool
 	Write                    writeOptions
 }
@@ -86,14 +88,22 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	if options.Layout != layeredLayout && options.Layout != "legacy" {
 		return options, fmt.Errorf("unsupported layout: %s", options.Layout)
 	}
-	if options.Platform != "echo" && options.Platform != "nethttp" && options.Platform != "none" {
+	if options.Platform != "none" && !validProviderName(options.Platform) {
 		return options, fmt.Errorf("unsupported platform: %s", options.Platform)
 	}
-	if options.WebSocketPlatform != "none" && options.WebSocketPlatform != "gorilla" {
+	if options.WebSocketPlatform != "none" && !validProviderName(options.WebSocketPlatform) {
 		return options, fmt.Errorf("unsupported WebSocket platform: %s", options.WebSocketPlatform)
 	}
-	if options.WebSocketPlatform == "gorilla" && options.Platform != "echo" && options.Platform != "nethttp" {
-		return options, fmt.Errorf("--websocket-platform gorilla requires --platform echo or nethttp")
+	if options.WebSocketPlatform != "none" && options.Platform == "none" {
+		return options, fmt.Errorf("--websocket-platform requires an HTTP platform")
+	}
+	if options.WebSocketPlatform != "none" && options.WebSocketPlatform == options.Platform {
+		return options, fmt.Errorf("HTTP and WebSocket providers must use different platform modules")
+	}
+	for _, event := range options.Events {
+		if (options.Platform != "none" && event.Provider == options.Platform) || (options.WebSocketPlatform != "none" && event.Provider == options.WebSocketPlatform) {
+			return options, fmt.Errorf("platform module %s cannot represent multiple adapter kinds", event.Provider)
+		}
 	}
 	if err := validateAssemblySelection(options.Platform, options.Events, options.Validator); err != nil {
 		return options, err
@@ -126,7 +136,7 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 		"spine.toml": projectConfigTemplate(config),
 		".gitignore": ".env\nbin/\ncoverage.out\n",
 	}
-	if options.Layout == layeredLayout && (options.Platform == "echo" || options.Platform == "nethttp") {
+	if options.Layout == layeredLayout && options.Platform != "none" {
 		if controllerRoutesScaffold(options) {
 			files["src/controller/health_controller.go"] = registeredHealthController
 		} else {

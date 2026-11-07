@@ -26,8 +26,12 @@ const (
 func legacyWebSocketModules(options newProjectOptions) []selectedModule {
 	modules := assemblyModules(options.Platform, options.Events, options.Validator)
 	modules[0].Version = webSocketSpineVersion
-	if options.WebSocketPlatform == "gorilla" {
-		modules = append(modules, selectedModule{Path: gorillaPlatformPath, Version: gorillaPlatformVersion})
+	if options.WebSocketPlatform != "" && options.WebSocketPlatform != "none" {
+		version := "preview"
+		if options.WebSocketPlatform == "gorilla" {
+			version = gorillaPlatformVersion
+		}
+		modules = append(modules, selectedModule{Path: providerModule(options.WebSocketPlatform), Version: version})
 	}
 	return modules
 }
@@ -92,8 +96,12 @@ func (i *contractInspector) inspectWebSocketAdapter(config projectConfig, import
 	for _, arg := range call.Args {
 		direct, directOK := importedCall(arg, imports, spineImportPath, "WithWebSocketAdapter")
 		option, optionOK := importedCall(arg, imports, gorillaPlatformPath, "Option")
-		if !directOK && !optionOK {
+		dynamic, dynamicPath := dynamicPlatformOption(arg, imports, i.contract.HTTPAdapter.SelectedModules, "websocket")
+		if !directOK && !optionOK && dynamic == nil {
 			known := false
+			if d, _ := dynamicPlatformOption(arg, imports, i.contract.HTTPAdapter.SelectedModules, "http"); d != nil {
+				known = true
+			}
 			for _, owner := range [][2]string{{spineImportPath, "WithHTTPAdapter"}, {spineImportPath, "WithEventAdapter"}, {spineImportPath, "WithValidator"}, {echoPlatformPath, "Option"}, {nethttpPlatformPath, "Option"}} {
 				if _, ok := importedCall(arg, imports, owner[0], owner[1]); ok {
 					known = true
@@ -114,7 +122,9 @@ func (i *contractInspector) inspectWebSocketAdapter(config projectConfig, import
 			factory, ok := importedCall(assemblyValue(direct.Args[0], function.Body, direct.Pos()), imports, gorillaPlatformPath, "NewFactory")
 			valid = ok && len(factory.Args) == 0 && !factory.Ellipsis.IsValid()
 		}
-		if valid {
+		if dynamic != nil && dynamic.Provider != "gorilla" {
+			selection.Provider, selection.CanonicalFactory = dynamic.Provider, dynamicPath+"."+dynamic.Factory
+		} else if valid {
 			selection.Provider = "gorilla"
 			selection.CanonicalFactory = gorillaPlatformPath + ".NewFactory"
 		} else {
@@ -131,8 +141,8 @@ func (i *contractInspector) inspectWebSocketAdapter(config projectConfig, import
 		if !separated {
 			add("WEBSOCKET_CORE_INCOMPATIBLE", "selected Spine version does not provide the standalone WebSocket adapter API", assignment)
 		}
-		if selection.Provider == "gorilla" && selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, gorillaPlatformPath) == "" {
-			add("MODULE_GRAPH_UNAVAILABLE", "the selected graph does not contain the Gorilla platform", assignment)
+		if selection.Provider != "unresolved" && selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, providerModule(selection.Provider)) == "" {
+			add("MODULE_GRAPH_UNAVAILABLE", "the selected graph does not contain the WebSocket platform", assignment)
 		}
 	} else if len(i.contract.WebSockets) > 0 && !unsafeOptions {
 		if separated {

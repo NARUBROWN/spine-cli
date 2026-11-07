@@ -2,6 +2,63 @@ package cli
 
 import "go/ast"
 
+// 선택한 모듈의 메타데이터가 선언한 인자 없는 option만 정적으로 인정합니다.
+func dynamicPlatformOption(expression ast.Expr, imports map[string]string, modules []selectedModule, kind string) (*platformDescriptor, string) {
+	call, ok := expression.(*ast.CallExpr)
+	if !ok || call.Ellipsis.IsValid() || len(call.Args) != 0 {
+		return nil, ""
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil, ""
+	}
+	ident, ok := selector.X.(*ast.Ident)
+	if !ok || ident.Obj != nil {
+		return nil, ""
+	}
+	path := imports[ident.Name]
+	provider := providerFromModule(path, kind)
+	if provider == "" || selectedModuleVersion(modules, path) == "" {
+		return nil, ""
+	}
+	d, err := staticPlatformDescriptor(kind, provider, path, modules)
+	if err != nil || selector.Sel.Name != d.Factory {
+		return nil, ""
+	}
+	return d, path
+}
+
+func dynamicAdapterSelection(expression ast.Expr, imports map[string]string, modules []selectedModule) string {
+	call, ok := importedCall(expression, imports, spineImportPath, "New")
+	if !ok || call.Ellipsis.IsValid() {
+		return "unresolved"
+	}
+	selected := "missing"
+	for _, arg := range call.Args {
+		if d, _ := dynamicPlatformOption(arg, imports, modules, "http"); d != nil {
+			if selected != "missing" {
+				return "unresolved"
+			}
+			selected = d.Provider
+			continue
+		}
+		if d, _ := dynamicPlatformOption(arg, imports, modules, "websocket"); d != nil {
+			continue
+		}
+		known := false
+		for _, method := range []string{"WithEventAdapter", "WithValidator", "WithWebSocketAdapter"} {
+			if option, ok := importedCall(arg, imports, spineImportPath, method); ok && !option.Ellipsis.IsValid() && ((method == "WithEventAdapter" && len(option.Args) >= 2) || (method != "WithEventAdapter" && len(option.Args) == 1)) {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return "unresolved"
+		}
+	}
+	return selected
+}
+
 // 패키지 별칭과 지역 변수의 가림을 확인해 알려진 앱 생성식만 인식합니다.
 func importedCall(expression ast.Expr, imports map[string]string, path, method string) (*ast.CallExpr, bool) {
 	call, ok := expression.(*ast.CallExpr)

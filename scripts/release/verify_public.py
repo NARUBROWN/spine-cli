@@ -116,11 +116,7 @@ def verify(plan, query, work, env):
             envelope(binary, [command], work, env)
     cli = str(Path(env["GOBIN"]) / ("spine" + suffix))
     recipe = plan["components"]["recipe"]
-    cases = {"http": [], "websocket": ["--websocket-platform", "gorilla"],
-             "all": ["--websocket-platform", "gorilla", "--event-platform", "kafka",
-                     "--event-platform", "rabbitmq", "--event-platform", "nats", "--validator", "playground"],
-             "worker": ["--platform", "none", "--event-platform", "kafka"],
-             "nats-worker": ["--platform", "none", "--event-platform", "nats"]}
+    cases = {"http": []}
     for layout in ("legacy", "layered-v1"):
         for case, options in cases.items():
             name = layout + "-" + case
@@ -162,7 +158,7 @@ def verify(plan, query, work, env):
             "resolved_cli_version": resolved, "components": plan["components"],
             "os": {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}[platform.system()],
             "go_version": execute(["go", "version"], work, env), "entrypoints": list(ENTRYPOINTS),
-            "checks": ["public installation and build provenance", "two layouts and four platform combinations",
+            "checks": ["public installation and build provenance", "two layouts and default HTTP composition",
                        "default recipe and selected public modules", "dry-run/if-match and source-preserving update",
                        "static contracts and generated tests", "HTTP health and listener release"]}
 

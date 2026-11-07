@@ -1,16 +1,20 @@
-# 이벤트 플랫폼과 validator 동적 조회
+# 플랫폼과 validator 동적 조회
 
-이벤트 플랫폼과 validator는 CLI를 수정하지 않고 저장소 규칙과 `spine-platform.json`으로 연결합니다. CLI는 요청한 이름의 `@preview`를 정규 모듈 버전으로 해석한 뒤, 그 버전의 메타데이터를 읽습니다.
+HTTP, WebSocket, 이벤트 플랫폼과 validator는 CLI를 수정하지 않고 저장소 규칙과 `spine-platform.json`으로 연결합니다. CLI는 요청한 이름의 `@preview`를 정규 모듈 버전으로 해석한 뒤, 그 버전의 메타데이터를 읽습니다.
 
 | 옵션 | 조회할 모듈 |
 | --- | --- |
 | `--event-platform [name:]provider` | `github.com/NARUBROWN/spine-<provider>-platform@preview` |
+| `--platform provider` | `github.com/NARUBROWN/spine-<provider>-platform@preview` |
+| `--websocket-platform provider` | `github.com/NARUBROWN/spine-<provider>-platform@preview` |
 | `--validator provider` | `github.com/NARUBROWN/spine-validator-<provider>@preview` |
 | `--validator none` | 검증기 생략, 기본값 |
 
 provider 이름은 영문 소문자로 시작하며 소문자, 숫자, `-`, `_`를 사용합니다. 구분자를 연속하거나 이름 끝에 넣을 수 없습니다. 이벤트 등록 이름은 기존 `[a-z][a-z0-9_]*` 규칙을 따릅니다. 등록 이름을 생략하면 provider 이름의 `-`를 `_`로 바꿉니다.
 
-이 문서의 동적 조회 범위는 이벤트와 validator입니다. HTTP와 WebSocket의 선택 규칙은 기존과 같습니다.
+HTTP와 WebSocket은 각각 별도 provider 모듈을 사용하며, WebSocket을 선택하려면 HTTP가 필요합니다. 한 모듈을 서로 다른 플랫폼 종류에 동시에 사용할 수 없습니다. 기본값은 HTTP `echo`, WebSocket `none`입니다.
+
+예를 들어 `myhttp`와 `mysocket` 모듈이 다음 형식의 메타데이터를 제공한다면 `--platform myhttp --websocket-platform mysocket`으로 선택할 수 있습니다. 이 이름은 형식을 설명하는 예시입니다.
 
 ## 생성과 검토
 
@@ -32,16 +36,34 @@ spine new worker --platform none --event-platform events:nats \
 | 필드 | 내용 |
 | --- | --- |
 | `schema_version` | `spine.platform/v1`, CLI 메타데이터 형식 |
-| `kind` | `event` 또는 `validator` |
+| `kind` | `http`, `websocket`, `event`, `validator` 중 하나 |
 | `provider` | 옵션에 지정한 provider와 같은 이름 |
-| `contract_version` | event는 `spine.event-adapter/v1`, validator는 `spine.validation/v1` |
+| `contract_version` | HTTP는 `spine.http-adapter/v3`, WebSocket은 `spine.websocket-adapter/v1`, event는 `spine.event-adapter/v1`, validator는 `spine.validation/v1` |
 | `package` | Go 패키지 이름 |
-| `factory` | 오류를 함께 반환하는 공개 생성자 이름 |
+| `factory` | event와 validator의 생성자 또는 HTTP와 WebSocket의 옵션 함수 이름 |
 | `config_type` | 공개 설정 구조체 이름. event는 필수, validator는 생략 가능 |
 | `minimum_go` | `1.26.0`처럼 전체 Go 버전 |
 | `fields` | 설정 구조체 필드 목록. 설정 없는 validator는 생략 |
 
 이벤트 생성자는 `Factory(Config) (event.Factory, error)` 형태입니다. validator 생성자는 설정이 있으면 `Factory(Config) (validator.Validator, error)`, 없으면 `Factory() (validator.Validator, error)` 형태입니다. 반환하는 구체 타입이 해당 인터페이스를 구현해도 됩니다. 생성자와 설정 필드는 실제 모듈에 있어야 하며 기본 생성의 컴파일 단계에서 확인합니다.
+
+HTTP와 WebSocket의 `factory`는 인자 없이 `spine.Option`을 반환하는 공개 함수입니다. 이 두 종류의 메타데이터에는 `config_type`과 `fields`를 넣지 않습니다. Echo, net/http, Gorilla의 기존 메타데이터 없는 공개 버전은 CLI의 호환 설명을 사용합니다.
+
+예를 들어 `--platform myhttp`에 사용할 모듈의 메타데이터는 다음과 같습니다.
+
+```json
+{
+  "schema_version": "spine.platform/v1",
+  "kind": "http",
+  "provider": "myhttp",
+  "contract_version": "spine.http-adapter/v3",
+  "package": "platform",
+  "factory": "Option",
+  "minimum_go": "1.25.5"
+}
+```
+
+WebSocket 모듈은 `kind`에 `websocket`, `contract_version`에 `spine.websocket-adapter/v1`을 지정합니다. 서로 다른 종류의 provider는 별도 모듈을 사용합니다.
 
 설정 없는 validator 예제입니다.
 

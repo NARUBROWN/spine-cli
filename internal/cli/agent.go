@@ -93,9 +93,9 @@ func currentCommandSchema() commandSchema {
 			c.Options["depends"] = d
 		}
 		if c.Name == "new" {
-			c.Options["platform"] = optionDefinition{Type: "string", Enum: []string{"echo", "nethttp", "none"}}
+			c.Options["platform"] = optionDefinition{Type: "string", Description: "HTTP provider or none; provider resolves spine-<provider>-platform@preview and metadata"}
 			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "[name:]provider resolves NARUBROWN/spine-<provider>-platform@preview and spine-platform.json; environment prefix SPINE_<NAME>_"}
-			c.Options["websocket-platform"] = optionDefinition{Type: "string", Enum: []string{"none", "gorilla"}, Description: "Default none; Gorilla requires HTTP echo or nethttp"}
+			c.Options["websocket-platform"] = optionDefinition{Type: "string", Description: "WebSocket provider or none; provider requires HTTP and resolves platform metadata"}
 			c.Options["validator"] = optionDefinition{Type: "string", Description: "Default none; provider resolves NARUBROWN/spine-validator-<provider>@preview and spine-platform.json; minimum Go comes from metadata"}
 			c.Options["skip-install"] = optionDefinition{Type: "boolean", Description: "Resolve Preview branches and generate files without dependency installation or build verification; requires Go and may use network"}
 			c.Effects.Network = true
