@@ -387,7 +387,7 @@ spine generate|g <domain|dto|repository|service|controller|resource|route|consum
 기존 버전의 기본 경로는 `src/route/route.go`다. 프로젝트 변경에는 context의 값을 우선한다.
 context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
 `role`, `group`, `package`, `type`으로 현재 구성 요소를 찾는다. `package`는 모듈 경로까지 포함한다.
-route와 application은 고정 연결 위치이며 composition은 설정의 `composition`을 따른다.
+composition은 설정의 `composition`을 따른다.
 
 ```sh
 spine g domain user
