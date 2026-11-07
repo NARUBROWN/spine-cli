@@ -39,6 +39,9 @@ type applicationContract struct {
 }
 
 type contractRegistration struct {
+	Role         string `json:"role,omitempty"`
+	Output       string `json:"output,omitempty"`
+	object       bool
 	Target       string   `json:"target"`
 	Scope        string   `json:"scope,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
@@ -231,10 +234,23 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 		registrationCall := false
 		if selector, ok := directAppCall(call, appName); ok {
 			switch selector {
-			case "Constructor":
+			case "Constructor", "ControllerConstructor", "ServiceConstructor", "RepositoryConstructor", "InterceptorConstructor":
 				registrationCall = true
 				for _, argument := range call.Args {
-					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: i.registrationExpression(argument, file, fset), Source: source})
+					target, object := i.objectConstructorTarget(argument, file, fset)
+					role := ""
+					if selector != "Constructor" {
+						role = strings.TrimSuffix(selector, "Constructor")
+					} else if object {
+						role = "Custom"
+					}
+					if !object {
+						target = i.registrationExpression(argument, file, fset)
+					}
+					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: target, Source: source, Role: role, object: object})
+					if role != "" && !object {
+						i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role constructors require a statically known pointer-to-struct prototype.", source)
+					}
 				}
 				if packageName, importPath, ok := directResourceConstructor(call, imports, i.module); ok {
 					i.addResource(packageName, importPath, source)
@@ -474,6 +490,9 @@ func (i *contractInspector) resolveConstructorDependencies() {
 	})
 	for index := range i.contract.Constructors {
 		constructor := &i.contract.Constructors[index]
+		if constructor.object {
+			continue
+		}
 		matches := signatures[constructor.Target]
 		if len(matches) == 1 {
 			constructor.Dependencies = matches[0].dependencies
@@ -976,7 +995,7 @@ func containsAppContractCall(root ast.Node, appName string) bool {
 		}
 		if selector, direct := directAppCall(call, appName); direct {
 			switch selector {
-			case "Constructor", "Route", "Interceptor", "InterceptorFor":
+			case "Constructor", "ControllerConstructor", "ServiceConstructor", "RepositoryConstructor", "InterceptorConstructor", "Route", "Interceptor", "InterceptorFor":
 				found = true
 				return false
 			}

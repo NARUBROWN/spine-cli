@@ -55,7 +55,7 @@ func (p *layeredPlanner) resolveDependency(ref string) (layeredDependency, error
 			continue
 		}
 		factory := strings.TrimPrefix(key, prefix)
-		if !token.IsIdentifier(factory) || !ast.IsExported(factory) {
+		if (!token.IsIdentifier(factory) || !ast.IsExported(factory)) && factory != name+".Constructor" {
 			continue
 		}
 		for _, signature := range signatures {
@@ -133,7 +133,19 @@ func (p *layeredPlanner) registerConstructor(dir, name string) error {
 	if err != nil {
 		return err
 	}
-	stmt := &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(appName), Sel: ast.NewIdent("Constructor")}, Args: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}}}}
+	registration := "Constructor"
+	var argument ast.Expr = &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
+	if strings.HasSuffix(name, ".Constructor") {
+		typ := strings.TrimSuffix(name, ".Constructor")
+		argument = &ast.UnaryExpr{Op: token.AND, X: &ast.CompositeLit{Type: &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(typ)}}}
+		for _, role := range componentRoles() {
+			if role.Constructor && (dir == role.Root || strings.HasPrefix(dir, role.Root+"/")) {
+				registration = strings.ToUpper(role.Name[:1]) + role.Name[1:] + "Constructor"
+				break
+			}
+		}
+	}
+	stmt := &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(appName), Sel: ast.NewIdent(registration)}, Args: []ast.Expr{argument}}}
 	f.Body.List = append(f.Body.List, nil)
 	copy(f.Body.List[index+2:], f.Body.List[index+1:])
 	f.Body.List[index+1] = stmt

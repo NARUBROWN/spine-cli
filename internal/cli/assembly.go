@@ -212,7 +212,11 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 	}
 	if options.Platform == "echo" || options.Platform == "nethttp" {
 		if options.Layout == layeredLayout {
-			source.WriteString("app.Constructor(controller.NewHealthController)\n")
+			if controllerRoutesScaffold(options) {
+				source.WriteString("app.ControllerConstructor(&controller.HealthController{})\n")
+			} else {
+				source.WriteString("app.Constructor(controller.NewHealthController)\n")
+			}
 			if !controllerRoutesScaffold(options) {
 				source.WriteString("if err := route.Register(app); err != nil { return nil, boot.Options{}, err }\n")
 			}

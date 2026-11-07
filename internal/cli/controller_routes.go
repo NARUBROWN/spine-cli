@@ -42,6 +42,11 @@ func (i *contractInspector) inspectControllerRoutes() {
 	}
 	needed := controllerRoutesVersion(selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, spineImportPath))
 	importedAPI := false
+	for _, provider := range i.contract.Constructors {
+		if provider.object {
+			needed = true
+		}
+	}
 	overlay := map[string][]byte{}
 	for _, source := range sources.sortedFiles() {
 		for _, path := range importPathsByAlias(source.File) {
@@ -123,24 +128,48 @@ func (i *contractInspector) inspectControllerRoutes() {
 		}
 	}
 	seen := map[types.Type]bool{}
-	for _, provider := range i.contract.Constructors {
-		split := strings.LastIndex(provider.Target, ".")
-		if split < 0 {
+	outputs := map[int]types.Type{}
+	signatures := map[int]*types.Signature{}
+	for index := range i.contract.Constructors {
+		provider := &i.contract.Constructors[index]
+		output, signature, problem := typedComponentConstructor(*provider, all)
+		if problem != "" {
+			if provider.object {
+				i.controllerDiagnostic("COMPONENT_CONSTRUCTOR_INVALID", problem, provider.Source)
+			}
 			continue
 		}
-		pkg := all[provider.Target[:split]]
-		if pkg == nil || pkg.Types == nil {
+		if output == nil {
 			continue
 		}
-		object := pkg.Types.Scope().Lookup(provider.Target[split+1:])
-		if object == nil {
+		outputs[index] = output
+		signatures[index] = signature
+		if provider.object {
+			provider.Dependencies = []string{}
+			for n := 0; n < signature.Params().Len(); n++ {
+				provider.Dependencies = append(provider.Dependencies, componentTypeName(signature.Params().At(n).Type()))
+			}
+			provider.Output = componentTypeName(output)
+			required := types.Type(nil)
+			switch provider.Role {
+			case "Controller":
+				required = contract
+			case "Interceptor":
+				if core := all[spineImportPath+"/core"]; core != nil {
+					if obj := core.Types.Scope().Lookup("Interceptor"); obj != nil {
+						required = obj.Type()
+					}
+				}
+			}
+			if required != nil && !types.Implements(output, required.Underlying().(*types.Interface)) {
+				i.controllerDiagnostic("COMPONENT_CONTRACT_INVALID", "Component does not implement its "+provider.Role+" contract: "+provider.Output, provider.Source)
+				continue
+			}
+		}
+
+		if provider.object && provider.Role != "Controller" {
 			continue
 		}
-		signature, ok := object.Type().(*types.Signature)
-		if !ok || signature.Results().Len() != 1 {
-			continue
-		}
-		output := types.Unalias(signature.Results().At(0).Type())
 		if _, abstract := output.Underlying().(*types.Interface); abstract && types.Implements(output, contract) {
 			i.controllerDiagnostic("HTTP_CONTROLLER_PROVIDER_ABSTRACT", "Controller constructors must return a concrete controller type, not api.Controller.", provider.Source)
 			continue
@@ -159,10 +188,15 @@ func (i *contractInspector) inspectControllerRoutes() {
 		}
 		scan.walk(method, types.TypeString(output, func(p *types.Package) string { return p.Path() }), nil)
 	}
+	validateTypedComponentGraph(i, outputs, signatures)
 }
 
 func (i *contractInspector) controllerDiagnostic(code, message, source string) {
-	i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: code, Message: message, Source: source, Hint: "Use statically resolved Registry calls and typed callbacks; inspect installed project dependencies. User code is never executed to infer routes."})
+	hint := "Use statically resolved Registry calls and typed callbacks; inspect installed project dependencies. User code is never executed to infer routes."
+	if strings.HasPrefix(code, "COMPONENT_") {
+		hint = "Implement Constructor(dependencies...) *Self, satisfy the selected role contract and register unique dependencies. User code is never executed for inspection."
+	}
+	i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: code, Message: message, Source: source, Hint: hint})
 }
 
 func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwarded []int) {

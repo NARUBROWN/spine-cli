@@ -329,7 +329,11 @@ func (p *layeredPlanner) addComponent(kind string, name generationName, fields [
 		fmt.Fprintf(&b, "%s %s\n", dep.Field, dep.Expression)
 	}
 	b.WriteString("}\n\n")
-	fmt.Fprintf(&b, "func New%s(", typeName)
+	if controllerRoutesProject() {
+		fmt.Fprintf(&b, "func (*%s) Constructor(", typeName)
+	} else {
+		fmt.Fprintf(&b, "func New%s(", typeName)
+	}
 	for i, dep := range deps {
 		if i > 0 {
 			b.WriteString(", ")
@@ -342,7 +346,7 @@ func (p *layeredPlanner) addComponent(kind string, name generationName, fields [
 	}
 	b.WriteString("}\n}\n")
 	if registered {
-		fmt.Fprintf(&b, "\nvar _ %s.Controller = (*%s)(nil)\nfunc (c *%s) RegisterRoutes(r *%s.Registry) {}\n", apiAlias, typeName, typeName, apiAlias)
+		fmt.Fprintf(&b, "\nfunc (c *%s) RegisterRoutes(r *%s.Registry) {}\n", typeName, apiAlias)
 	}
 	if err = p.put(path, b.String(), false); err != nil {
 		return err
@@ -353,7 +357,11 @@ func (p *layeredPlanner) addComponent(kind string, name generationName, fields [
 				return err
 			}
 		}
-		return p.registerConstructor(filepath.ToSlash(dir), "New"+typeName)
+		factory := "New" + typeName
+		if controllerRoutesProject() {
+			factory = typeName + ".Constructor"
+		}
+		return p.registerConstructor(filepath.ToSlash(dir), factory)
 	}
 	return nil
 }

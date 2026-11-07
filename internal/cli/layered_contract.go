@@ -73,6 +73,9 @@ func (i *contractInspector) resolveLayeredConstructors() {
 	signatures := i.sources.constructorSignatures(i.module)
 	for index := range i.contract.Constructors {
 		ctor := &i.contract.Constructors[index]
+		if ctor.object {
+			continue
+		}
 		if matches := signatures[ctor.Target]; len(matches) == 1 && matches[0].Output != "" {
 			ctor.Dependencies = matches[0].Dependencies
 		} else {
