@@ -19,6 +19,11 @@ func TestRuntimeOpenAPIGeneratedApplications(t *testing.T) {
 				workspace := t.TempDir()
 				applyAssemblyPlan(t, binary, workspace, "new", "sample", "--module", "example.com/sample", "--layout", layout, "--validator", validator)
 				project := filepath.Join(workspace, "sample")
+				health, err := os.ReadFile(filepath.Join(project, "src/controller/health_controller.go"))
+				modern := err == nil && strings.Contains(string(health), "RegisterRoutes(")
+				if err != nil && !os.IsNotExist(err) {
+					t.Fatal(err)
+				}
 				path := filepath.Join(project, "internal/application/application.go")
 				source, err := os.ReadFile(path)
 				if err != nil {
@@ -34,10 +39,19 @@ func TestRuntimeOpenAPIGeneratedApplications(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					addGeneratedTest(t, project, fixture.to, strings.ReplaceAll(string(contents), "{{VALIDATOR}}", strconv.FormatBool(validator == "playground")))
+					generated := strings.ReplaceAll(string(contents), "{{VALIDATOR}}", strconv.FormatBool(validator == "playground"))
+					generated = strings.ReplaceAll(generated, "{{MODERN}}", strconv.FormatBool(modern))
+					addGeneratedTest(t, project, fixture.to, generated)
 				}
 				assertE2ESuccess(t, runE2E(binary, project, nil, "contract", "check", "--json"), "structured HTTP contract")
-				assertE2ESuccess(t, runE2E(binary, project, nil, "contract", "export", "--format", "openapi", "--source", "runtime", "--output", "exported-openapi.json"), "runtime OpenAPI export")
+				export := runE2E(binary, project, nil, "contract", "export", "--format", "openapi", "--source", "runtime", "--output", "exported-openapi.json")
+				if modern {
+					if export.code == 0 || !strings.Contains(export.stderr, "controller routes are not collected") || !strings.Contains(export.stderr, "did not call Prepare") {
+						t.Fatalf("runtime export boundary: %+v", export)
+					}
+				} else {
+					assertE2ESuccess(t, export, "runtime OpenAPI export")
+				}
 				t.Log(generatedGo(t, project, "test", "-race", "-v", "./...", "-count=1", "-timeout=90s"))
 			})
 		}
