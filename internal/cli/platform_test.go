@@ -62,7 +62,8 @@ func TestNewFailuresHaveSamePlainAndJSONCodes(t *testing.T) {
 		code int
 	}{
 		{[]string{"new", "--skip-install"}, 2},
-		{[]string{"new", "sample", "--platform", "unknown"}, 2},
+		{[]string{"new", "sample", "--platform", "bad/name"}, 2},
+		{[]string{"new", "sample", "--platform", "unknown"}, 3},
 		{[]string{"new", "sample", "--force"}, 2},
 		{[]string{"new", "existing", "--skip-install"}, 4},
 		{[]string{"new", "sample", "--skip-install", "--if-match", "wrong"}, 4},

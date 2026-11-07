@@ -12,11 +12,6 @@
     "modules": {
       "github.com/NARUBROWN/spine": "preview",
       "github.com/NARUBROWN/spine-echo-platform": "preview",
-      "github.com/NARUBROWN/spine-gorilla-platform": "preview",
-      "github.com/NARUBROWN/spine-kafka-platform": "preview",
-      "github.com/NARUBROWN/spine-rabbitmq-platform": "preview",
-      "github.com/NARUBROWN/spine-nats-platform": "preview",
-      "github.com/NARUBROWN/spine-validator-playground": "preview",
       "github.com/labstack/echo/v5": "v5.4.4"
     }
   },

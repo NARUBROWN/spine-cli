@@ -7,12 +7,26 @@ import unittest
 from unittest.mock import patch
 
 import check_tests
+import core_regression
 import configure_branches
 import release
 import verify_public
 
 
 class PublicEvidenceTests(unittest.TestCase):
+    def test_core_regression_excludes_only_declared_optional_tests(self):
+        names = sorted(core_regression.OPTIONAL) + ["TestCoreBehavior"]
+        pattern = core_regression.selection("\n".join(names))
+        self.assertIn("TestCoreBehavior", pattern)
+        self.assertNotIn("TestGeneratedNATSAssemblyE2E", pattern)
+        with self.assertRaises(ValueError):
+            core_regression.selection("TestCoreBehavior")
+        events = [{"Action": "pass", "Test": name} for name in check_tests.REQUIRED
+                  if name.split("/")[0] not in core_regression.OPTIONAL]
+        check_tests.check(events, core=True)
+        with self.assertRaises(ValueError):
+            check_tests.check(events, core=False)
+
     def test_module_replacements_and_wrong_versions_are_rejected(self):
         graph = verify_public.module_graph('{"Path":"example.com/a","Version":"v1.0.0"}\n{"Path":"example.com/b","Version":"v2.0.0"}')
         verify_public.assert_modules(graph, {"example.com/a": "v1.0.0"})

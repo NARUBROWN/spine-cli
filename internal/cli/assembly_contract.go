@@ -203,7 +203,7 @@ func assemblyFactoryDescriptor(expression ast.Expr, imports map[string]string, m
 }
 
 func providerFromModule(path, kind string) string {
-	if kind == "event" {
+	if kind == "event" || kind == "http" || kind == "websocket" {
 		const prefix, suffix = "github.com/NARUBROWN/spine-", "-platform"
 		if strings.HasPrefix(path, prefix) && strings.HasSuffix(path, suffix) {
 			provider := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)

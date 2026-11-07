@@ -151,12 +151,15 @@ func exportedIdentifier(value string) bool {
 
 func validatePlatformDescriptor(d *platformDescriptor, kind, provider string) error {
 	invalid := func(reason string) error { return fmt.Errorf("invalid %s: %s", platformDescriptorFile, reason) }
-	contract := map[string]string{"event": "spine.event-adapter/v1", "validator": "spine.validation/v1"}[kind]
+	contract := map[string]string{"event": "spine.event-adapter/v1", "validator": "spine.validation/v1", "http": "spine.http-adapter/v3", "websocket": "spine.websocket-adapter/v1"}[kind]
 	if d.SchemaVersion != platformDescriptorSchema || d.Kind != kind || d.Provider != provider || contract == "" || d.ContractVersion != contract {
 		return invalid("schema, kind, provider or contract version does not match the selected module")
 	}
 	if !token.IsIdentifier(d.Package) || !exportedIdentifier(d.Factory) || (d.ConfigType != "" && !exportedIdentifier(d.ConfigType)) {
 		return invalid("package, factory and config type must be Go identifiers")
+	}
+	if (kind == "http" || kind == "websocket") && (d.ConfigType != "" || len(d.Fields) != 0) {
+		return invalid("HTTP and WebSocket options do not accept metadata configuration")
 	}
 	if !goversion.IsValid("go"+d.MinimumGo) || !regexp.MustCompile(`^1\.[0-9]+\.[0-9]+$`).MatchString(d.MinimumGo) {
 		return invalid("minimum_go must be a full Go version")
@@ -271,6 +274,20 @@ func resolveProjectDescriptors(ctx context.Context, options *newProjectOptions) 
 		}
 		return platformDescriptorResolver(ctx, kind, provider, module, false)
 	}
+	if options.Platform != "" && options.Platform != "none" {
+		d, err := resolve("http", options.Platform, providerModule(options.Platform))
+		if err != nil {
+			return err
+		}
+		options.HTTPDescriptor = d
+	}
+	if options.WebSocketPlatform != "" && options.WebSocketPlatform != "none" {
+		d, err := resolve("websocket", options.WebSocketPlatform, providerModule(options.WebSocketPlatform))
+		if err != nil {
+			return err
+		}
+		options.WebSocketDescriptor = d
+	}
 	for index := range options.Events {
 		spec := &options.Events[index]
 		descriptor, err := resolve("event", spec.Provider, providerModule(spec.Provider))
@@ -279,7 +296,7 @@ func resolveProjectDescriptors(ctx context.Context, options *newProjectOptions) 
 		}
 		spec.Descriptor = descriptor
 	}
-	if options.Validator != "none" {
+	if options.Validator != "" && options.Validator != "none" {
 		descriptor, err := resolve("validator", options.Validator, validatorModule(options.Validator))
 		if err != nil {
 			return err
@@ -303,10 +320,22 @@ func selectedValidatorDescriptor(options newProjectOptions) *platformDescriptor 
 	return legacyPlatformDescriptor("validator", options.Validator)
 }
 
+func platformOption(descriptor *platformDescriptor) string {
+	if descriptor != nil {
+		return descriptor.Factory
+	}
+	return "Option"
+}
+
 func projectGoVersion(options newProjectOptions) string {
 	version := assemblyGoVersion(options.Validator, options.Events...)
 	if descriptor := selectedValidatorDescriptor(options); descriptor != nil && goversion.Compare("go"+descriptor.MinimumGo, "go"+version) > 0 {
 		version = descriptor.MinimumGo
+	}
+	for _, d := range []*platformDescriptor{options.HTTPDescriptor, options.WebSocketDescriptor} {
+		if d != nil && goversion.Compare("go"+d.MinimumGo, "go"+version) > 0 {
+			version = d.MinimumGo
+		}
 	}
 	return version
 }
@@ -317,7 +346,14 @@ func legacyPlatformDescriptor(kind, provider string) *platformDescriptor {
 	field := func(name, kind, env string, required bool, def, example string) platformConfigField {
 		return platformConfigField{Field: name, Type: kind, Env: env, Required: required, Default: json.RawMessage(def), Example: json.RawMessage(example)}
 	}
-	if kind == "validator" && provider == "playground" {
+	if (kind == "http" && (provider == "echo" || provider == "nethttp")) || (kind == "websocket" && provider == "gorilla") {
+		d.ConfigType, d.Factory = "", "Option"
+		if kind == "http" {
+			d.ContractVersion = "spine.http-adapter/v3"
+		} else {
+			d.ContractVersion = "spine.websocket-adapter/v1"
+		}
+	} else if kind == "validator" && provider == "playground" {
 		d.Package, d.Factory, d.ConfigType, d.MinimumGo, d.ContractVersion = "playground", "New", "", "1.26.0", "spine.validation/v1"
 	} else if kind == "event" && provider == "kafka" {
 		d.Fields = []platformConfigField{field("Brokers", "strings", "BROKERS", true, "", `["127.0.0.1:9092"]`), field("GroupID", "string", "GROUP_ID", true, "", `"generated-test"`)}

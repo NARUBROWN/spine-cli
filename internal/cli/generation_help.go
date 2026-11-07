@@ -21,8 +21,8 @@ func generationHelp(command string, args []string, out, errOut io.Writer) (bool,
 			kind = args[0]
 		}
 		if command == "new" {
-			fmt.Fprintln(out, "Usage: spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo|nethttp|none] [--event-platform [name:]provider ...] [--validator none|provider] [--websocket-platform none|gorilla] [--skip-install] [--dry-run] [--json] [--if-match <hash>] [--force]")
-			fmt.Fprintln(out, "\n기본값: layered-v1, HTTP echo, WebSocket none, validator none. --websocket-platform gorilla는 독립 WS 구현을 선택하며 HTTP echo 또는 nethttp가 필요합니다. 공개 pseudo-version 레시피의 의존성 설치와 정적 검사/빌드. 이벤트는 --event-platform을 반복해 선택합니다. --platform none은 이벤트 worker입니다. playground는 Go 1.26.0 이상이 필요합니다. 생성 후 cd <project>와 spine dev를 실행합니다.\n--skip-install: 파일만 생성. 이때는 go mod tidy 후 spine dev를 실행합니다.\n--force: --skip-install과 함께만 사용합니다.\n\n예:\n  spine new shop-api --module example.com/shop\n  spine new shop-api --module example.com/shop --skip-install")
+			fmt.Fprintln(out, "Usage: spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform provider|none] [--event-platform [name:]provider ...] [--validator none|provider] [--websocket-platform none|provider] [--skip-install] [--dry-run] [--json] [--if-match <hash>] [--force]")
+			fmt.Fprintln(out, "\n기본값: layered-v1, HTTP echo, WebSocket none, validator none. --websocket-platform은 독립 WS provider를 선택하며 HTTP가 필요합니다. 선택한 Preview 의존성을 조회하고 설치, 정적 검사, 빌드를 수행합니다. 이벤트는 --event-platform을 반복해 선택합니다. --platform none은 이벤트 worker입니다. playground는 Go 1.26.0 이상이 필요합니다. 생성 후 cd <project>와 spine dev를 실행합니다.\n--skip-install: 버전과 메타데이터는 조회하지만 설치와 빌드는 생략합니다. 생성 후 go mod tidy를 실행합니다.\n--force: --skip-install과 함께만 사용합니다.\n\n예:\n  spine new shop-api --module example.com/shop\n  spine new shop-api --module example.com/shop --skip-install")
 			return true, 0
 		}
 		usage, ok := generatorUsage(kind)

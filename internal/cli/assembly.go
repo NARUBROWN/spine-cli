@@ -84,6 +84,9 @@ func assemblyModules(http string, events []eventPlatformSpec, validator string) 
 	if http == "echo" {
 		modules = append(modules, selectedModule{Path: echoPlatformPath, Version: echoPlatformVersion}, selectedModule{Path: "github.com/labstack/echo/v5", Version: platformEchoVersion})
 	}
+	if http != "" && http != "none" && http != "echo" && http != "nethttp" {
+		modules = append(modules, selectedModule{Path: providerModule(http), Version: "preview"})
+	}
 	providers := map[string]bool{}
 	for _, spec := range events {
 		providers[spec.Provider] = true
@@ -128,13 +131,9 @@ func assemblyGoMod(options newProjectOptions) string {
 func assemblyApplication(options newProjectOptions) (string, error) {
 	var source strings.Builder
 	source.WriteString("package application\n\nimport (\n\"github.com/NARUBROWN/spine\"\n\"github.com/NARUBROWN/spine/pkg/boot\"\n")
-	if options.Platform == "echo" || options.Platform == "nethttp" {
+	if options.Platform != "" && options.Platform != "none" {
 		source.WriteString("\"os\"\n")
-		if options.Platform == "nethttp" {
-			source.WriteString("nethttpplatform \"" + nethttpPlatformPath + "\"\n")
-		} else {
-			source.WriteString("echoplatform \"" + echoPlatformPath + "\"\n")
-		}
+		fmt.Fprintf(&source, "%splatform %q\n", providerGoIdentifier(options.Platform), providerModule(options.Platform))
 		if options.Layout == layeredLayout {
 			fmt.Fprintf(&source, "controller %q\n", options.Module+"/src/controller")
 			if controllerRoutesScaffold(options) {
@@ -147,8 +146,8 @@ func assemblyApplication(options newProjectOptions) (string, error) {
 			source.WriteString("\"github.com/NARUBROWN/spine/pkg/httpx\"\n")
 		}
 	}
-	if options.WebSocketPlatform == "gorilla" {
-		fmt.Fprintf(&source, "gorillaplatform %q\n", gorillaPlatformPath)
+	if options.WebSocketPlatform != "" && options.WebSocketPlatform != "none" {
+		fmt.Fprintf(&source, "%splatform %q\n", providerGoIdentifier(options.WebSocketPlatform), providerModule(options.WebSocketPlatform))
 	}
 	providers := map[string]bool{}
 	for _, spec := range options.Events {
@@ -170,7 +169,7 @@ func assemblyApplication(options newProjectOptions) (string, error) {
 		fmt.Fprintf(&source, "%s %q\n", descriptorAlias(descriptor), validatorModule(options.Validator))
 	}
 	source.WriteString(")\n\n")
-	if options.Layout == "legacy" && (options.Platform == "echo" || options.Platform == "nethttp") {
+	if options.Layout == "legacy" && (options.Platform != "" && options.Platform != "none") {
 		source.WriteString(`type HealthController struct{}
 func NewHealthController() *HealthController { return &HealthController{} }
 func (*HealthController) Get() httpx.Response[map[string]string] {
@@ -195,15 +194,15 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 		}
 		fmt.Fprintf(&source, "validator, err := %s.%s(%s)\nif err != nil { return nil, boot.Options{}, err }\n", descriptorAlias(descriptor), descriptor.Factory, argument)
 	}
-	if (options.Platform == "echo" || options.Platform == "nethttp") && len(options.Events) == 0 && options.Validator == "none" && options.WebSocketPlatform != "gorilla" {
-		fmt.Fprintf(&source, "app := spine.New(%splatform.Option())\n", options.Platform)
+	if (options.Platform != "" && options.Platform != "none") && len(options.Events) == 0 && options.Validator == "none" && (options.WebSocketPlatform == "" || options.WebSocketPlatform == "none") {
+		fmt.Fprintf(&source, "app := spine.New(%splatform.%s())\n", providerGoIdentifier(options.Platform), platformOption(options.HTTPDescriptor))
 	} else {
 		source.WriteString("app := spine.New(\n")
-		if options.Platform == "echo" || options.Platform == "nethttp" {
-			fmt.Fprintf(&source, "%splatform.Option(),\n", options.Platform)
+		if options.Platform != "" && options.Platform != "none" {
+			fmt.Fprintf(&source, "%splatform.%s(),\n", providerGoIdentifier(options.Platform), platformOption(options.HTTPDescriptor))
 		}
-		if options.WebSocketPlatform == "gorilla" {
-			source.WriteString("gorillaplatform.Option(),\n")
+		if options.WebSocketPlatform != "" && options.WebSocketPlatform != "none" {
+			fmt.Fprintf(&source, "%splatform.%s(),\n", providerGoIdentifier(options.WebSocketPlatform), platformOption(options.WebSocketDescriptor))
 		}
 		for index, spec := range options.Events {
 			fmt.Fprintf(&source, "spine.WithEventAdapter(%q, factory%d),\n", spec.Name, index)
@@ -213,7 +212,7 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 		}
 		source.WriteString(")\n")
 	}
-	if options.Platform == "echo" || options.Platform == "nethttp" {
+	if options.Platform != "" && options.Platform != "none" {
 		if options.Layout == layeredLayout {
 			if controllerRoutesScaffold(options) {
 				source.WriteString("app.Constructor(\nconstructor.Controller(&controller.HealthController{}),\n)\n")
@@ -269,8 +268,8 @@ func assemblyReadme(options newProjectOptions) string {
 		}
 		source.WriteString("\n`BuildApplication`은 설정과 factory 생성 오류를 반환합니다. consumer는 `app.Consumers().Register`로 등록합니다. 등록된 이벤트 factory는 같은 consumer registry를 사용하므로 복수 플랫폼에서는 각 플랫폼의 topic, prefix와 중복 처리 정책을 함께 설계하세요. 생성만으로 consumer나 topic, queue를 만들지는 않습니다.\n")
 	}
-	if options.WebSocketPlatform == "gorilla" {
-		source.WriteString("\nWebSocket 구현은 gorillaplatform.Option()으로 선택했습니다. app.WebSocket().Register로 경로를 등록하고 boot.HTTPOptions.WebSocket으로 정책을 설정합니다.\n")
+	if options.WebSocketPlatform != "" && options.WebSocketPlatform != "none" {
+		fmt.Fprintf(&source, "\nWebSocket 구현 `%s`를 선택했습니다. app.WebSocket().Register로 경로를 등록하고 boot.HTTPOptions.WebSocket으로 정책을 설정합니다.\n", options.WebSocketPlatform)
 	}
 	if options.Validator != "none" {
 		fmt.Fprintf(&source, "\n검증기는 `%s`와 `spine.WithValidator`로 연결됩니다. 규칙과 태그는 선택한 검증기의 문서를 따르세요.\n", options.Validator)
@@ -281,14 +280,14 @@ func assemblyReadme(options newProjectOptions) string {
 		source.WriteString("\n검증기를 생략했습니다. DTO의 `validate` 태그는 자동 검사되지 않습니다.\n")
 	}
 	source.WriteString("\n## 실행과 검사\n\n```sh\nspine contract check\nspine verify\nspine dev\n```\n")
-	if options.Platform == "echo" || options.Platform == "nethttp" {
+	if options.Platform != "" && options.Platform != "none" {
 		source.WriteString("\n`GET /health`를 제공합니다. `SPINE_PORT` 또는 CLI의 `spine.toml` port로 포트를 정합니다.\n")
 	}
 	if options.Platform == "echo" {
 		source.WriteString("Echo native 설정은 `echoplatform.Option(echoplatform.WithEcho(func(*echo.Echo) { ... }))`에 추가합니다.\n")
 	}
 	source.WriteString("\n`spine update --dry-run --json`으로 의존성 변경을 검토하고 `--if-match`로 적용합니다. update는 앱 소스를 바꾸지 않습니다. 정적 검사와 build/test는 실제 브로커 연결, ACK/NACK, 배포 검증을 뜻하지 않습니다.\n")
-	if options.Layout == layeredLayout && (options.Platform == "echo" || options.Platform == "nethttp") {
+	if options.Layout == layeredLayout && (options.Platform != "" && options.Platform != "none") {
 		if controllerRoutesScaffold(options) {
 			source.WriteString(registeredFirstAPIGuide())
 		} else {

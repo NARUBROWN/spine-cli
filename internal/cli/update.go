@@ -174,8 +174,11 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if config.Validator != "" && config.Validator != "none" && legacyPlatformDescriptor("validator", config.Validator) == nil && config.Recipe != currentAssemblyRecipe {
 		return finish(3, "snapshot", fmt.Errorf("validator %s requires the %s recipe; older recipes are not migrated automatically", config.Validator, currentAssemblyRecipe))
 	}
-	if config.Platform != "" && config.Platform != "echo" && config.Platform != "nethttp" && config.Platform != "none" {
+	if config.Platform != "" && config.Platform != "none" && !validProviderName(config.Platform) {
 		return finish(3, "snapshot", fmt.Errorf("unsupported platform: %s", config.Platform))
+	}
+	if config.Recipe != currentAssemblyRecipe && ((config.Platform != "" && config.Platform != "none" && config.Platform != "echo" && config.Platform != "nethttp") || (config.WebSocketPlatform != "" && config.WebSocketPlatform != "none" && config.WebSocketPlatform != "gorilla")) {
+		return finish(3, "snapshot", fmt.Errorf("dynamic HTTP and WebSocket providers require the %s recipe; older recipes are not migrated automatically", currentAssemblyRecipe))
 	}
 	recipe, targets := echoRecipe, echoRecipeModules()
 	if config.Recipe == assemblyRecipe {
@@ -246,7 +249,7 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 		if err != nil {
 			return finish(3, "dependencies", err)
 		}
-		selection := newProjectOptions{Events: config.Events, Validator: config.Validator, Modules: targets}
+		selection := newProjectOptions{Platform: config.Platform, WebSocketPlatform: config.WebSocketPlatform, Events: config.Events, Validator: config.Validator, Modules: targets}
 		if selection.Validator == "" {
 			selection.Validator = "none"
 		}

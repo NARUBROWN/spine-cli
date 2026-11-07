@@ -37,7 +37,7 @@ func TestWebSocketSelectionPlanAndDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	inTempDir(t)
-	for _, args := range [][]string{{"--websocket-platform", "unknown"}, {"--websocket-platform"}, {"--platform", "none", "--event-platform", "kafka", "--websocket-platform", "gorilla"}} {
+	for _, args := range [][]string{{"--websocket-platform", "bad/name"}, {"--websocket-platform"}, {"--platform", "none", "--event-platform", "kafka", "--websocket-platform", "gorilla"}} {
 		var out, errOut bytes.Buffer
 		if code := Run(append([]string{"new", "invalid", "--skip-install", "--json"}, args...), &out, &errOut); code != 2 {
 			t.Fatalf("%v: %d %s", args, code, out.String())
