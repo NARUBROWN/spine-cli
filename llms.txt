@@ -423,7 +423,13 @@ spine g controller admin/user --depends src/service:UserService
 세 역할 모두 구조체와 생성자 골격만 만든다. repository에 DB 연결, 메모리 저장소, ID 할당이나
 CRUD를 추가하지 않는다. controller에 임의의 HTTP 메서드나 경로를 만들지 않는다.
 
-### 8.3 명시적인 HTTP 경로
+### 8.3 HTTP 경로 등록
+
+컨트롤러 등록 API를 지원하는 코어에서는 `constructor.Controller`로 컨트롤러를 등록하고
+`RegisterRoutes(*api.Registry)`에 경로를 선언한다. 별도 `route.go`에서 `app.Route`로
+메서드 표현식을 연결하는 기존 방식은 Deprecated다.
+
+아래는 기존 라우트 파일을 사용하는 프로젝트의 호환 절차다.
 
 핸들러를 먼저 구현한 뒤 메서드와 경로와 실제 메서드 참조를 지정한다.
 

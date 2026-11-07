@@ -15,7 +15,7 @@ Spine CLI는 [Spine](https://github.com/NARUBROWN/spine) 애플리케이션을 �
 
 ## 역할별 생성자 등록 후보
 
-코어 `v0.7.0-preview.6` 후보를 대상으로 하는 생성기는 다섯 역할을 하나의 `app.Constructor(...)` 호출에 모읍니다. `constructor`의 import 경로는 `github.com/NARUBROWN/spine/pkg/constructor`입니다.
+코어 `v0.7.0-preview.7` 후보를 대상으로 하는 생성기는 다섯 역할을 하나의 `app.Constructor(...)` 호출에 모읍니다. `constructor`의 import 경로는 `github.com/NARUBROWN/spine/pkg/constructor`입니다.
 
 ```go
 app.Constructor(
@@ -49,7 +49,7 @@ spine version
 
 ### 이번 Preview 설치
 
-컨트롤러 경로와 역할 표식 예제에는 CLI `v0.4.3-preview.7` 후보에 포함되는 기능이 필요합니다. 공개 발행 전에는 소스 조합으로 확인합니다. 해당 소스 체크아웃의 루트에서는 다음과 같이 설치합니다. 로컬 소스 설치본은 `0.4.3-dev`로 표시됩니다.
+컨트롤러 경로와 역할 표식 예제에는 CLI `v0.4.3-preview.8` 후보에 포함되는 기능이 필요합니다. 공개 발행 전에는 소스 조합으로 확인합니다. 해당 소스 체크아웃의 루트에서는 다음과 같이 설치합니다. 로컬 소스 설치본은 `0.4.3-dev`로 표시됩니다.
 
 ```sh
 go install ./cmd/spine
