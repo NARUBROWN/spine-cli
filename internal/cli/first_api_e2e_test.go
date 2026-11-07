@@ -73,6 +73,39 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 	if len(code) != 2 {
 		t.Fatal("generated guide lacks complete Go handler")
 	}
+	if strings.Contains(guide, "RegisterRoutes(*api.Registry)") {
+		apply(project, "g", "controller", "product")
+		controller := filepath.Join(project, "src/controller/product_controller.go")
+		generated, err := os.ReadFile(controller)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := strings.Replace(string(generated), "func (c *ProductController) RegisterRoutes(r *api.Registry) {}", code[1], 1)
+		if body == string(generated) {
+			t.Fatal("generated RegisterRoutes stub missing")
+		}
+		body = strings.Replace(body, "import (", "import (\n\"github.com/NARUBROWN/spine/pkg/httpx\"\n\"github.com/NARUBROWN/spine/pkg/input\"", 1)
+		writeE2EFile(t, controller, body)
+		writeE2EFile(t, filepath.Join(project, "internal/application/guide_test.go"), modernFirstAPIGuideHTTPTest)
+		format := exec.Command("go", "fmt", "./...")
+		format.Dir = project
+		if output, err := format.CombinedOutput(); err != nil {
+			t.Fatalf("format modern guide: %v %s", err, output)
+		}
+		assertE2ESuccess(t, runE2E(binary, project, nil, "verify", "--json"), "modern documented API and real HTTP response")
+		bad := strings.Replace(body, "func(a input.Body[CreateProduct]) httpx.Response[CreateProduct]", "func(a input.Body[CreateProduct]) string", 1)
+		bad = strings.Replace(bad, "return httpx.Response[CreateProduct]{Body: CreateProduct{Name: a.Name}}", `return "bad"`, 1)
+		bad = strings.Replace(bad, "\"github.com/NARUBROWN/spine/pkg/httpx\"\n", "", 1)
+		if bad == body {
+			t.Fatal("modern raw return fixture was not changed")
+		}
+		writeE2EFile(t, controller, bad)
+		result := runE2E(binary, project, nil, "contract", "check", "--json")
+		if result.code != 5 || !strings.Contains(result.stdout, "HTTP_RETURN_TYPE_UNSUPPORTED") {
+			t.Fatalf("modern raw return was not rejected: %+v", result)
+		}
+		return
+	}
 	for _, line := range strings.Split(guide, "\n") {
 		if strings.HasPrefix(line, "spine g dto ") || strings.HasPrefix(line, "spine g controller ") {
 			apply(project, strings.Fields(strings.TrimPrefix(line, "spine "))...)
@@ -127,5 +160,26 @@ func TestDocumentedProductAPI(t *testing.T) {
   response,err:=server.Client().Post(server.URL+"/products","application/json",strings.NewReader(scenario.body));if err!=nil {t.Fatal(err)}
   response.Body.Close();if response.StatusCode!=scenario.status {t.Fatalf("got %d want %d",response.StatusCode,scenario.status)}
  }
+}
+`
+
+const modernFirstAPIGuideHTTPTest = `package application
+import (
+ "github.com/NARUBROWN/spine"
+ "context"
+ "io"
+ "net/http/httptest"
+ "strings"
+ "testing"
+)
+func TestModernDocumentedProductAPI(t *testing.T) {
+ app,options,err:=BuildApplication();if err!=nil {t.Fatal(err)}
+ prepared,err:=app.Prepare(context.Background(),options);if err!=nil {t.Fatal(err)}
+ defer prepared.Close(context.Background())
+ handler,err:=spine.NetHTTPHandler(prepared);if err!=nil {t.Fatal(err)}
+ server:=httptest.NewServer(handler);defer server.Close()
+ response,err:=server.Client().Post(server.URL+"/products","application/json",strings.NewReader("{\"name\":\"Bolt\"}"));if err!=nil {t.Fatal(err)}
+ defer response.Body.Close();body,err:=io.ReadAll(response.Body);if err!=nil {t.Fatal(err)}
+ if response.StatusCode!=200 || !strings.Contains(string(body), "Bolt") {t.Fatalf("got %d %s",response.StatusCode,body)}
 }
 `

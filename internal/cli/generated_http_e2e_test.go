@@ -45,7 +45,12 @@ func TestGeneratedProjectsHandleHTTPInputErrors(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(project, "handlers"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			writeE2EFile(t, filepath.Join(project, "handlers", "controller.go"), `package handlers
+			_, legacyRouteErr := os.Stat(filepath.Join(project, "src/route/route.go"))
+			if legacyRouteErr != nil && !os.IsNotExist(legacyRouteErr) {
+				t.Fatal(legacyRouteErr)
+			}
+			modern := layout == layeredLayout && os.IsNotExist(legacyRouteErr)
+			handlerSource := `package handlers
 import (
  "errors"
  "github.com/NARUBROWN/spine/pkg/httpx"
@@ -70,7 +75,17 @@ func (*Controller) Text() TextResponse { return TextResponse{Body:"alias text"} 
 func (*Controller) Download() *httpx.Binary { return &httpx.Binary{ContentType:"application/octet-stream",Data:[]byte("binary data")} }
 func (*Controller) Redirect() httpx.Redirect { return httpx.Redirect{Location:"/health"} }
 
-`)
+`
+			handlerPath := filepath.Join(project, "handlers", "controller.go")
+			writeE2EFile(t, handlerPath, handlerSource)
+			if modern {
+				rejected := runE2E(binary, project, nil, "g", "route", "create", "--method", "POST", "--path", "/products", "--handler", "handlers:Controller.Create", "--dry-run", "--json")
+				if rejected.code == 0 || !strings.Contains(rejected.stdout, "requires a Constructor method") {
+					t.Fatalf("factory controller must fail safely: %+v", rejected)
+				}
+				handlerSource = strings.Replace(handlerSource, "func NewController() *Controller", "func (*Controller) Constructor() *Controller", 1)
+				writeE2EFile(t, handlerPath, handlerSource)
+			}
 			if layout == layeredLayout {
 				for _, route := range []struct{ name, method, path, handler string }{
 					{"create", "POST", "/products", "Create"}, {"detail", "GET", "/products/:id", "Detail"}, {"wrapper", "POST", "/wrapper", "Wrapped"}, {"fail", "GET", "/failure", "Fail"}, {"text", "GET", "/text", "Text"}, {"download", "GET", "/download", "Download"}, {"redirect", "GET", "/redirect", "Redirect"},

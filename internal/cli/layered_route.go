@@ -73,11 +73,17 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 	if dependency.Pointer != "*" {
 		return fmt.Errorf("route receiver requires a constructor returning *%s", name)
 	}
+	if controllerRoutesProject() {
+		if dependency.Factory != name+".Constructor" {
+			return fmt.Errorf("controller %s requires a Constructor method for route collection; keep legacy factory routes registered with app.Route or migrate to a controller prototype", name)
+		}
+		if err = p.addControllerRoute(r, dir, name, method, handlerSource, handlerFunction); err != nil {
+			return err
+		}
+		return p.registerConstructorRole(dir, dependency.Factory, "Controller")
+	}
 	if err = p.registerConstructor(dir, dependency.Factory); err != nil {
 		return err
-	}
-	if controllerRoutesProject() {
-		return p.addControllerRoute(r, dir, name, method, handlerSource, handlerFunction)
 	}
 	path := layeredRoutePath
 	s := p.Sources[path]
