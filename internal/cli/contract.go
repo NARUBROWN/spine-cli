@@ -50,15 +50,19 @@ type contractRegistration struct {
 }
 
 type httpRegistration struct {
-	delegatedMethod string
-	schemaSource    string
-	Method          string             `json:"method"`
-	Path            string             `json:"path"`
-	Handler         string             `json:"handler"`
-	Interceptors    []string           `json:"interceptors,omitempty"`
-	Parameters      []handlerParameter `json:"parameters,omitempty"`
-	Returns         []string           `json:"returns,omitempty"`
-	Source          string             `json:"source"`
+	delegatedMethod    string
+	schemaSource       string
+	Method             string             `json:"method"`
+	Path               string             `json:"path"`
+	Handler            string             `json:"handler"`
+	Tags               []string           `json:"tags,omitempty"`
+	Summary            string             `json:"summary,omitempty"`
+	Description        string             `json:"description,omitempty"`
+	Interceptors       []string           `json:"interceptors,omitempty"`
+	InterceptorSources []string           `json:"interceptor_sources,omitempty"`
+	Parameters         []handlerParameter `json:"parameters,omitempty"`
+	Returns            []string           `json:"returns,omitempty"`
+	Source             string             `json:"source"`
 }
 
 type namedRegistration struct {
@@ -71,9 +75,13 @@ type namedRegistration struct {
 }
 
 type handlerInputField struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	source string
+	description    string
+	example        any
+	hasExample     bool
+	invalidExample bool
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	source         string
 }
 
 type handlerParameter struct {

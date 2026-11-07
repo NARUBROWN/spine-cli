@@ -64,7 +64,12 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		}
 		seen[name] = true
 		shape.keys = append(shape.keys, name)
-		shape.fields = append(shape.fields, handlerInputField{Name: name, Type: expressionText(field.source.Fset, field.expression), source: field.source.Path})
+		descriptor := handlerInputField{Name: name, Type: expressionText(field.source.Fset, field.expression), source: field.source.Path, description: field.tags.Get("description")}
+		if example, ok := field.tags.Lookup("example"); ok {
+			descriptor.example, descriptor.hasExample = staticFieldExample(field.expression, example, field.source)
+			descriptor.invalidExample = !descriptor.hasExample
+		}
+		shape.fields = append(shape.fields, descriptor)
 	}
 	return shape, true
 }

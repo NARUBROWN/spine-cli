@@ -203,7 +203,7 @@ func (i *contractInspector) inspectControllerRoutes() {
 		if !ok {
 			continue
 		}
-		scan.walk(method, types.TypeString(output, func(p *types.Package) string { return p.Path() }), nil)
+		scan.walk(method, types.TypeString(output, func(p *types.Package) string { return p.Path() }), nil, nil)
 	}
 	validateTypedComponentGraph(i, outputs, signatures)
 }
@@ -218,7 +218,7 @@ func (i *contractInspector) controllerDiagnostic(code, message, source string) {
 	i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: code, Message: message, Source: source, Hint: hint})
 }
 
-func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwarded []int) {
+func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwarded []int, forwardedGroups map[int]staticGroup) {
 	function, ok := s.functions[object]
 	if !ok {
 		s.inspector.controllerDiagnostic("CONTROLLER_HELPER_UNRESOLVED", "Controller registration target has no inspectable project body: "+object.FullName(), "")
@@ -235,8 +235,12 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 	}
 	signature := object.Type().(*types.Signature)
 	tracked := map[types.Object]bool{}
+	groups := map[types.Object]staticGroup{}
 	for index := 0; index < signature.Params().Len(); index++ {
 		param := signature.Params().At(index)
+		if group, ok := forwardedGroups[index]; ok {
+			groups[param] = cloneStaticGroup(group)
+		}
 		if types.Identical(param.Type(), s.registry) && (forwarded == nil || containsControllerIndex(forwarded, index)) {
 			tracked[param] = true
 		}
@@ -251,6 +255,60 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 	}
 	parents := astParentMap(function.declaration.Body)
 	conditions := map[*ast.IfStmt]bool{}
+	var groupExpression func(ast.Expr) (staticGroup, bool, bool)
+	groupExpression = func(expr ast.Expr) (staticGroup, bool, bool) {
+		if id, ok := expr.(*ast.Ident); ok {
+			group, found := groups[info.ObjectOf(id)]
+			return cloneStaticGroup(group), found, found
+		}
+		call, ok := expr.(*ast.CallExpr)
+		if !ok {
+			return staticGroup{}, false, false
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Group" {
+			return staticGroup{}, false, false
+		}
+		parent := staticGroup{}
+		recognized := isRegistry(sel.X)
+		if !recognized {
+			var valid bool
+			parent, recognized, valid = groupExpression(sel.X)
+			if recognized && !valid {
+				return staticGroup{}, true, false
+			}
+		}
+		if !recognized {
+			return staticGroup{}, false, false
+		}
+		if controllerCallConditional(call, function.declaration.Body, parents, conditions) {
+			s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_CONDITIONAL", "Group is conditionally created.", function.source.Path)
+		}
+		if len(call.Args) == 0 {
+			s.inspector.controllerDiagnostic("CONTROLLER_GROUP_DYNAMIC", "Group path is missing.", function.source.Path)
+			return staticGroup{}, true, false
+		}
+		v := info.Types[call.Args[0]].Value
+		if v == nil || v.Kind() != constant.String {
+			s.inspector.controllerDiagnostic("CONTROLLER_GROUP_DYNAMIC", "Group path must be a compile-time string constant.", function.source.Path)
+			return staticGroup{}, true, false
+		}
+		path := constant.StringVal(v)
+		if path == "" || !strings.HasPrefix(path, "/") || strings.Contains(path, "//") {
+			s.inspector.controllerDiagnostic("CONTROLLER_GROUP_DYNAMIC", "Group path must be a valid absolute path.", function.source.Path)
+			return staticGroup{}, true, false
+		}
+		parent = cloneStaticGroup(parent)
+		if path != "/" {
+			parent.path = strings.TrimSuffix(parent.path, "/") + path
+		} else if parent.path == "" {
+			parent.path = "/"
+		}
+		if !s.groupOptions(function, call.Args[1:], &parent) {
+			return staticGroup{}, true, false
+		}
+		return parent, true, true
+	}
 	skipped := map[ast.Node]bool{}
 	imports := importPathsByAlias(function.source.File)
 	ast.Inspect(function.declaration.Body, func(node ast.Node) bool {
@@ -270,7 +328,7 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 		if literal, ok := node.(*ast.FuncLit); ok {
 			captures := false
 			ast.Inspect(literal.Body, func(child ast.Node) bool {
-				if id, ok := child.(*ast.Ident); ok && tracked[info.ObjectOf(id)] {
+				if id, ok := child.(*ast.Ident); ok && (tracked[info.ObjectOf(id)] || hasStaticGroup(groups, info.ObjectOf(id))) {
 					captures = true
 				}
 				return true
@@ -281,6 +339,28 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 			return false
 		}
 		if assignment, ok := node.(*ast.AssignStmt); ok {
+			for index, rhs := range assignment.Rhs {
+				if index >= len(assignment.Lhs) {
+					continue
+				}
+				id, ok := assignment.Lhs[index].(*ast.Ident)
+				if !ok {
+					continue
+				}
+				obj := info.ObjectOf(id)
+				if other, ok := rhs.(*ast.Ident); ok {
+					group, found := groups[info.ObjectOf(other)]
+					delete(groups, obj)
+					if found {
+						groups[obj] = cloneStaticGroup(group)
+					}
+					continue
+				}
+				delete(groups, obj)
+				if group, recognized, valid := groupExpression(rhs); recognized && valid {
+					groups[obj] = group
+				}
+			}
 			values := make([]bool, len(assignment.Lhs))
 			for index, rhs := range assignment.Rhs {
 				if index < len(values) {
@@ -297,6 +377,14 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 			for index, name := range declaration.Names {
 				if index < len(declaration.Values) {
 					tracked[info.ObjectOf(name)] = isRegistry(declaration.Values[index])
+					if alias, ok := declaration.Values[index].(*ast.Ident); ok {
+						if group, found := groups[info.ObjectOf(alias)]; found {
+							groups[info.ObjectOf(name)] = cloneStaticGroup(group)
+						}
+					}
+					if group, recognized, valid := groupExpression(declaration.Values[index]); recognized && valid {
+						groups[info.ObjectOf(name)] = group
+					}
 				}
 			}
 		}
@@ -311,12 +399,66 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 			}
 		}
 		source := relativeSource(position)
+		if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
+			typ := info.TypeOf(selector.X)
+			if pointer, ok := typ.(*types.Pointer); ok {
+				if named, ok := types.Unalias(pointer.Elem()).(*types.Named); ok && named.Obj().Name() == "Group" && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == spineImportPath+"/internal/apiregistry" {
+					if id, ok := selector.X.(*ast.Ident); !ok || !hasStaticGroup(groups, info.ObjectOf(id)) {
+						s.inspector.controllerDiagnostic("CONTROLLER_GROUP_VALUE_UNRESOLVED", "Group receiver is not statically tracked.", source)
+						return false
+					}
+				}
+			}
+		}
 		if selector, ok := call.Fun.(*ast.SelectorExpr); ok && info.TypeOf(selector.X) != nil && types.Identical(info.TypeOf(selector.X), s.registry) && !isRegistry(selector.X) {
 			s.inspector.controllerDiagnostic("CONTROLLER_REGISTRY_VALUE_UNRESOLVED", "Registry receiver is not a statically tracked registration parameter.", source)
 			return false
 		}
+		if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
+			if id, ok := selector.X.(*ast.Ident); ok {
+				if group, found := groups[info.ObjectOf(id)]; found {
+					method := selector.Sel.Name
+					if method == "Group" {
+						return false
+					}
+					switch method {
+					case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+					default:
+						s.inspector.controllerDiagnostic("CONTROLLER_GROUP_CALL_UNRESOLVED", "Unsupported group call: "+method, source)
+						return false
+					}
+					if controllerCallConditional(call, function.declaration.Body, parents, conditions) {
+						s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_CONDITIONAL", "Controller route is conditionally registered.", source)
+					}
+					if len(call.Args) != 3 {
+						s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_ARGUMENTS_INVALID", "Group route needs path, options and handler.", source)
+						return false
+					}
+					local := group
+					local = cloneStaticGroup(local)
+					options, ok := call.Args[1].(*ast.CallExpr)
+					if !ok {
+						s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Route options must be statically resolved.", source)
+						return false
+					}
+					optsel, ok := options.Fun.(*ast.SelectorExpr)
+					if !ok || optsel.Sel.Name != "Options" || !isAPISymbol(info.ObjectOf(optsel.Sel)) {
+						s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Route options must use api.Options.", source)
+						return false
+					}
+					if !s.groupOptions(function, options.Args, &local) {
+						return false
+					}
+					s.route(function, call, owner, method, source, &local)
+					return false
+				}
+			}
+		}
 		if selector, ok := call.Fun.(*ast.SelectorExpr); ok && isRegistry(selector.X) {
 			method := selector.Sel.Name
+			if method == "Group" {
+				return false
+			}
 			if method == "Error" {
 				return false
 			}
@@ -329,16 +471,29 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 			if controllerCallConditional(call, function.declaration.Body, parents, conditions) {
 				s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_CONDITIONAL", "Controller route is conditionally registered.", source)
 			}
-			s.route(function, call, owner, method, source)
+			s.route(function, call, owner, method, source, nil)
 			return false
 		}
-		var forwarded []int
+		forwardedGroups := map[int]staticGroup{}
+		for index, arg := range call.Args {
+			group, recognized, valid := groupExpression(arg)
+			if recognized {
+				if !valid {
+					return false
+				}
+				forwardedGroups[index] = group
+			} else if isGroupType(info.TypeOf(arg)) {
+				s.inspector.controllerDiagnostic("CONTROLLER_GROUP_VALUE_UNRESOLVED", "Group argument is not statically tracked.", source)
+				return false
+			}
+		}
+		forwarded := []int{}
 		for index, arg := range call.Args {
 			if isRegistry(arg) {
 				forwarded = append(forwarded, index)
 			}
 		}
-		if len(forwarded) == 0 {
+		if len(forwarded) == 0 && len(forwardedGroups) == 0 {
 			return true
 		}
 		var target *types.Func
@@ -351,6 +506,11 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 					for index := range forwarded {
 						forwarded[index]--
 					}
+					adjusted := map[int]staticGroup{}
+					for index, group := range forwardedGroups {
+						adjusted[index-1] = group
+					}
+					forwardedGroups = adjusted
 				}
 				if _, dynamic := selected.Recv().Underlying().(*types.Interface); !dynamic {
 					target, _ = selected.Obj().(*types.Func)
@@ -366,7 +526,7 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 		if controllerCallConditional(call, function.declaration.Body, parents, conditions) {
 			s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_CONDITIONAL", "Registration helper is conditionally called.", source)
 		}
-		s.walk(target, owner, forwarded)
+		s.walk(target, owner, forwarded, forwardedGroups)
 		return false
 	})
 }
@@ -380,7 +540,11 @@ func containsControllerIndex(indices []int, value int) bool {
 	return false
 }
 
-func (s *controllerRouteInspector) route(function controllerFunction, call *ast.CallExpr, owner, method, source string) {
+func (s *controllerRouteInspector) route(function controllerFunction, call *ast.CallExpr, owner, method, source string, group *staticGroup) {
+	handlerIndex := 1
+	if group != nil {
+		handlerIndex = 2
+	}
 	if len(call.Args) < 2 {
 		s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_ARGUMENTS_INVALID", "Registry route needs a path and handler.", source)
 		return
@@ -391,7 +555,14 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 		return
 	}
 	path := constant.StringVal(pathValue)
-	if signature, ok := function.pkg.TypesInfo.TypeOf(call.Args[1]).(*types.Signature); ok {
+	if group != nil {
+		if path == "/" {
+			path = group.path
+		} else {
+			path = strings.TrimSuffix(group.path, "/") + path
+		}
+	}
+	if signature, ok := function.pkg.TypesInfo.TypeOf(call.Args[handlerIndex]).(*types.Signature); ok {
 		if err := checkControllerInputs(signature); err != nil {
 			s.inspector.controllerDiagnostic("HTTP_INPUT_CONTRACT_INVALID", err.Error(), source)
 			return
@@ -400,7 +571,7 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 	var fields, results *ast.FieldList
 	delegatedMethod := ""
 	callbackSource := function.source
-	switch handler := call.Args[1].(type) {
+	switch handler := call.Args[handlerIndex].(type) {
 	case *ast.FuncLit:
 		fields, results = handler.Type.Params, handler.Type.Results
 		if len(handler.Body.List) == 1 {
@@ -441,9 +612,19 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 		s.inspector.controllerHandlers = map[string]staticHandlerSignature{}
 	}
 	s.inspector.controllerHandlers[key] = staticHandlerSignature{httpSource: callbackSource, httpFields: fields, httpResults: results, schemaSource: callbackSource.Path, returns: fieldTypes(callbackSource.Fset, results), source: source}
-	fake := &ast.CallExpr{Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", method)}, &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", path)}, call.Args[1]}}
-	fake.Args = append(fake.Args, call.Args[2:]...)
+	fake := &ast.CallExpr{Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", method)}, &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", path)}, call.Args[handlerIndex]}}
+	if group == nil {
+		fake.Args = append(fake.Args, call.Args[2:]...)
+	}
 	s.inspector.inspectHTTPCall(fake, function.pkg.Fset, source)
+	if group != nil {
+		r := &s.inspector.contract.HTTP[len(s.inspector.contract.HTTP)-1]
+		r.Tags = group.tags
+		r.Interceptors = append([]string(nil), group.interceptors...)
+		r.InterceptorSources = append([]string(nil), group.interceptorSources...)
+		r.Summary = group.summary
+		r.Description = group.description
+	}
 	s.inspector.contract.HTTP[len(s.inspector.contract.HTTP)-1].Handler = key
 	s.inspector.contract.HTTP[len(s.inspector.contract.HTTP)-1].delegatedMethod = delegatedMethod
 }
@@ -455,4 +636,142 @@ func controllerCallConditional(node, root ast.Node, parents map[ast.Node]ast.Nod
 		}
 	}
 	return conditionallyExecuted(node, root, parents, conditions)
+}
+
+// staticGroup is source-derived only; dynamic values are diagnosed rather than evaluated.
+type staticGroup struct {
+	path                 string
+	tags                 []string
+	interceptors         []string
+	interceptorSources   []string
+	summary, description string
+}
+
+func (s *controllerRouteInspector) groupOptions(f controllerFunction, exprs []ast.Expr, group *staticGroup) bool {
+	for _, expr := range exprs {
+		call, ok := expr.(*ast.CallExpr)
+		if !ok {
+			s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Option must be statically declared.", f.source.Path)
+			return false
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Option must be statically declared.", f.source.Path)
+			return false
+		}
+		name := sel.Sel.Name
+		if !isAPISymbol(f.pkg.TypesInfo.ObjectOf(sel.Sel)) {
+			s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Option is not from the Spine API package.", f.source.Path)
+			return false
+		}
+		if name == "Interceptors" {
+			if call.Ellipsis.IsValid() {
+				s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Expanded interceptor lists are not statically resolved.", f.source.Path)
+				return false
+			}
+			for _, arg := range call.Args {
+				if !staticInterceptorExpression(arg) {
+					s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Interceptor must be a statically identifiable value.", f.source.Path)
+					return false
+				}
+				group.interceptors = append(group.interceptors, expressionText(f.pkg.Fset, arg))
+				position := f.pkg.Fset.Position(arg.Pos())
+				if absolute, err := filepath.Abs("."); err == nil {
+					if relative, err := filepath.Rel(absolute, position.Filename); err == nil {
+						position.Filename = relative
+					}
+				}
+				group.interceptorSources = append(group.interceptorSources, relativeSource(position))
+			}
+			continue
+		}
+		if name != "Tags" && name != "Summary" && name != "Description" {
+			s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Unsupported group option: "+name, f.source.Path)
+			return false
+		}
+		for _, arg := range call.Args {
+			v := f.pkg.TypesInfo.Types[arg].Value
+			if v == nil || v.Kind() != constant.String {
+				s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Option requires constant text.", f.source.Path)
+				return false
+			}
+			value := constant.StringVal(v)
+			switch name {
+			case "Tags":
+				if !containsString(group.tags, value) {
+					group.tags = append(group.tags, value)
+				}
+			case "Summary":
+				group.summary = value
+			case "Description":
+				group.description = value
+			}
+		}
+	}
+	return true
+}
+func containsString(values []string, value string) bool {
+	for _, v := range values {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasStaticGroup(groups map[types.Object]staticGroup, obj types.Object) bool {
+	_, ok := groups[obj]
+	return ok
+}
+
+func isAPISymbol(obj types.Object) bool {
+	return obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == spineImportPath+"/pkg/api"
+}
+
+func cloneStaticGroup(group staticGroup) staticGroup {
+	group.tags = append([]string(nil), group.tags...)
+	group.interceptors = append([]string(nil), group.interceptors...)
+	group.interceptorSources = append([]string(nil), group.interceptorSources...)
+	return group
+}
+func staticInterceptorExpression(expr ast.Expr) bool {
+	switch value := expr.(type) {
+	case *ast.Ident:
+		return value.Name != "nil"
+	case *ast.SelectorExpr:
+		_, ok := value.X.(*ast.Ident)
+		return ok
+	case *ast.ParenExpr:
+		return staticInterceptorExpression(value.X)
+	case *ast.UnaryExpr:
+		return value.Op == token.AND && staticInterceptorExpression(value.X)
+	case *ast.CompositeLit:
+		safe := true
+		ast.Inspect(value, func(node ast.Node) bool {
+			switch node.(type) {
+			case *ast.CallExpr, *ast.FuncLit, *ast.IndexExpr, *ast.SliceExpr:
+				safe = false
+				return false
+			}
+			return true
+		})
+		return safe
+	}
+	return false
+}
+
+func isGroupType(value types.Type) bool {
+	if value == nil {
+		return false
+	}
+	pointer, ok := types.Unalias(value).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := types.Unalias(pointer.Elem()).(*types.Named)
+	if !ok || named.Obj().Pkg() == nil || named.Obj().Name() != "Group" {
+		return false
+	}
+	path := named.Obj().Pkg().Path()
+	return path == spineImportPath+"/internal/apiregistry" || path == spineImportPath+"/pkg/api"
 }

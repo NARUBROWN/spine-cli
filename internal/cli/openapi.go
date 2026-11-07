@@ -133,12 +133,35 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 				"default": map[string]any{"description": "Response status is determined by the Spine handler contract."},
 			},
 		}
+		if len(route.Tags) > 0 {
+			operation["tags"] = route.Tags
+		}
+		if route.Summary != "" {
+			operation["summary"] = route.Summary
+		}
+		if route.Description != "" {
+			operation["description"] = route.Description
+		}
 		var parameters []any
 		var unresolved []string
 		for _, parameter := range route.Parameters {
 			if parameter.SourceDTO && len(parameter.InputFields) > 0 {
 				for _, field := range parameter.InputFields {
-					parameters = append(parameters, map[string]any{"name": field.Name, "in": parameter.Binding, "required": parameter.Binding == "path", "schema": catalog.schema(field.Type, field.source)})
+					schema := catalog.schema(field.Type, field.source)
+					if field.description != "" {
+						schema["description"] = field.description
+					}
+					if field.hasExample {
+						schema["examples"] = []any{field.example}
+					}
+					if field.invalidExample {
+						schema["x-spine-unresolved-example"] = true
+					}
+					item := map[string]any{"name": field.Name, "in": parameter.Binding, "required": parameter.Binding == "path", "schema": schema}
+					if parameter.Binding != "path" {
+						item["x-spine-validation-unresolved"] = true
+					}
+					parameters = append(parameters, item)
 				}
 				continue
 			}
