@@ -159,10 +159,14 @@ func (i *contractInspector) inspectControllerRoutes() {
 			case "Controller":
 				required = contract
 			case "Interceptor":
-				if core := all[spineImportPath+"/core"]; core != nil {
+				if core := all[spineImportPath+"/core"]; core != nil && core.Types != nil {
 					if obj := core.Types.Scope().Lookup("Interceptor"); obj != nil {
 						required = obj.Type()
 					}
+				}
+				if required == nil {
+					i.controllerDiagnostic("COMPONENT_CONTRACT_INVALID", "The selected core does not provide core.Interceptor.", provider.Source)
+					continue
 				}
 			}
 			if required != nil {

@@ -51,32 +51,40 @@ func(*fixtureApp)Constructor(...any){}
 	}
 }
 
-func TestInterceptorContractRejectsNonInterfaceWithoutPanic(t *testing.T) {
-	for _, tc := range []struct{ name, contract, code string }{
-		{"interface", "type Interceptor interface{Accept()}", ""},
-		{"struct", "type Interceptor struct{}", "COMPONENT_CONTRACT_INVALID"},
+func TestInterceptorContractRejectsInvalidOrMissingDefinition(t *testing.T) {
+	for _, tc := range []struct{ name, contract, reference, code string }{
+		{"interface", "type Interceptor interface{Accept()}", "Interceptor", ""},
+		{"struct", "type Interceptor struct{}", "Interceptor", "COMPONENT_CONTRACT_INVALID"},
+		{"missing definition", "type Placeholder struct{}", "Placeholder", "COMPONENT_CONTRACT_INVALID"},
+		{"unloaded package", "", "", "COMPONENT_CONTRACT_INVALID"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			inspector := controllerFixture(t, `func(*UserController)RegisterRoutes(r *api.Registry){r.POST(endpoint,func(a input.Body[DTO])httpx.Response[DTO]{return httpx.Response[DTO]{Body:DTO{Name:a.Name}}})}
+			body := `func(*UserController)RegisterRoutes(r *api.Registry){r.POST(endpoint,func(a input.Body[DTO])httpx.Response[DTO]{return httpx.Response[DTO]{Body:DTO{Name:a.Name}}})}
 type ProbeInterceptor struct{}
 func(*ProbeInterceptor)Constructor()*ProbeInterceptor{panic("must not run")}
 func(*ProbeInterceptor)Accept(){}
-type ImportedContract=core.Interceptor`)
-			if err := os.MkdirAll(filepath.Join("core", "core"), 0755); err != nil {
-				t.Fatal(err)
+`
+			if tc.reference != "" {
+				body += "type ImportedContract=core." + tc.reference
 			}
-			if err := os.WriteFile(filepath.Join("core", "core", "interceptor.go"), []byte("package core\n"+tc.contract), 0644); err != nil {
-				t.Fatal(err)
+			inspector := controllerFixture(t, body)
+			if tc.contract != "" {
+				if err := os.MkdirAll(filepath.Join("core", "core"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join("core", "core", "interceptor.go"), []byte("package core\n"+tc.contract), 0644); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile("controller.go")
+				if err != nil {
+					t.Fatal(err)
+				}
+				text := strings.Replace(string(data), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api";"github.com/NARUBROWN/spine/core"`, 1)
+				if err := os.WriteFile("controller.go", []byte(text), 0644); err != nil {
+					t.Fatal(err)
+				}
+				inspector.sources = nil
 			}
-			data, err := os.ReadFile("controller.go")
-			if err != nil {
-				t.Fatal(err)
-			}
-			text := strings.Replace(string(data), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api";"github.com/NARUBROWN/spine/core"`, 1)
-			if err := os.WriteFile("controller.go", []byte(text), 0644); err != nil {
-				t.Fatal(err)
-			}
-			inspector.sources = nil
 			inspector.contract.Constructors = []contractRegistration{{Target: "example.com/typed.ProbeInterceptor.Constructor", Role: "Interceptor", object: true}}
 			inspector.inspectControllerRoutes()
 			found := false
