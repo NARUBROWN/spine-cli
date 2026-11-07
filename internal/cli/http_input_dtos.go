@@ -10,8 +10,10 @@ import (
 )
 
 type httpInputField struct {
-	name string
-	tags reflect.StructTag
+	name       string
+	tags       reflect.StructTag
+	expression ast.Expr
+	source     *layoutSource
 }
 
 // 태그와 키만 정적으로 확인합니다. validator 규칙과 사용자 decoder는 실행하지 않습니다.
@@ -83,7 +85,7 @@ func (catalog *httpBindingCatalog) inputFields(source *layoutSource, node *ast.S
 		if len(field.Names) > 0 {
 			for _, name := range field.Names {
 				if ast.IsExported(name.Name) {
-					fields = append(fields, httpInputField{name.Name, tags})
+					fields = append(fields, httpInputField{name: name.Name, tags: tags, expression: field.Type, source: source})
 				}
 			}
 			continue
@@ -98,7 +100,7 @@ func (catalog *httpBindingCatalog) inputFields(source *layoutSource, node *ast.S
 			tagged = tagged || exists
 		}
 		if tagged {
-			fields = append(fields, httpInputField{name, tags})
+			fields = append(fields, httpInputField{name: name, tags: tags, expression: field.Type, source: source})
 			continue
 		}
 		if key := canonicalType(source, field.Type, catalog.module); key != "" {

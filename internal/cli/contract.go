@@ -39,6 +39,10 @@ type applicationContract struct {
 }
 
 type contractRegistration struct {
+	Role         string `json:"role,omitempty"`
+	Output       string `json:"output,omitempty"`
+	object       bool
+	typedTarget  string
 	Target       string   `json:"target"`
 	Scope        string   `json:"scope,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
@@ -46,14 +50,19 @@ type contractRegistration struct {
 }
 
 type httpRegistration struct {
-	schemaSource string
-	Method       string             `json:"method"`
-	Path         string             `json:"path"`
-	Handler      string             `json:"handler"`
-	Interceptors []string           `json:"interceptors,omitempty"`
-	Parameters   []handlerParameter `json:"parameters,omitempty"`
-	Returns      []string           `json:"returns,omitempty"`
-	Source       string             `json:"source"`
+	delegatedMethod    string
+	schemaSource       string
+	Method             string             `json:"method"`
+	Path               string             `json:"path"`
+	Handler            string             `json:"handler"`
+	Tags               []string           `json:"tags,omitempty"`
+	Summary            string             `json:"summary,omitempty"`
+	Description        string             `json:"description,omitempty"`
+	Interceptors       []string           `json:"interceptors,omitempty"`
+	InterceptorSources []string           `json:"interceptor_sources,omitempty"`
+	Parameters         []handlerParameter `json:"parameters,omitempty"`
+	Returns            []string           `json:"returns,omitempty"`
+	Source             string             `json:"source"`
 }
 
 type namedRegistration struct {
@@ -65,14 +74,27 @@ type namedRegistration struct {
 	Source       string             `json:"source"`
 }
 
+type handlerInputField struct {
+	description    string
+	example        any
+	hasExample     bool
+	invalidExample bool
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	source         string
+}
+
 type handlerParameter struct {
-	Name       string   `json:"name"`
-	Type       string   `json:"type"`
-	Binding    string   `json:"binding"`
-	Key        string   `json:"key,omitempty"`
-	Keys       []string `json:"keys,omitempty"`
-	SourceDTO  bool     `json:"source_dto,omitempty"`
-	Deprecated bool     `json:"deprecated,omitempty"`
+	Payload       string              `json:"payload_type,omitempty"`
+	InputFields   []handlerInputField `json:"fields,omitempty"`
+	payloadSource string
+	Name          string   `json:"name"`
+	Type          string   `json:"type"`
+	Binding       string   `json:"binding"`
+	Key           string   `json:"key,omitempty"`
+	Keys          []string `json:"keys,omitempty"`
+	SourceDTO     bool     `json:"source_dto,omitempty"`
+	Deprecated    bool     `json:"deprecated,omitempty"`
 }
 
 type resourceRegistration struct {
@@ -98,11 +120,12 @@ type contractDiagnostic struct {
 }
 
 type contractInspector struct {
-	contract  *applicationContract
-	module    string
-	seen      map[string]bool
-	qualified bool
-	sources   layoutSources
+	contract           *applicationContract
+	module             string
+	seen               map[string]bool
+	qualified          bool
+	sources            layoutSources
+	controllerHandlers map[string]staticHandlerSignature
 }
 
 func inspectApplication() (applicationContract, error) {
@@ -135,7 +158,21 @@ func inspectApplication() (applicationContract, error) {
 		inspector.inspectHTTPAdapter(config, file, fset, function, index)
 	}
 	inspector.resolveConstructorDependencies()
+	priorRoutes := len(inspector.contract.HTTP)
+	inspector.inspectControllerRoutes()
 	inspector.resolveHandlerSignatures()
+	if len(inspector.contract.HTTP) > priorRoutes {
+		diagnostics := inspector.contract.Diagnostics[:0]
+		for _, diagnostic := range inspector.contract.Diagnostics {
+			switch diagnostic.Code {
+			case "HTTP_ROUTE_DUPLICATE", "HTTP_ROUTE_AMBIGUOUS", "CONSUMER_DUPLICATE", "WEBSOCKET_DUPLICATE":
+				continue
+			}
+			diagnostics = append(diagnostics, diagnostic)
+		}
+		inspector.contract.Diagnostics = diagnostics
+		inspector.addDuplicateDiagnostics()
+	}
 	inspector.sort()
 	inspector.contract.Complete = !contractHasErrors(*inspector.contract)
 	return *inspector.contract, nil
@@ -209,7 +246,33 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 			case "Constructor":
 				registrationCall = true
 				for _, argument := range call.Args {
-					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: i.registrationExpression(argument, file, fset), Source: source})
+					role, value, marked := componentRoleArgument(argument, imports)
+					if marked {
+						if value == nil {
+							i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role markers require exactly one object prototype or Custom factory.", source)
+							continue
+						}
+						argument = value
+					}
+					target, object := i.objectConstructorTarget(argument, file, fset)
+					if !marked && object {
+						role = "Custom"
+					}
+					if !object {
+						target = i.registrationExpression(argument, file, fset)
+						if marked {
+							pkg := modulePackage(i.module, filepath.ToSlash(filepath.Dir(fset.Position(file.Package).Filename)))
+							target = qualifiedExpression(argument, imports, pkg, fset)
+						}
+					}
+					typedTarget := target
+					if !object && !marked && !i.qualified {
+						typedTarget = legacyFactoryTarget(argument, file, fset, i.module)
+					}
+					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: target, Source: source, Role: role, object: object, typedTarget: typedTarget})
+					if role != "" && role != "Custom" && !object {
+						i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role markers require a statically known pointer-to-struct prototype; only Custom accepts factory functions.", source)
+					}
 				}
 				if packageName, importPath, ok := directResourceConstructor(call, imports, i.module); ok {
 					i.addResource(packageName, importPath, source)
@@ -449,6 +512,9 @@ func (i *contractInspector) resolveConstructorDependencies() {
 	})
 	for index := range i.contract.Constructors {
 		constructor := &i.contract.Constructors[index]
+		if constructor.object || constructor.Role != "" {
+			continue
+		}
 		matches := signatures[constructor.Target]
 		if len(matches) == 1 {
 			constructor.Dependencies = matches[0].dependencies
@@ -473,6 +539,9 @@ type staticHandlerSignature struct {
 
 func (i *contractInspector) resolveHandlerSignatures() {
 	signatures := map[string][]staticHandlerSignature{}
+	for key, signature := range i.controllerHandlers {
+		signatures[key] = []staticHandlerSignature{signature}
+	}
 	handlerSources := layoutSources{}
 	collect := func(path string, file *ast.File, fset *token.FileSet) {
 		source := &layoutSource{Path: path, File: file, Fset: fset, Package: filepath.ToSlash(filepath.Dir(path))}

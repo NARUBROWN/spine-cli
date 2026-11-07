@@ -55,7 +55,7 @@ func (p *layeredPlanner) resolveDependency(ref string) (layeredDependency, error
 			continue
 		}
 		factory := strings.TrimPrefix(key, prefix)
-		if !token.IsIdentifier(factory) || !ast.IsExported(factory) {
+		if (!token.IsIdentifier(factory) || !ast.IsExported(factory)) && factory != name+".Constructor" {
 			continue
 		}
 		for _, signature := range signatures {
@@ -83,6 +83,10 @@ func (p *layeredPlanner) composition() (*layoutSource, *ast.FuncDecl, int, strin
 }
 
 func (p *layeredPlanner) importInto(s *layoutSource, dir string) (string, error) {
+	return importPathInto(s, filepath.Base(dir), p.Module+"/"+dir)
+}
+
+func importPathInto(s *layoutSource, preferred, importPath string) (string, error) {
 	imports := importPathsByAlias(s.File)
 	// 파일의 선언과 지역 변수도 import 별칭과 충돌하지 않도록 예약합니다.
 	ast.Inspect(s.File, func(node ast.Node) bool {
@@ -93,10 +97,10 @@ func (p *layeredPlanner) importInto(s *layoutSource, dir string) (string, error)
 		}
 		return true
 	})
-	alias := chooseAlias(imports, filepath.Base(dir), p.Module+"/"+dir)
+	alias := chooseAlias(imports, preferred, importPath)
 	for _, spec := range s.File.Imports {
 		path, err := strconv.Unquote(spec.Path.Value)
-		if err != nil || path != p.Module+"/"+dir || spec.Name == nil {
+		if err != nil || path != importPath || spec.Name == nil {
 			continue
 		}
 		if spec.Name.Name == "." {
@@ -106,7 +110,7 @@ func (p *layeredPlanner) importInto(s *layoutSource, dir string) (string, error)
 			spec.Name = ast.NewIdent(alias)
 		}
 	}
-	if err := addNamedImport(s.File, alias, p.Module+"/"+dir); err != nil {
+	if err := addNamedImport(s.File, alias, importPath); err != nil {
 		return "", err
 	}
 	return alias, nil
@@ -133,11 +137,81 @@ func (p *layeredPlanner) registerConstructor(dir, name string) error {
 	if err != nil {
 		return err
 	}
-	stmt := &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(appName), Sel: ast.NewIdent("Constructor")}, Args: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}}}}
+	roleName := "Custom"
+	var argument ast.Expr = &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
+	if strings.HasSuffix(name, ".Constructor") {
+		typ := strings.TrimSuffix(name, ".Constructor")
+		argument = &ast.UnaryExpr{Op: token.AND, X: &ast.CompositeLit{Type: &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(typ)}}}
+		for _, role := range componentRoles() {
+			if role.Constructor && (dir == role.Root || strings.HasPrefix(dir, role.Root+"/")) {
+				roleName = strings.ToUpper(role.Name[:1]) + role.Name[1:]
+				break
+			}
+		}
+	}
+	if controllerRoutesProject() {
+		markerAlias, err := importPathInto(s, "constructor", constructorImportPath)
+		if err != nil {
+			return err
+		}
+		argument = &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(markerAlias), Sel: ast.NewIdent(roleName)}, Args: []ast.Expr{argument}}
+		for _, statement := range f.Body.List[index+1:] {
+			expression, ok := statement.(*ast.ExprStmt)
+			if !ok {
+				continue
+			}
+			call, ok := expression.X.(*ast.CallExpr)
+			if !ok || call.Ellipsis.IsValid() {
+				continue
+			}
+			if selector, direct := directAppCall(call, appName); direct && selector == "Constructor" {
+				call.Args = append(call.Args, argument)
+				if err := p.update(s); err != nil {
+					return err
+				}
+				return p.separateConstructorArgument()
+			}
+		}
+	}
+	stmt := &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(appName), Sel: ast.NewIdent("Constructor")}, Args: []ast.Expr{argument}}}
 	f.Body.List = append(f.Body.List, nil)
 	copy(f.Body.List[index+2:], f.Body.List[index+1:])
 	f.Body.List[index+1] = stmt
 	return p.update(s)
+}
+
+// separateConstructorArgument는 여러 줄 등록에 추가한 표식을 독립된 줄에 둡니다.
+// AST를 저장한 뒤의 위치로 줄바꿈만 추가하므로 기존 주석과 인자를 보존합니다.
+func (p *layeredPlanner) separateConstructorArgument() error {
+	s, f, _, appName, err := p.composition()
+	if err != nil {
+		return err
+	}
+	for _, statement := range f.Body.List {
+		expression, ok := statement.(*ast.ExprStmt)
+		if !ok {
+			continue
+		}
+		call, ok := expression.X.(*ast.CallExpr)
+		if !ok || call.Ellipsis.IsValid() {
+			continue
+		}
+		selector, direct := directAppCall(call, appName)
+		if !direct || selector != "Constructor" {
+			continue
+		}
+		if len(call.Args) < 2 || s.Fset.Position(call.Lparen).Line == s.Fset.Position(call.Rparen).Line {
+			return nil
+		}
+		last := s.Fset.Position(call.Args[len(call.Args)-1].Pos())
+		previous := s.Fset.Position(call.Args[len(call.Args)-2].End())
+		if last.Line != previous.Line {
+			return nil
+		}
+		contents := p.Changes[s.Path].Contents
+		return p.put(s.Path, contents[:last.Offset]+"\n"+contents[last.Offset:], true)
+	}
+	return nil
 }
 
 func (p *layeredPlanner) registerRouteModule() error {

@@ -14,13 +14,14 @@ const commandSchemaVersion = "spine.command-schema/v1alpha1"
 const contextSchemaVersion = "spine.project-context/v1alpha1"
 
 type commandSchema struct {
-	SchemaVersion   string                      `json:"schema_version"`
-	CLIVersion      string                      `json:"cli_version"`
-	Protocol        string                      `json:"protocol_schema"`
-	GlobalOptions   map[string]optionDefinition `json:"global_options"`
-	Commands        []commandDefinition         `json:"commands"`
-	GenerationRoles []generationRole            `json:"generation_roles"`
-	Layouts         []string                    `json:"layouts"`
+	ControllerRoutes map[string]any              `json:"controller_routes"`
+	SchemaVersion    string                      `json:"schema_version"`
+	CLIVersion       string                      `json:"cli_version"`
+	Protocol         string                      `json:"protocol_schema"`
+	GlobalOptions    map[string]optionDefinition `json:"global_options"`
+	Commands         []commandDefinition         `json:"commands"`
+	GenerationRoles  []generationRole            `json:"generation_roles"`
+	Layouts          []string                    `json:"layouts"`
 }
 
 type commandDefinition struct {
@@ -107,7 +108,7 @@ func currentCommandSchema() commandSchema {
 			c.Options = map[string]optionDefinition{"help": {Type: "boolean", Description: "Show command help without executing; other command-specific options are rejected"}}
 		}
 	}
-	return commandSchema{SchemaVersion: commandSchemaVersion, CLIVersion: version, Protocol: protocolSchemaVersion, GlobalOptions: map[string]optionDefinition{"root": {Type: "string", Description: "Run the command from an explicit project directory"}}, Commands: commands, GenerationRoles: generationRoles(), Layouts: []string{layeredLayout, "legacy"}}
+	return commandSchema{ControllerRoutes: controllerRouteSchema(), SchemaVersion: commandSchemaVersion, CLIVersion: version, Protocol: protocolSchemaVersion, GlobalOptions: map[string]optionDefinition{"root": {Type: "string", Description: "Run the command from an explicit project directory"}}, Commands: commands, GenerationRoles: generationRoles(), Layouts: []string{layeredLayout, "legacy"}}
 }
 
 func runSchema(args []string, out, errOut io.Writer) int {
@@ -203,7 +204,7 @@ func runContext(args []string, out, errOut io.Writer) int {
 	}
 	var inventoryErr error
 	if config.Layout == layeredLayout {
-		context.GenerationRoles = generationRoles()
+		context.GenerationRoles = projectGenerationRoles()
 		context.Components, inventoryErr = layoutInventory(config.Module)
 	} else if context.Config.Layout == "" {
 		context.Config.Layout = "legacy"

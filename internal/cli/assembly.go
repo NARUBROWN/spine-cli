@@ -136,7 +136,13 @@ func assemblyApplication(options newProjectOptions) (string, error) {
 			source.WriteString("echoplatform \"" + echoPlatformPath + "\"\n")
 		}
 		if options.Layout == layeredLayout {
-			fmt.Fprintf(&source, "controller %q\nroute %q\n", options.Module+"/src/controller", options.Module+"/src/route")
+			fmt.Fprintf(&source, "controller %q\n", options.Module+"/src/controller")
+			if controllerRoutesScaffold(options) {
+				fmt.Fprintf(&source, "%q\n", constructorImportPath)
+			}
+			if !controllerRoutesScaffold(options) {
+				fmt.Fprintf(&source, "route %q\n", options.Module+"/src/route")
+			}
 		} else {
 			source.WriteString("\"github.com/NARUBROWN/spine/pkg/httpx\"\n")
 		}
@@ -209,7 +215,14 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 	}
 	if options.Platform == "echo" || options.Platform == "nethttp" {
 		if options.Layout == layeredLayout {
-			source.WriteString("app.Constructor(controller.NewHealthController)\nif err := route.Register(app); err != nil { return nil, boot.Options{}, err }\n")
+			if controllerRoutesScaffold(options) {
+				source.WriteString("app.Constructor(\nconstructor.Controller(&controller.HealthController{}),\n)\n")
+			} else {
+				source.WriteString("app.Constructor(controller.NewHealthController)\n")
+			}
+			if !controllerRoutesScaffold(options) {
+				source.WriteString("if err := route.Register(app); err != nil { return nil, boot.Options{}, err }\n")
+			}
 		} else {
 			source.WriteString("app.Constructor(NewHealthController)\napp.Route(\"GET\",\"/health\",(*HealthController).Get)\n")
 		}
@@ -276,7 +289,11 @@ func assemblyReadme(options newProjectOptions) string {
 	}
 	source.WriteString("\n`spine update --dry-run --json`으로 의존성 변경을 검토하고 `--if-match`로 적용합니다. update는 앱 소스를 바꾸지 않습니다. 정적 검사와 build/test는 실제 브로커 연결, ACK/NACK, 배포 검증을 뜻하지 않습니다.\n")
 	if options.Layout == layeredLayout && (options.Platform == "echo" || options.Platform == "nethttp") {
-		source.WriteString(strings.ReplaceAll(generatedFirstAPIGuide(), "{{MODULE}}", options.Module))
+		if controllerRoutesScaffold(options) {
+			source.WriteString(registeredFirstAPIGuide())
+		} else {
+			source.WriteString(strings.ReplaceAll(generatedFirstAPIGuide(), "{{MODULE}}", options.Module))
+		}
 	}
 	return source.String()
 }

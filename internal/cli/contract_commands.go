@@ -394,8 +394,12 @@ func printHTTPExplanation(contract applicationContract, route httpRegistration, 
 			interceptors = append(interceptors, interceptor)
 		}
 	}
-	for _, target := range route.Interceptors {
-		interceptors = append(interceptors, contractRegistration{Target: target, Scope: "route", Source: route.Source})
+	for index, target := range route.Interceptors {
+		source := route.Source
+		if index < len(route.InterceptorSources) && route.InterceptorSources[index] != "" {
+			source = route.InterceptorSources[index]
+		}
+		interceptors = append(interceptors, contractRegistration{Target: target, Scope: "route", Source: source})
 	}
 	for index, interceptor := range interceptors {
 		fmt.Fprintf(out, "    %d. PreHandle %s (%s)\n", index+2, interceptor.Target, interceptor.Source)

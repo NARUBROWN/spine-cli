@@ -89,14 +89,30 @@ func (p *layeredPlanner) details(request layeredRequest) generationDetails {
 		}
 	}
 	if request.Kind == "route" {
-		details.Routes = append(details.Routes, httpRegistration{Method: request.Method, Path: request.Path, Handler: request.Handler, Source: layeredRoutePath})
+		routeSource := layeredRoutePath
+		if controllerRoutesProject() {
+			pkg, handler, _ := strings.Cut(request.Handler, ":")
+			typ, _, _ := strings.Cut(handler, ".")
+			for _, source := range p.Sources.packageFiles(pkg) {
+				for _, decl := range source.File.Decls {
+					function, ok := decl.(*ast.FuncDecl)
+					if ok && function.Recv != nil && function.Name.Name == "RegisterRoutes" && strings.TrimPrefix(expressionText(source.Fset, function.Recv.List[0].Type), "*") == typ {
+						routeSource = source.Path
+					}
+				}
+			}
+			details.Registrations = append(details.Registrations, generatedRegistrationInfo{"controller", pkg + ":" + typ + ".RegisterRoutes", routeSource})
+		}
+		details.Routes = append(details.Routes, httpRegistration{Method: request.Method, Path: request.Path, Handler: request.Handler, Source: routeSource})
 		if pkg, handler, ok := strings.Cut(request.Handler, ":"); ok {
 			name, _, _ := strings.Cut(handler, ".")
 			if dependency, err := p.resolveDependency(pkg + ":" + name); err == nil {
 				details.Registrations = append(details.Registrations, generatedRegistrationInfo{"constructor", pkg + ":" + dependency.Factory, composition})
 			}
 		}
-		details.Registrations = append(details.Registrations, generatedRegistrationInfo{"module", "src/route:Register", composition})
+		if !controllerRoutesProject() {
+			details.Registrations = append(details.Registrations, generatedRegistrationInfo{"module", "src/route:Register", composition})
+		}
 	}
 	if p.Register && (request.Kind == "consumer" || request.Kind == "websocket") {
 		directory := filepath.ToSlash(filepath.Join("src", request.Kind, request.Name.Group, request.Name.Name.Package))

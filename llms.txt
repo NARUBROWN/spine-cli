@@ -381,10 +381,13 @@ spine generate|g <domain|dto|repository|service|controller|resource|route|consum
 | route | `src/route/route.go` | HTTP 등록 |
 | application | `internal/application/` | 생성자와 Register 호출 연결 |
 
-`spine schema --json`의 `generation_roles`와 `spine context --json`의 `generation_roles`는
-같은 정의를 사용한다. context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
+`spine schema --json`의 `generation_roles`는 프로젝트와 무관한 기본값이다.
+`spine context --json`의 `generation_roles`는 선택한 코어와 레이아웃을 반영한다.
+컨트롤러 등록 API를 지원하는 layered 프로젝트의 route 경로는 `src/controller`이며,
+기존 버전의 기본 경로는 `src/route/route.go`다. 프로젝트 변경에는 context의 값을 우선한다.
+context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
 `role`, `group`, `package`, `type`으로 현재 구성 요소를 찾는다. `package`는 모듈 경로까지 포함한다.
-route와 application은 고정 연결 위치이며 composition은 설정의 `composition`을 따른다.
+composition은 설정의 `composition`을 따른다.
 
 ```sh
 spine g domain user
@@ -420,7 +423,13 @@ spine g controller admin/user --depends src/service:UserService
 세 역할 모두 구조체와 생성자 골격만 만든다. repository에 DB 연결, 메모리 저장소, ID 할당이나
 CRUD를 추가하지 않는다. controller에 임의의 HTTP 메서드나 경로를 만들지 않는다.
 
-### 8.3 명시적인 HTTP 경로
+### 8.3 HTTP 경로 등록
+
+컨트롤러 등록 API를 지원하는 코어에서는 `constructor.Controller`로 컨트롤러를 등록하고
+`RegisterRoutes(*api.Registry)`에 경로를 선언한다. 별도 `route.go`에서 `app.Route`로
+메서드 표현식을 연결하는 기존 방식은 Deprecated다.
+
+아래는 기존 라우트 파일을 사용하는 프로젝트의 호환 절차다.
 
 핸들러를 먼저 구현한 뒤 메서드와 경로와 실제 메서드 참조를 지정한다.
 
@@ -1107,3 +1116,18 @@ CLI v0.4.2의 platform-contracts-v0.6.5 레시피는 Spine v0.6.5와 각 독립 
 운영 절차와 초기 전환은 `release/README.md`를 따른다. 모든 단계에서 태그를 발행하고 GitHub Release는 Production에서만 만든다. Preview와 RC의 승격은 성공한 Actions 실행과 태그별 manifest artifact로 검증한다. 공개 발행 전 태그, 계획과 릴리스 노트 초안을 검토하고 승인한다. 소스 트리나 생성 레시피가 바뀌면 새 Preview에서 검증한다. `SPINE_CLI_SHUTDOWN_TIMEOUT`은 run과 dev의 종료 대기 시간이며 기본값은 15초다.
 
 Preview CLI 설치: `go install github.com/NARUBROWN/spine-cli/cmd/spine@preview`. `@preview`는 브랜치 HEAD를 선택하며 실제 버전은 `spine version`으로 확인한다.
+
+## Controller route source candidate
+
+Core >=v0.7.0-preview.5 selects controller-owned RegisterRoutes scaffolds; earlier cores retain route.go generation.
+The schema exposes controller_routes and capabilities list contract.controller-routes/generation.controller-routes.
+Static analysis uses installed Go type information, aliases, constant paths and Registry forwarding helpers without running init or constructors.
+Dynamic paths/targets, recursive or asynchronous registration and unknown conditions fail completeness.
+Path/Query/Body struct payloads and wire names are shared by route validation and static OpenAPI.
+Use dry-run/diff/base_hash and if-match for controller and route AST changes. No user route.go is deleted automatically.
+Runtime OpenAPI for uncollected controllers fails explicitly and never invokes Prepare; use static export or explicit DescribePreparedHTTP.
+Candidate source E2E is TestControllerCandidateEndToEnd with SPINE_CONTROLLER_CORE_SOURCE. Public installation still needs matching published tags.
+
+## 역할별 생성자 표식 후보
+
+코어 v0.7.0-preview.5 후보는 `app.Constructor(...)` 안에 `constructor.Custom`, `Repository`, `Service`, `Controller`, `Interceptor` 표식을 받는다. 공식 import 경로는 `github.com/NARUBROWN/spine/pkg/constructor`이며 별칭을 지원한다. Custom은 객체 표식과 기존 이름 있는 생성자 함수를 받고 나머지 역할은 객체 표식을 받는다. 역할이 명시된 등록 중 Controller만 HTTP 경로를 수집한다. CLI는 생성자를 실행하지 않고 공통 생성 계약과 추가 역할 계약, 의존성을 검사한다. 동적 표식 변수나 사용자 wrapper는 분석 불완전이다. 신규 코어용 생성기는 기존 Constructor 호출에 표식을 추가하고 dry-run/hash 적용과 재실행 불변을 유지한다. 미공개 소스 검증을 공개 설치 증거로 해석하지 않는다.

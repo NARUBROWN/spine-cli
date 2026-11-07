@@ -21,12 +21,15 @@ type httpBindingCatalog struct {
 }
 
 type httpBindingShape struct {
-	binding string
-	kind    string
-	source  string
-	keys    []string
-	legacy  bool
-	problem string
+	payload       string
+	payloadSource string
+	fields        []handlerInputField
+	binding       string
+	kind          string
+	source        string
+	keys          []string
+	legacy        bool
+	problem       string
 }
 
 // HTTP 검증과 route 생성은 동일한 소스 기반 resolver 지원 규칙을 사용합니다.
@@ -75,6 +78,7 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 		for range count {
 			parameter := &parameters[index]
 			parameter.Binding = shape.binding
+			parameter.Payload, parameter.payloadSource, parameter.InputFields = shape.payload, shape.payloadSource, shape.fields
 			parameter.SourceDTO = shape.source != "" && shape.kind == "pointer"
 			parameter.Keys = append([]string(nil), shape.keys...)
 			parameter.Deprecated = catalog.structured && shape.legacy
@@ -141,6 +145,11 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 		return shape
 	}
 	switch node := expression.(type) {
+	case *ast.IndexExpr:
+		if marker, ok := catalog.markerShape(source, node, visiting); ok {
+			return marker
+		}
+		return httpBindingShape{kind: "unknown"}
 	case *ast.ParenExpr:
 		return catalog.shape(source, node.X, visiting)
 	case *ast.StarExpr:
@@ -178,7 +187,7 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 			return httpBindingShape{kind: "scalar"}
 		}
 		return httpBindingShape{kind: "unknown"}
-	case *ast.SelectorExpr, *ast.IndexExpr, *ast.IndexListExpr:
+	case *ast.SelectorExpr, *ast.IndexListExpr:
 		return httpBindingShape{kind: "unknown"}
 	default:
 		return httpBindingShape{kind: "unsupported"}
