@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 )
@@ -74,7 +75,7 @@ func runProject(development bool, out, errOut io.Writer) int {
 		return 0
 	case <-ctx.Done():
 		if stopDevProcess(process, false) {
-			fmt.Fprintln(errOut, "Application exceeded the shutdown timeout and was killed.")
+			fmt.Fprintln(errOut, forcedTerminationMessage("Application", runtime.GOOS))
 			return 1
 		}
 		return 0

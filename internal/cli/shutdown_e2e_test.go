@@ -28,6 +28,28 @@ func TestApplicationShutdownTimeout(t *testing.T) {
 	}
 }
 
+func TestWindowsFallbackReportsForcedTermination(t *testing.T) {
+	if message := forcedTerminationMessage("Application", "windows"); !strings.Contains(message, "Windows fallback") {
+		t.Fatalf("unexpected forced termination message: %s", message)
+	}
+	if os.Getenv("SPINE_TEST_CHILD") == "1" {
+		for {
+			time.Sleep(time.Second)
+		}
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestWindowsFallbackReportsForcedTermination$")
+	cmd.Env = append(os.Environ(), "SPINE_TEST_CHILD=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	process := &devProcess{cmd: cmd, done: make(chan error, 1)}
+	go func() { process.done <- cmd.Wait() }()
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	if !stopDevProcessForOS(process, false, "windows") {
+		t.Fatal("Windows fallback was not reported as forced termination")
+	}
+}
+
 func TestRunAndDevGracefulShutdown(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix signal lifecycle; Windows uses the documented kill fallback")
