@@ -147,7 +147,7 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 		for _, parameter := range route.Parameters {
 			if parameter.SourceDTO && len(parameter.InputFields) > 0 {
 				for _, field := range parameter.InputFields {
-					schema := catalog.schema(field.Type, field.source)
+					schema := nullableInputSchema(catalog.schema(field.Type, field.source), field.Type, parameter.Binding)
 					if field.description != "" {
 						schema["description"] = field.description
 					}
@@ -158,9 +158,7 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 						schema["x-spine-unresolved-example"] = true
 					}
 					item := map[string]any{"name": field.Name, "in": parameter.Binding, "required": parameter.Binding == "path", "schema": schema}
-					if parameter.Binding != "path" {
-						item["x-spine-validation-unresolved"] = true
-					}
+					item["x-spine-validation-unresolved"] = true
 					parameters = append(parameters, item)
 				}
 				continue
@@ -181,9 +179,20 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 				if parameter.Payload != "" {
 					payload, source = parameter.Payload, parameter.payloadSource
 				}
-				operation["requestBody"] = map[string]any{
-					"content": map[string]any{"application/json": map[string]any{"schema": catalog.schema(payload, source)}},
+				content := map[string]any{"application/json": map[string]any{"schema": catalog.schema(payload, source)}}
+				requestBody := map[string]any{"content": content}
+				if parameter.Payload == "" {
+					form, ok, unresolved := catalog.staticFormContent(payload, source)
+					if ok {
+						requestBody["content"] = form
+					}
+					if unresolved {
+						requestBody["content"] = map[string]any{}
+						requestBody["x-spine-unresolved-content"] = true
+					}
 				}
+				operation["requestBody"] = requestBody
+
 			case "query", "header", "value":
 				unresolved = append(unresolved, parameter.Name+":"+parameter.Type+"@"+parameter.Binding)
 			}

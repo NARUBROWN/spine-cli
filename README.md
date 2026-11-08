@@ -350,7 +350,8 @@ spine contract export --format asyncapi --output asyncapi.json
 OpenAPI와 AsyncAPI는 타입을 선언한 패키지와 import 범위를 기준으로 스키마를 구분합니다.
 JSON 태그가 없으면 Go 필드 이름을 그대로 사용하고, `time.Time`은 `string`과 `date-time`으로
 표현합니다. 해석할 수 없는 타입은 `x-spine-unresolved-type`으로 표시합니다. 이 표시는 문서의
-분석 한계이며 실제 API의 요청 필드가 아닙니다. AsyncAPI의 채널과 operation 식별자는 원래 이름을
+분석 한계이며 실제 API의 요청 필드가 아닙니다. 정적 OpenAPI는 분석 가능한 path, query, header DTO와 폼 파일을 표현하지만 validator 규칙은 실행하지 않고 `x-spine-validation-unresolved`로 표시합니다. query와 header의 필수 여부도 정적으로 확정할 수 없으므로 생성 문서에서 선택 입력으로 취급될 수 있습니다. 정확한 검증 규칙이 필요하면 runtime 출력을 사용하세요. 본문 media type을 확인할 수 없으면 `x-spine-unresolved-content`로 표시합니다.
+AsyncAPI의 채널과 operation 식별자는 원래 이름을
 구분하도록 만들며, 문서에 기록된 참조를 사용해야 합니다.
 
 ## 개발 명령

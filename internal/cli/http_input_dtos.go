@@ -67,6 +67,12 @@ func (catalog *httpBindingCatalog) inputStruct(source *layoutSource, node *ast.S
 		}
 		seen[key] = true
 		shape.keys = append(shape.keys, key)
+		descriptor := handlerInputField{Name: key, Type: expressionText(field.source.Fset, field.expression), source: field.source.Path, description: field.tags.Get("description")}
+		if example, ok := field.tags.Lookup("example"); ok {
+			descriptor.example, descriptor.hasExample = staticFieldExample(field.expression, example, field.source)
+			descriptor.invalidExample = !descriptor.hasExample
+		}
+		shape.fields = append(shape.fields, descriptor)
 	}
 	return shape
 }
