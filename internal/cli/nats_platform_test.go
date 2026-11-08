@@ -64,7 +64,7 @@ func TestNATSPlanIsolationAndLegacyRecipeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeE2EFile(t, configPath, strings.ReplaceAll(string(config), currentAssemblyRecipe, stableAssemblyRecipe))
+	writeE2EFile(t, configPath, removeDependencyChannelForLegacyFixture(strings.ReplaceAll(string(config), currentAssemblyRecipe, stableAssemblyRecipe)))
 	before, _ := os.ReadFile("go.mod")
 	out.Reset()
 	errOut.Reset()
