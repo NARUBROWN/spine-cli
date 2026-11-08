@@ -29,6 +29,12 @@ class FakeGitHub:
             policy = {"next_version": next_version, "ci_core": SHA,
                       "channels": {"preview": {"core_version": "v0.7.0-preview.8"}}}
             return {"content": base64.b64encode(json.dumps(policy).encode()).decode()}
+        if path.startswith("git/matching-refs/tags/"):
+            return []
+        if path.startswith("actions/workflows/preview.yml/runs?"):
+            return {"workflow_runs": []}
+        if path == "git/commits/" + SHA:
+            return {"tree": {"sha": "b" * 40}}
         raise AssertionError(path)
 
 
@@ -83,20 +89,21 @@ class ReleaseTrainTests(unittest.TestCase):
     def test_existing_tag_requires_matching_successful_provenance(self):
         module = release.CORE_MODULE
         item = sample()[module]
-        manifest = {"schema_version": "spine.release-manifest/v1", "repository": "NARUBROWN/spine",
+        manifest = {"schema_version": "spine.release-manifest/v1", "repository": "NARUBROWN/spine", "module": module, "kind": "core", "source_tree": "b" * 40,
                     "version": item["version"], "source_sha": SHA, "channel": "preview", "branch": "preview",
-                    "components": {}, "workflow_run_id": "10", "workflow_run_attempt": "1",
-                    "validation": {"result": "passed", "version": item["version"], "source_sha": SHA, "components": {}}}
+                    "components": {"core_version": item["version"]}, "workflow_run_id": "10", "workflow_run_attempt": "1",
+                    "validation": {"result": "passed", "scope": "core", "version": item["version"], "source_sha": SHA,
+                                   "components": {"core_version": item["version"]}, "selected_modules": {module: item["version"]}}}
         run = {"id": 10, "run_attempt": 1, "status": "completed", "conclusion": "success",
                "event": "workflow_dispatch", "head_sha": SHA, "head_branch": "preview",
                "path": ".github/workflows/preview.yml"}
         artifact = {"workflow_run": {"id": 10, "head_sha": SHA}}
         github = FakeGitHub("NARUBROWN/spine")
         github.candidate_evidence = lambda tag, prefix: {"manifest": manifest, "workflow_run": run, "artifact": artifact}
-        train.check_existing(github, module, item)
+        train.check_existing(github, module, item, core_version=item["version"])
         run["conclusion"] = "failure"
         with self.assertRaises(release.ReleaseError):
-            train.check_existing(github, module, item)
+            train.check_existing(github, module, item, core_version=item["version"])
 
     def test_existing_publication_in_progress_prevents_dispatch(self):
         item = sample()[release.CORE_MODULE]
@@ -110,7 +117,52 @@ class ReleaseTrainTests(unittest.TestCase):
             return original_api(path)
         github.api = api
         with self.assertRaisesRegex(release.ReleaseError, "진행 중인"):
-            train.dispatch_and_wait(release.CORE_MODULE, item, github_factory=lambda _: github)
+            train.dispatch_and_wait(release.CORE_MODULE, item, core_version=item["version"], github_factory=lambda _: github)
+
+    def test_reused_sequence_or_queued_release_stops_before_dispatch(self):
+        for condition in ("sequence", "queued"):
+            with self.subTest(condition=condition):
+                class BusyGitHub(FakeGitHub):
+                    def api(self, path):
+                        if self.repository.endswith("/spine-nats-platform"):
+                            if condition == "sequence" and path.startswith("git/matching-refs/tags/"):
+                                return [{"ref": "refs/tags/v0.2.0-preview.3"}]
+                            if condition == "queued" and path.startswith("actions/workflows/preview.yml/runs?"):
+                                return {"workflow_runs": [{"status": "queued"}]}
+                        return super().api(path)
+                seen = []
+                with self.assertRaises(release.ReleaseError):
+                    train.run_train(sample(), execute=True, github_factory=BusyGitHub,
+                                    dispatch=lambda module, item, **kwargs: seen.append(module))
+                self.assertEqual(seen, [])
+
+    def test_successful_dispatch_waits_for_run_tag_and_proof(self):
+        module = "github.com/NARUBROWN/spine-nats-platform"
+        item = sample()[module]
+        class RunGitHub(FakeGitHub):
+            def __init__(self, repository):
+                super().__init__(repository)
+                self.dispatched = False
+                self.queries = 0
+            def tag_sha(self, tag):
+                return SHA if self.dispatched and self.queries >= 2 else None
+            def api(self, path, **kwargs):
+                if kwargs.get("method") == "POST":
+                    self.dispatched = True
+                    self.sent = kwargs["data"]
+                    return None
+                if path.startswith("actions/workflows/preview.yml/runs?"):
+                    self.queries += 1
+                    return {"workflow_runs": [{"id": 42, "head_sha": SHA, "status": "in_progress"}] if self.dispatched else []}
+                if path == "actions/runs/42":
+                    return {"status": "completed", "conclusion": "success"}
+                return super().api(path)
+        github = RunGitHub(module.removeprefix("github.com/"))
+        with patch.object(train, "check_existing") as proof:
+            train.dispatch_and_wait(module, item, core_version="v0.7.0-preview.8", github_factory=lambda _: github,
+                                    sleep=lambda _: None)
+        self.assertEqual(github.sent, {"ref": "preview", "inputs": item})
+        proof.assert_called_once_with(github, module, item, core_version="v0.7.0-preview.8")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import time
 
-from release import CORE_MODULE, GitHub, ReleaseError, SHA, UPSTREAM_MODULES, parse_tag
+from release import CORE_MODULE, GitHub, ReleaseError, SHA, TAG, UPSTREAM_MODULES, parse_tag
 
 CLI = "github.com/NARUBROWN/spine-cli"
 ORDER = (*UPSTREAM_MODULES, CLI)
@@ -31,12 +31,23 @@ def validate_plan(plan, github_factory=GitHub):
         policy = json.loads(base64.b64decode(raw["content"]))
         if parse_tag(item["version"])[0] != policy["next_version"]:
             raise ReleaseError("후보 버전이 저장소의 다음 버전과 다릅니다: " + module)
+        if module == CORE_MODULE and policy["channels"]["preview"]["core_version"] != item["version"]:
+            raise ReleaseError("코어 정책의 Preview 버전이 계획과 다릅니다")
         if module not in (CORE_MODULE, CLI):
             selected = policy["channels"]["preview"]["core_version"]
             if selected != plan[CORE_MODULE]["version"] or policy["ci_core"] != plan[CORE_MODULE]["source_sha"]:
                 raise ReleaseError("플랫폼의 코어 버전 또는 CI 소스가 계획과 다릅니다: " + module)
         if tagged is not None:
-            check_existing(github, module, item)
+            check_existing(github, module, item, core_version=plan[CORE_MODULE]["version"])
+        else:
+            base, channel, sequence = parse_tag(item["version"])
+            refs = github.api(f"git/matching-refs/tags/{base}-{channel}.")
+            tags = [ref["ref"].removeprefix("refs/tags/") for ref in refs]
+            existing = [parse_tag(tag)[2] for tag in tags if TAG.fullmatch(tag)]
+            if existing and sequence <= max(existing):
+                raise ReleaseError("후보 번호가 이미 발행된 번호보다 크지 않습니다: " + module)
+            if any(run["status"] != "completed" for run in workflow_runs(github)):
+                raise ReleaseError("이미 진행 중인 Preview 발행이 있습니다: " + module)
     return plan
 
 
@@ -44,7 +55,7 @@ def workflow_runs(github):
     return github.api("actions/workflows/preview.yml/runs?event=workflow_dispatch&branch=preview&per_page=100")["workflow_runs"]
 
 
-def check_existing(github, module, item):
+def check_existing(github, module, item, *, core_version):
     prefix = "core-candidate-" if module == CORE_MODULE else "release-manifest-"
     proof = github.candidate_evidence(item["version"], prefix)
     manifest, run, artifact = proof["manifest"], proof["workflow_run"], proof["artifact"]
@@ -65,15 +76,24 @@ def check_existing(github, module, item):
             str(run.get("id")) != manifest.get("workflow_run_id") or
             str(run.get("run_attempt")) != manifest.get("workflow_run_attempt")):
         raise ReleaseError("기존 태그의 발행 검증이 완료되지 않았습니다: " + module)
+    if module != CLI:
+        scope = "core" if module == CORE_MODULE else "platform"
+        if (manifest.get("kind") != scope or manifest.get("module") != module or
+                report.get("scope") != scope or
+                manifest.get("source_tree") != github.api("git/commits/" + item["source_sha"])["tree"]["sha"] or
+                manifest.get("components", {}).get("core_version") != core_version or
+                report.get("selected_modules", {}).get(module) != item["version"] or
+                report.get("selected_modules", {}).get(CORE_MODULE) != core_version):
+            raise ReleaseError("기존 태그가 계획의 코어 조합을 검증하지 않았습니다: " + module)
 
 
-def dispatch_and_wait(module, item, *, timeout=21600, github_factory=GitHub, sleep=time.sleep, now=time.monotonic):
+def dispatch_and_wait(module, item, *, core_version, timeout=21600, github_factory=GitHub, sleep=time.sleep, now=time.monotonic):
     github = github_factory(module.removeprefix("github.com/"))
     current = github.tag_sha(item["version"])
     if current:
         if current != item["source_sha"]:
             raise ReleaseError("기존 태그가 요청한 커밋과 다릅니다: " + module)
-        check_existing(github, module, item)
+        check_existing(github, module, item, core_version=core_version)
         return
     if github.api("git/ref/heads/preview")["object"]["sha"] != item["source_sha"]:
         raise ReleaseError("발행 전에 Preview HEAD가 바뀌었습니다: " + module)
@@ -97,7 +117,7 @@ def dispatch_and_wait(module, item, *, timeout=21600, github_factory=GitHub, sle
             if run["status"] == "completed":
                 if run["conclusion"] != "success" or github.tag_sha(item["version"]) != item["source_sha"]:
                     raise ReleaseError("발행 실행 또는 태그 검증에 실패했습니다: " + module)
-                check_existing(github, module, item)
+                check_existing(github, module, item, core_version=core_version)
                 return
         sleep(15)
     raise ReleaseError("발행 완료 대기 시간이 초과됐습니다. 승인과 실행 상태를 확인하세요: " + module)
@@ -110,7 +130,7 @@ def run_train(plan, *, execute=False, github_factory=GitHub, dispatch=dispatch_a
             print(f"{module}: {plan[module]['version']} {plan[module]['source_sha']}")
         return
     for module in ORDER:
-        dispatch(module, plan[module], github_factory=github_factory)
+        dispatch(module, plan[module], core_version=plan[CORE_MODULE]["version"], github_factory=github_factory)
 
 
 def main():

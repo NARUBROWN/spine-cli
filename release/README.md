@@ -20,7 +20,7 @@ CLI Preview 발행 계획을 만들기 전에 코어 Preview 후보를 발행하
 
 CLI 저장소의 `RELEASE_EVIDENCE_TOKEN` secret에는 코어와 7개 플랫폼 저장소의 Actions 읽기 권한이 있는 자격 증명이 필요합니다. 이 값은 선행 저장소의 검증 artifact 조회에만 사용합니다. CLI 태그 생성은 기존 워크플로 토큰과 승인 환경을 사용합니다. secret이 없거나 읽기 권한이 부족하면 발행을 중단합니다.
 
-전체 Preview 발행은 `scripts/release/release_train.py --plan 계획.json`으로 먼저 확인합니다. JSON 객체에 코어, 위 7개 플랫폼과 CLI의 전체 모듈 경로를 키로 넣고, 각각 `version`과 `source_sha`를 지정합니다. 각 Preview 브랜치에 후보 변경을 미리 병합해야 합니다. 확인한 계획에 `--execute`를 추가하면 코어, 플랫폼, CLI 순서로 각 저장소의 기존 Preview 발행 workflow를 실행하고 앞 단계의 성공을 기다립니다. 기존 승인 환경은 그대로 적용되므로 승인이 필요한 단계는 지정 리뷰어가 처리해야 합니다. GitHub CLI에는 각 저장소의 Actions 실행 권한이 필요합니다.
+전체 Preview 발행은 `scripts/release/release_train.py --plan 계획.json`으로 먼저 확인합니다. JSON 객체에 코어, 위 7개 플랫폼과 CLI의 전체 모듈 경로를 키로 넣고, 각각 `version`과 `source_sha`를 지정합니다. 각 Preview 브랜치에 후보 변경을 미리 병합해야 합니다. 실행 전 모든 저장소의 후보 번호, 진행 중인 발행과 기존 검증 기록을 확인합니다. 확인한 계획에 `--execute`를 추가하면 코어, 플랫폼, CLI 순서로 각 저장소의 기존 Preview 발행 workflow를 실행하고 앞 단계의 성공을 기다립니다. 기존 승인 환경은 그대로 적용되므로 승인이 필요한 단계는 지정 리뷰어가 처리해야 합니다. GitHub CLI에는 각 저장소의 Actions 실행 권한이 필요합니다.
 
 CLI는 태그 생성 전에 선행 발행 기록을 다시 확인하고, 태그 생성 후 기록이 달라지면 최종 manifest를 만들지 않습니다. 순차 실행은 다른 작업자의 동시 발행을 잠그지 않습니다. CLI의 발행 후 검증이 끝날 때까지 별도의 코어와 플랫폼 Preview 발행을 시작하지 마세요.
 
