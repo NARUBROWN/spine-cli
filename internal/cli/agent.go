@@ -58,6 +58,7 @@ func currentCommandSchema() commandSchema {
 	jsonOption := optionDefinition{Type: "boolean", Description: "Emit the versioned machine-readable result protocol"}
 	commands := []commandDefinition{
 		{Name: "build", Summary: "Build the configured application binary", Effects: commandEffects{WritesFiles: true, Network: true}},
+		{Name: "licenses", Summary: "Print third party license notices embedded in the CLI binary", Effects: commandEffects{}},
 		{Name: "capabilities", Summary: "Discover implemented features and explicit limits", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "check", Summary: "Run formatting, vet, and test checks", Effects: commandEffects{Network: true}},
 		{Name: "completion", Summary: "Generate shell completion", Arguments: []argumentDefinition{{Name: "shell", Required: true, Enum: []string{"powershell", "bash", "zsh"}}}, Effects: commandEffects{}},
@@ -153,6 +154,10 @@ type projectContextConfig struct {
 	Events            []eventPlatformSpec `json:"event_platforms,omitempty"`
 	Validator         string              `json:"validator,omitempty"`
 	WebSocketPlatform string              `json:"websocket_platform,omitempty"`
+	FrontendRoot      string              `json:"frontend_root,omitempty"`
+	FrontendEntry     string              `json:"frontend_entry,omitempty"`
+	FrontendOutput    string              `json:"frontend_output,omitempty"`
+	FrontendAPIPrefix string              `json:"frontend_api_prefix,omitempty"`
 }
 
 type nextAction struct {
@@ -193,7 +198,7 @@ func runContext(args []string, out, errOut io.Writer) int {
 		SchemaVersion: contextSchemaVersion,
 		CLIVersion:    version,
 		ProjectRoot:   filepath.Clean(absoluteRoot),
-		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform},
+		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform, FrontendRoot: config.FrontendRoot, FrontendEntry: config.FrontendEntry, FrontendOutput: config.FrontendOutput, FrontendAPIPrefix: config.FrontendAPIPrefix},
 		Capabilities:  currentCapabilities(),
 		Doctor:        doctor,
 		NextActions: []nextAction{

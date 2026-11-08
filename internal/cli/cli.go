@@ -142,6 +142,8 @@ func runCommand(args []string, out, errOut io.Writer) int {
 		return runContext(args[1:], out, errOut)
 	case "build":
 		return runBuild(out, errOut)
+	case "licenses":
+		return runLicenses(args[1:], out, errOut)
 	case "completion":
 		return runCompletion(args[1:], out, errOut)
 	default:
@@ -168,6 +170,7 @@ Usage:
   spine generate websocket <name> --path </path> --field message:string
   spine schema [--json]
   spine context [--json]
+  spine licenses
 
 Layout:
   New projects use layered-v1 role roots with optional nested groups.

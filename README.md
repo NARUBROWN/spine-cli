@@ -359,11 +359,12 @@ AsyncAPI의 채널과 operation 식별자는 원래 이름을
 | 명령 | 동작 |
 | --- | --- |
 | `spine dev` | 변경을 감지하고, 새 빌드가 성공한 경우에만 앱을 교체 |
-| `spine run` | `ENV=production`으로 빌드하고 실행 |
+| `spine run` | 프론트를 production 빌드한 뒤 `ENV=production`으로 Go 앱을 빌드하고 실행 |
 | `spine test` | `go test ./...` 실행 |
 | `spine check` | gofmt 상태, `go vet`, `go test` 검사 |
 | `spine verify` | 정적 계약 검사 후 `spine check` 수행 |
-| `spine build` | `bin/<모듈명>`에 바이너리 생성 |
+| `spine build` | 프론트 production 산출물과 `bin/<모듈명>` 바이너리 생성 |
+| `spine licenses` | CLI에 포함된 제삼자 라이선스 고지 출력 |
 | `spine doctor` | 도구 체인, 설정, 정적 계약을 오프라인 진단 |
 | `spine completion <shell>` | bash, zsh, PowerShell completion 생성 |
 
@@ -371,10 +372,37 @@ AsyncAPI의 채널과 operation 식별자는 원래 이름을
 그 밖의 명령별 옵션은 실행 전에 오류로 처리합니다. 테스트 필터는 `go test ./... -run <이름>`으로
 직접 실행하세요.
 
-`run`은 매번 `go build`를 호출해 Go 자체의 빌드 캐시와 로컬 의존성 변경을 반영합니다.
-`dev`는 Go가 열거한 소스와 embed 파일, 모듈과 프로젝트 설정을 감시합니다. 일반 로그 기록은
-재시작 조건에서 제외하며 유효한 설정 변경 시 새 포트를 전달합니다. SIGTERM에서도 자식 앱을
-종료하고 회수합니다.
+`run`은 한 번의 명령 실행에서 production 프론트 번들과 Go 앱을 각각 한 번 빌드합니다. Go 빌드는
+Go 자체의 빌드 캐시와 로컬 의존성 변경을 반영합니다. `dev`는 Go 소스를 감시해 변경 시 앱을
+재빌드하고 재시작하며, 프론트 파일만 바뀌면 증분 번들만 교체합니다. 설정 파일 변경 시에는
+앱을 다시 빌드해 새 포트와 프론트 설정을 전달합니다. 일반 로그 기록은 재시작 조건에서 제외하며
+SIGTERM에서도 자식 앱을 종료하고 회수합니다.
+
+### React CSR 프론트엔드
+
+프로젝트에 `frontend/src/main.tsx`, `frontend/src/main.jsx`, `frontend/src/main.ts` 또는
+`frontend/src/main.js`가 있으면 CLI가 React CSR 엔트리로 감지합니다. `frontend/index.html`은
+선택 사항이며, 없으면 `#root`가 있는 기본 HTML을 만듭니다. 프로젝트에서 프론트 의존성을 먼저
+설치해야 합니다. CLI는 npm 패키지를 설치하지 않으며 TypeScript 타입 검사는 수행하지 않습니다.
+
+```toml
+frontend_root = "frontend"
+frontend_entry = "src/main.tsx" # 선택 사항, 자동 감지 경로를 바꿀 때 사용
+frontend_output = "bin/frontend"
+frontend_api_prefix = "/api"
+```
+
+설정 키는 모두 선택 사항입니다. 기본값은 `frontend_root = "frontend"`,
+`frontend_output = "bin/frontend"`, `frontend_api_prefix = "/api"`입니다. 엔트리를 자동 감지하지
+못했으면 `frontend_entry`를 지정하세요. 빌드 결과는 같은 HTTP listener에서 제공합니다. 기존
+Echo 및 `net/http` 플랫폼 라우트가 먼저 처리되고, 정적 파일과 확장자가 없는 HTML 경로는 앱의
+404 뒤에 제공됩니다. API가 설정한 prefix 밖에 있고 HTML 요청에 404를 반환하면 SPA 경로로
+판정될 수 있습니다. 존재하지 않는 확장자 파일은 404를 유지합니다.
+
+`spine dev`는 esbuild 증분 context를 유지하고 프론트 변경만 재빌드하므로 Go 앱을 재시작하지
+않습니다. `spine run`과 `spine build`는 최적화된 번들을 한 번 생성합니다. 빌드 결과에는 번들
+패키지의 사용 가능한 LICENSE 파일을 모은 `THIRD-PARTY-LICENSES.txt`와 esbuild가 연결한 법적
+주석이 포함됩니다. `spine licenses`는 esbuild를 포함한 CLI Go 의존성의 라이선스 전문을 출력합니다.
 
 ## 프로젝트 설정
 
@@ -391,6 +419,7 @@ recipe = "platform-contracts-preview"
 validator = "none"
 websocket_platform = "none"
 # 이벤트 선택 시 예: event_platforms = ["events:kafka", "jobs:rabbitmq"]
+# React CSR 사용 시 선택 설정은 위 React CSR 프론트엔드 절을 참고하세요.
 ```
 
 `module`은 `go.mod`의 module path와 같아야 합니다.
