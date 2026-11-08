@@ -159,7 +159,7 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 	processDone := process.done
 	defer func() {
 		if stopDevProcess(process, false) {
-			fail("process_killed", "Application exceeded the shutdown timeout and was killed.")
+			fail("process_killed", forcedTerminationMessage("Application", runtime.GOOS))
 			code = 1
 		}
 	}()
@@ -222,7 +222,7 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 			}
 			config = updatedConfig
 			if stopDevProcess(process, false) {
-				fail("process_killed", "Previous application exceeded the shutdown timeout and was killed.")
+				fail("process_killed", forcedTerminationMessage("Previous application", runtime.GOOS))
 			}
 			process, err = startDevProcess(newBinary, newBinaryDir, config, processOut, processErr)
 			if err != nil {
@@ -382,8 +382,19 @@ func applicationShutdownTimeout() (time.Duration, error) {
 	return timeout, nil
 }
 
-// stopDevProcess는 제한 시간을 넘겨 강제 종료했는지 반환합니다.
+func forcedTerminationMessage(subject, goos string) string {
+	if devTerminationUsesKill(goos) {
+		return subject + " was forcibly terminated using the Windows fallback."
+	}
+	return subject + " exceeded the shutdown timeout and was killed."
+}
+
+// stopDevProcess는 자식을 강제 종료했는지 반환합니다.
 func stopDevProcess(process *devProcess, removeBinary bool) bool {
+	return stopDevProcessForOS(process, removeBinary, runtime.GOOS)
+}
+
+func stopDevProcessForOS(process *devProcess, removeBinary bool, goos string) bool {
 	if process == nil {
 		return false
 	}
@@ -393,12 +404,16 @@ func stopDevProcess(process *devProcess, removeBinary bool) bool {
 	if process.cmd == nil || process.cmd.Process == nil {
 		return false
 	}
-	if err := terminateDevProcess(process.cmd.Process, runtime.GOOS); err != nil {
+	if err := terminateDevProcess(process.cmd.Process, goos); err != nil {
 		select {
 		case <-process.done:
 			return false
 		default:
 		}
+	} else if devTerminationUsesKill(goos) {
+		// Windows의 즉시 강제 종료도 정상 종료와 구분해 보고합니다.
+		<-process.done
+		return true
 	}
 	timeout, err := applicationShutdownTimeout()
 	if err != nil {
