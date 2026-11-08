@@ -796,6 +796,9 @@ source 기본값은 static이다. --source runtime은 import 가능한 compositi
 - JSON 태그가 없으면 Go 필드 이름을 유지하고 `json:"-"`와 선택적 필드 태그를 반영
 - `time.Time`은 JSON 날짜와 시간 문자열로 표현
 - 해석할 수 없는 타입은 존재하지 않는 `$ref` 대신 `x-spine-unresolved-type`으로 표시
+- path, query, header DTO와 폼 필드를 정적으로 해석하며 validator 규칙은 `x-spine-validation-unresolved`로 표시
+- query와 header의 필수 여부를 확정하지 못하므로 생성 문서에서 선택 입력으로 취급될 수 있음. 정확한 검증 규칙은 runtime 출력 사용
+- 본문 media type을 확인할 수 없으면 `x-spine-unresolved-content`로 표시
 - runtime이 정하는 response status는 `default` response와 `x-spine-*` evidence로 표현
 - 해결하지 못한 query/header/value는 별도 extension에 보존
 - dynamic registration을 추정하지 않음
