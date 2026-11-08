@@ -21,13 +21,13 @@
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
-- 새 프로젝트의 레시피: `platform-contracts-preview` (코어와 선택한 플랫폼의 @preview 브랜치 조회, stability=prerelease)
+- 새 프로젝트의 레시피: `platform-contracts-preview`; `dependency_channel`은 `preview` (기본값), `rc`, `main` 중 하나이며 update에서도 유지한다.
 - recipe 미지정 기존 Echo 앱의 update 레시피: `echo-v0.1.0-spine-v0.6.0`
-- Gorilla WS: `@preview`
-- 새 앱 Spine: `github.com/NARUBROWN/spine@preview`
+- Gorilla WS 기본 채널: `@preview`
+- 새 앱 Spine 기본 채널: `github.com/NARUBROWN/spine@preview`; `rc`는 공개 RC 또는 더 높은 정식 태그, `main`은 공개 정식 태그만 선택한다.
 - 기존 `platform-contracts-v0.7.0-preview.1` 앱의 `update`는 코어 `v0.7.0-preview.1`을 유지한다. `.2` 전환은 recipe를 명시적으로 바꾸고 dry-run/base_hash를 검토해 적용한다.
-- Kafka: `@preview`; RabbitMQ: `@preview`
-- playground: `@preview`
+- Kafka와 RabbitMQ 기본 채널: `@preview`
+- playground 기본 채널: `@preview`
 - 기존 platform-contracts-v0.6.5 앱은 정식 조합을 유지한다. 이 Preview 소스의 기능을 정식 CLI @latest나 과거 코어에 있다고 가정하지 않는다.
 - Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform@preview`
 - Echo 플랫폼 설치, 프로젝트 의존성 갱신과 HTTP 반환형 진단은 CLI v0.3.0에서 제공한다.

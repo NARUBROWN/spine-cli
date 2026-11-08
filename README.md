@@ -116,10 +116,11 @@ spine new nats-worker --platform none --event-platform events:nats
 
 | 옵션 | 값과 기본 동작 |
 | --- | --- |
+| `--channel` | `preview` (기본값), `rc`, `main`; 코어와 provider의 조회 채널을 선택하고 `spine.toml`에 저장 |
 | `--platform` | HTTP provider, `echo` (기본값), `none` (이벤트 플랫폼 필요) |
-| `--event-platform` | 반복 가능한 `[name:]provider`; `spine-<provider>-platform@preview` 조회 |
+| `--event-platform` | 반복 가능한 `[name:]provider`; 선택한 채널에서 `spine-<provider>-platform` 조회 |
 | `--websocket-platform` | WebSocket provider 또는 `none` (기본값), provider 선택 시 HTTP 필요 |
-| `--validator` | `none` (기본값) 또는 provider; `spine-validator-<provider>@preview` 조회 |
+| `--validator` | `none` (기본값) 또는 provider; 선택한 채널에서 `spine-validator-<provider>` 조회 |
 
 이벤트 이름은 `[a-z][a-z0-9_]*`이며 중복을 거부합니다. 같은 provider도 서로 다른 이름으로 등록할 수 있습니다.
 선택한 플랫폼과 검증기만 직접 의존성으로 추가하고, 메타데이터에 선언한 생성자의
@@ -139,7 +140,7 @@ NATS는 JetStream을 사용합니다. `SPINE_EVENTS_URLS` (쉼표로 구분), `S
 Core NATS pub/sub와 request/reply, 자동 DLQ는 생성 범위에 포함하지 않습니다.
 
 HTTP, WebSocket, 이벤트와 validator는 `NARUBROWN`의 저장소 명명 규칙과 선택 버전의 `spine-platform.json`으로 조회합니다.
-저장소나 Preview 브랜치를 찾지 못하면 조회 경로와 원인을 표시하고 프로젝트를 만들지 않습니다.
+저장소나 선택 채널의 버전을 찾지 못하면 조회 경로와 원인을 표시하고 프로젝트를 만들지 않습니다.
 새 provider의 설정과 생성자, 최소 Go 버전은 메타데이터로 읽으므로 CLI를 패치할 필요가 없습니다.
 기존 Kafka, RabbitMQ와 playground의 메타데이터 없는 버전은 호환 경로를 유지합니다.
 [메타데이터 형식과 조회 규칙](PLATFORMS.md)을 참고하세요. `--skip-install`도 메타데이터 조회를 위해 모듈을 캐시에 내려받을 수 있습니다.
@@ -155,7 +156,7 @@ WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playgr
 
 ### 공개 버전 레시피
 
-새 앱의 `platform-contracts-preview` 레시피는 코어와 선택한 Echo, Gorilla, Kafka, RabbitMQ, playground 모듈을 `@preview`로 조회합니다. 해석된 태그 또는 pseudo-version을 `go.mod`와 JSON 결과의 `target_modules`에 기록하고, 원래 조회 조건은 `module_queries`에 제공합니다. `spine update`도 이 레시피에서는 브랜치를 다시 조회합니다.
+새 앱의 `platform-contracts-preview` 레시피는 `dependency_channel`을 함께 기록합니다. 기본 `preview`는 코어와 선택한 provider의 `@preview` 브랜치를 조회하고, `rc`는 공개 RC 또는 더 높은 정식 태그, `main`은 공개 정식 태그만 선택합니다. 해석된 태그 또는 pseudo-version을 `go.mod`와 JSON 결과의 `target_modules`에 기록하고, 원래 조회 조건은 `module_queries`에 제공합니다. `spine update`도 저장된 채널을 유지합니다.
 
 `--dry-run` 이후 브랜치가 이동해 생성 또는 업데이트 내용이 바뀌면 기존 해시를 이용한 적용은 실패합니다. 새 계획을 검토한 뒤 적용하세요. 기존 `platform-contracts-v0.7.0-preview.1`, `platform-contracts-v0.7.0-preview.2`와 정식 `platform-contracts-v0.6.5` 앱은 레시피를 직접 바꾸기 전까지 기존 버전 조합을 유지합니다.
 

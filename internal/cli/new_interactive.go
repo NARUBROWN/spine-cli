@@ -11,7 +11,7 @@ import (
 )
 
 type newPromptPresence struct {
-	http, events, websocket, validator, frontend, frontendRoot bool
+	channel, http, events, websocket, validator, frontend, frontendRoot bool
 }
 
 type promptChoice struct {
@@ -38,6 +38,9 @@ func newPromptSelections(args []string) newPromptPresence {
 	var present newPromptPresence
 	for index := 1; index < len(args); index++ {
 		switch args[index] {
+		case "--channel":
+			present.channel = true
+			index++
 		case "--platform":
 			present.http = true
 			index++
@@ -65,37 +68,47 @@ func promptNewProjectOptions(args []string, options newProjectOptions, input io.
 	reader := bufio.NewReader(input)
 	present := newPromptSelections(args)
 	var err error
+	if !present.channel {
+		options.DependencyChannel, err = promptDynamicChoice(reader, output, "Dependency channel", []promptChoice{
+			{value: "preview", label: "Preview"},
+			{value: "rc", label: "RC"},
+			{value: "main", label: "Main (release)"},
+		}, options.DependencyChannel, false, "")
+		if err != nil {
+			return options, err
+		}
+	}
 	if !present.http {
 		options.Platform, err = promptDynamicChoice(reader, output, "HTTP adapter", []promptChoice{
 			{value: "nethttp", label: "net/http"},
 			{value: "echo", label: "Echo"},
-			{value: "none", label: "HTTP 없음, 이벤트 worker"},
-		}, options.Platform, true, "spine-<provider>-platform@preview에서 HTTP provider를 찾습니다")
+			{value: "none", label: "No HTTP, event worker"},
+		}, options.Platform, true, providerLookupHint("spine-<provider>-platform", options.DependencyChannel))
 		if err != nil {
 			return options, err
 		}
 	}
 	if !present.events {
-		options.Events, err = promptEventPlatforms(reader, output, options.Events, options.Platform == "none")
+		options.Events, err = promptEventPlatforms(reader, output, options.Events, options.Platform == "none", options.DependencyChannel)
 		if err != nil {
 			return options, err
 		}
 	}
 	if !present.websocket {
-		choices := []promptChoice{{value: "none", label: "사용 안 함"}}
+		choices := []promptChoice{{value: "none", label: "Disabled"}}
 		if options.Platform != "none" {
 			choices = append(choices, promptChoice{value: "gorilla", label: "Gorilla WebSocket"})
 		}
-		options.WebSocketPlatform, err = promptDynamicChoice(reader, output, "WebSocket", choices, options.WebSocketPlatform, options.Platform != "none", "spine-<provider>-platform@preview에서 WebSocket provider를 찾습니다")
+		options.WebSocketPlatform, err = promptDynamicChoice(reader, output, "WebSocket", choices, options.WebSocketPlatform, options.Platform != "none", providerLookupHint("spine-<provider>-platform", options.DependencyChannel))
 		if err != nil {
 			return options, err
 		}
 	}
 	if !present.validator {
 		options.Validator, err = promptDynamicChoice(reader, output, "Validator", []promptChoice{
-			{value: "none", label: "사용 안 함"},
+			{value: "none", label: "Disabled"},
 			{value: "playground", label: "Playground"},
-		}, options.Validator, true, "spine-validator-<provider>@preview에서 validator를 찾습니다")
+		}, options.Validator, true, providerLookupHint("spine-validator-<provider>", options.DependencyChannel))
 		if err != nil {
 			return options, err
 		}
@@ -103,15 +116,15 @@ func promptNewProjectOptions(args []string, options newProjectOptions, input io.
 	if !present.frontend && !present.frontendRoot {
 		if !supportsFrontendServingPlatform(options.Platform) {
 			if options.Platform == "none" {
-				fmt.Fprintln(output, "HTTP adapter가 없어 프론트엔드를 연결할 수 없습니다.")
+				fmt.Fprintln(output, "Frontend integration is unavailable without an HTTP adapter.")
 			} else {
-				fmt.Fprintln(output, "현재 프론트엔드 서빙은 Echo와 net/http HTTP adapter만 지원합니다.")
+				fmt.Fprintln(output, "Frontend serving currently supports only the Echo and net/http HTTP adapters.")
 			}
 			options.Frontend = "none"
-		} else if promptYesNo(reader, output, "Frontend를 사용할까요?", false) {
+		} else if promptYesNo(reader, output, "Enable a frontend?", false) {
 			options.Frontend, err = promptDynamicChoice(reader, output, "Frontend provider", []promptChoice{
 				{value: "react", label: "React CSR"},
-			}, "react", true, "spine-frontend-<provider>@preview에서 esbuild provider를 찾습니다")
+			}, "react", true, providerLookupHint("spine-frontend-<provider>", options.DependencyChannel))
 		} else {
 			options.Frontend = "none"
 		}
@@ -130,16 +143,16 @@ func promptNewProjectOptions(args []string, options newProjectOptions, input io.
 	return options, nil
 }
 
-func promptEventPlatforms(reader *bufio.Reader, output io.Writer, existing []eventPlatformSpec, required bool) ([]eventPlatformSpec, error) {
+func promptEventPlatforms(reader *bufio.Reader, output io.Writer, existing []eventPlatformSpec, required bool, channel string) ([]eventPlatformSpec, error) {
 	selected := append([]eventPlatformSpec(nil), existing...)
 	for {
 		choices := []promptChoice{}
 		defaultValue := ""
 		if !required && len(selected) == 0 {
-			choices = append(choices, promptChoice{value: "none", label: "사용 안 함"})
+			choices = append(choices, promptChoice{value: "none", label: "Disabled"})
 			defaultValue = "none"
 		} else if !required {
-			choices = append(choices, promptChoice{value: "done", label: "선택 완료"})
+			choices = append(choices, promptChoice{value: "done", label: "Done"})
 			defaultValue = "done"
 		}
 		for _, choice := range []promptChoice{
@@ -155,13 +168,14 @@ func promptEventPlatforms(reader *bufio.Reader, output io.Writer, existing []eve
 				choices = append(choices, choice)
 			}
 		}
-		value, err := promptDynamicChoice(reader, output, "Event adapter", choices, defaultValue, true, "spine-<provider>-platform@preview에서 event provider를 찾습니다. name:provider 형식으로 등록 이름도 지정할 수 있습니다")
+		hint := providerLookupHint("spine-<provider>-platform", channel) + " Use name:provider to set a registration name."
+		value, err := promptDynamicChoice(reader, output, "Event adapter", choices, defaultValue, true, hint)
 		if err != nil {
 			return selected, err
 		}
 		if value == "none" || value == "done" {
 			if required && len(selected) == 0 {
-				fmt.Fprintln(output, "HTTP가 없으면 event provider를 하나 이상 선택해야 합니다.")
+				fmt.Fprintln(output, "Select at least one event provider when HTTP is disabled.")
 				required = true
 				continue
 			}
@@ -169,7 +183,7 @@ func promptEventPlatforms(reader *bufio.Reader, output io.Writer, existing []eve
 		}
 		spec, err := parseEventPlatform(value)
 		if err != nil {
-			fmt.Fprintf(output, "유효하지 않은 event provider입니다: %v\n", err)
+			fmt.Fprintf(output, "Invalid event provider: %v\n", err)
 			continue
 		}
 		duplicate := false
@@ -177,11 +191,11 @@ func promptEventPlatforms(reader *bufio.Reader, output io.Writer, existing []eve
 			duplicate = duplicate || event.Name == spec.Name || event.Provider == spec.Provider
 		}
 		if duplicate {
-			fmt.Fprintln(output, "같은 event 이름이나 provider는 중복 선택할 수 없습니다.")
+			fmt.Fprintln(output, "Event names and providers must be unique.")
 			continue
 		}
 		selected = append(selected, spec)
-		if !promptYesNo(reader, output, "event provider를 더 추가할까요?", false) {
+		if !promptYesNo(reader, output, "Add another event provider?", false) {
 			return selected, nil
 		}
 		required = false
@@ -190,12 +204,12 @@ func promptEventPlatforms(reader *bufio.Reader, output io.Writer, existing []eve
 
 func promptFrontendRoot(reader *bufio.Reader, output io.Writer, defaultRoot string) (string, error) {
 	for {
-		value, err := promptText(reader, output, "Frontend root 경로", defaultRoot)
+		value, err := promptText(reader, output, "Frontend root path", defaultRoot)
 		if err != nil {
 			return "", err
 		}
 		if err := validateProjectRelativePath(value); err != nil || filepath.Clean(filepath.FromSlash(value)) == "." || projectPathContains(value, "bin/frontend") || projectPathContains("bin/frontend", value) {
-			fmt.Fprintln(output, "프로젝트 안의 frontend_output과 겹치지 않는 상대 경로를 입력하세요.")
+			fmt.Fprintln(output, "Enter a project-relative path that does not overlap frontend_output.")
 			continue
 		}
 		return filepath.ToSlash(filepath.Clean(filepath.FromSlash(value))), nil
@@ -204,31 +218,31 @@ func promptFrontendRoot(reader *bufio.Reader, output io.Writer, defaultRoot stri
 
 func promptDynamicChoice(reader *bufio.Reader, output io.Writer, title string, choices []promptChoice, defaultValue string, allowCustom bool, customHint string) (string, error) {
 	for {
-		fmt.Fprintf(output, "\n%s를 선택하세요.\n", title)
+		fmt.Fprintf(output, "\nSelect %s.\n", title)
 		for index, choice := range choices {
 			fmt.Fprintf(output, "  %d. %s\n", index+1, choice.label)
 		}
 		if allowCustom {
-			fmt.Fprintln(output, "  0. 목록에 없음, provider 이름 직접 입력")
+			fmt.Fprintln(output, "  0. Other provider")
 			if customHint != "" {
 				fmt.Fprintf(output, "     %s\n", customHint)
 			}
 		}
 		if defaultValue != "" {
-			fmt.Fprintf(output, "선택 또는 이름 검색 [%s]: ", defaultValue)
+			fmt.Fprintf(output, "Choice or name [%s]: ", defaultValue)
 		} else {
-			fmt.Fprint(output, "선택 또는 이름 검색: ")
+			fmt.Fprint(output, "Choice or name: ")
 		}
 		line, readErr := reader.ReadString('\n')
 		value := strings.TrimSpace(line)
 		if value == "" && defaultValue != "" {
 			return defaultValue, nil
 		}
-		if value == "0" || strings.EqualFold(value, "other") || value == "목록에 없음" || value == "목록에없음" {
+		if value == "0" || strings.EqualFold(value, "other") {
 			if !allowCustom {
-				fmt.Fprintln(output, "목록에서 선택하세요.")
+				fmt.Fprintln(output, "Select one of the listed choices.")
 			} else {
-				custom, err := promptText(reader, output, "provider 이름", "")
+				custom, err := promptText(reader, output, "Provider name", "")
 				return strings.ToLower(strings.TrimSpace(custom)), err
 			}
 		} else if value != "" {
@@ -236,7 +250,7 @@ func promptDynamicChoice(reader *bufio.Reader, output io.Writer, title string, c
 				if index > 0 && index <= len(choices) {
 					return choices[index-1].value, nil
 				}
-				fmt.Fprintln(output, "목록에 있는 번호를 선택하세요.")
+				fmt.Fprintln(output, "Select a listed number.")
 			} else {
 				lower := strings.ToLower(value)
 				var matches []promptChoice
@@ -252,19 +266,19 @@ func promptDynamicChoice(reader *bufio.Reader, output io.Writer, title string, c
 					return matches[0].value, nil
 				}
 				if len(matches) > 1 {
-					fmt.Fprintln(output, "일치하는 선택지:")
+					fmt.Fprintln(output, "Matching choices:")
 					for _, choice := range matches {
 						fmt.Fprintf(output, "  %s\n", choice.label)
 					}
 				} else if allowCustom {
 					return strings.ToLower(value), nil
 				} else {
-					fmt.Fprintln(output, "목록에 있는 선택지를 입력하세요.")
+					fmt.Fprintln(output, "Enter one of the listed choices.")
 				}
 			}
 		}
 		if readErr != nil {
-			return "", fmt.Errorf("선택 입력을 읽을 수 없습니다: %w", readErr)
+			return "", fmt.Errorf("could not read the selection: %w", readErr)
 		}
 	}
 }
@@ -282,9 +296,9 @@ func promptText(reader *bufio.Reader, output io.Writer, title, defaultValue stri
 			return defaultValue, nil
 		}
 		if err != nil {
-			return "", fmt.Errorf("%s를 입력해야 합니다", title)
+			return "", fmt.Errorf("%s is required", title)
 		}
-		return "", fmt.Errorf("%s를 입력해야 합니다", title)
+		return "", fmt.Errorf("%s is required", title)
 	}
 	return value, nil
 }
@@ -307,10 +321,21 @@ func promptYesNo(reader *bufio.Reader, output io.Writer, title string, defaultVa
 		case "n", "no", "0":
 			return false
 		default:
-			fmt.Fprintln(output, "y 또는 n을 입력하세요.")
+			fmt.Fprintln(output, "Enter y or n.")
 		}
 		if err != nil {
 			return defaultValue
 		}
+	}
+}
+
+func providerLookupHint(module, channel string) string {
+	switch channel {
+	case "rc":
+		return fmt.Sprintf("Looks up the latest published RC or release tag for %s.", module)
+	case "main":
+		return fmt.Sprintf("Looks up the latest published release tag for %s.", module)
+	default:
+		return fmt.Sprintf("Looks up %s@preview.", module)
 	}
 }

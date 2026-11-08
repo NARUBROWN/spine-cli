@@ -25,7 +25,7 @@ func updateHelp(args []string, out io.Writer) bool {
 	for i, arg := range args {
 		if (arg == "--help" || arg == "-h") && (i == 0 || args[i-1] != "--if-match") {
 			fmt.Fprintln(out, "Usage: spine update [--dry-run] [--if-match <hash>] [--json] [--root <directory>]")
-			fmt.Fprintln(out, "\n기존 프로젝트의 Spine과 선택한 플랫폼 의존성을 이 CLI의 검증된 레시피로 갱신합니다.\n임시 복사본에서 의존성 해석, 정적 계약 검사와 빌드를 완료한 뒤 go.mod와 go.sum을 반영합니다.\n--dry-run도 네트워크와 Go 캐시를 사용할 수 있지만 프로젝트 파일은 바꾸지 않습니다.\n현재 레시피보다 새로운 버전은 낮추지 않습니다. CLI 실행 파일과 업무 소스는 갱신하지 않습니다.\n\n예:\n  spine update\n  spine update --dry-run\n  spine update --root ./shop-api --dry-run --json")
+			fmt.Fprintln(out, "\nUpdate Spine and selected platform dependencies in an existing project with the CLI's verified recipe.\nThe command resolves dependencies, validates the static contract, and builds a temporary copy before publishing go.mod and go.sum.\n--dry-run may use the network and Go caches but does not change project files.\nThe command does not downgrade versions newer than the selected recipe. It does not update the CLI executable or application source.\n\nExamples:\n  spine update\n  spine update --dry-run\n  spine update --root ./shop-api --dry-run --json")
 			return true
 		}
 	}
@@ -203,6 +203,10 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if recipe == assemblyRecipe || recipe == legacyWebSocketRecipe || isPreviewAssemblyRecipe(recipe) {
 		result["stability"] = "prerelease"
 	}
+	if recipe == currentAssemblyRecipe {
+		result["dependency_channel"] = config.DependencyChannel
+		result["stability"] = dependencyStability(config.DependencyChannel)
+	}
 	if recipe == stableAssemblyRecipe {
 		result["stability"] = "released"
 	}
@@ -244,8 +248,8 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 		return finish(3, "snapshot", err)
 	}
 	if recipe == currentAssemblyRecipe {
-		result["module_queries"], result["dependency_channel"] = targets, "preview"
-		targets, err = previewModuleResolver(ctx, targets)
+		result["module_queries"] = targets
+		targets, err = resolveDependencyModules(ctx, targets, config.DependencyChannel)
 		if err != nil {
 			return finish(3, "dependencies", err)
 		}
