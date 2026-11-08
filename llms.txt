@@ -1134,3 +1134,5 @@ Candidate source E2E is TestControllerCandidateEndToEnd with SPINE_CONTROLLER_CO
 ## 역할별 생성자 표식 후보
 
 코어 v0.7.0-preview.5 후보는 `app.Constructor(...)` 안에 `constructor.Custom`, `Repository`, `Service`, `Controller`, `Interceptor` 표식을 받는다. 공식 import 경로는 `github.com/NARUBROWN/spine/pkg/constructor`이며 별칭을 지원한다. Custom은 객체 표식과 기존 이름 있는 생성자 함수를 받고 나머지 역할은 객체 표식을 받는다. 역할이 명시된 등록 중 Controller만 HTTP 경로를 수집한다. CLI는 생성자를 실행하지 않고 공통 생성 계약과 추가 역할 계약, 의존성을 검사한다. 동적 표식 변수나 사용자 wrapper는 분석 불완전이다. 신규 코어용 생성기는 기존 Constructor 호출에 표식을 추가하고 dry-run/hash 적용과 재실행 불변을 유지한다. 미공개 소스 검증을 공개 설치 증거로 해석하지 않는다.
+
+스칼라 input.Path[T]는 경로 키가 하나인 경우에 정적 분석한다. 코어 v0.7.0-preview.7 이하는 거부하며 교체된 코어 또는 미확인 버전은 경고한다. int, uint, uintptr 범위는 x-spine-platform-range-unresolved로 표시한다.

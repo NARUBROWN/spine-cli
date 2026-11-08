@@ -148,6 +148,9 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 			if parameter.SourceDTO && len(parameter.InputFields) > 0 {
 				for _, field := range parameter.InputFields {
 					schema := nullableInputSchema(catalog.schema(field.Type, field.source), field.Type, parameter.Binding)
+					if parameter.scalarPath {
+						schema = scalarPathSchema(field.Type)
+					}
 					if field.description != "" {
 						schema["description"] = field.description
 					}
@@ -158,7 +161,9 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 						schema["x-spine-unresolved-example"] = true
 					}
 					item := map[string]any{"name": field.Name, "in": parameter.Binding, "required": parameter.Binding == "path", "schema": schema}
-					item["x-spine-validation-unresolved"] = true
+					if !parameter.scalarPath {
+						item["x-spine-validation-unresolved"] = true
+					}
 					parameters = append(parameters, item)
 				}
 				continue

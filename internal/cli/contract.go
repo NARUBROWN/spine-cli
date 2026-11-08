@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 const contractSchemaVersion = "spine.contract/v1alpha2"
@@ -88,6 +90,7 @@ type handlerParameter struct {
 	Payload       string              `json:"payload_type,omitempty"`
 	InputFields   []handlerInputField `json:"fields,omitempty"`
 	payloadSource string
+	scalarPath    bool
 	Name          string   `json:"name"`
 	Type          string   `json:"type"`
 	Binding       string   `json:"binding"`
@@ -616,6 +619,25 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			route.schemaSource = matches[0].schemaSource
 			parameters, diagnostics := bindings.parameters(matches[0].httpSource, matches[0].httpFields, route.Path, route.Handler)
 			route.Parameters = parameters
+			for _, parameter := range parameters {
+				if !parameter.scalarPath {
+					continue
+				}
+				var version string
+				replaced := false
+				for _, module := range i.contract.HTTPAdapter.SelectedModules {
+					if module.Path == spineImportPath {
+						version, replaced = module.Version, module.Replace != nil
+						break
+					}
+				}
+				if !replaced && semver.IsValid(version) && semver.Compare(version, "v0.7.0-preview.7") <= 0 {
+					diagnostics = append(diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_SCALAR_CORE_UNSUPPORTED", Message: "The selected Spine core version does not support scalar input.Path.", Source: route.Source, Hint: "Use a path DTO or a core version that supports scalar path inputs."})
+				} else if replaced || !semver.IsValid(version) || semver.Compare(version, "v0.7.0-preview.8") < 0 {
+					diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_PATH_SCALAR_CORE_UNVERIFIED", Message: "Scalar path support in the selected Spine core has not been verified by static analysis.", Source: route.Source, Hint: "Confirm the selected core implements scalar path inputs before running the application."})
+				}
+				break
+			}
 			i.contract.Diagnostics = append(i.contract.Diagnostics, diagnostics...)
 			route.Returns = matches[0].returns
 			i.contract.Diagnostics = append(i.contract.Diagnostics, bindings.returns(matches[0].httpSource, matches[0].httpResults, route.Handler)...)

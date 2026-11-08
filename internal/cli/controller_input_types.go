@@ -24,6 +24,9 @@ func checkControllerInputs(signature *types.Signature) error {
 		if !ok {
 			return fmt.Errorf("input.%s must be a named pointer", source)
 		}
+		if source == "Path" && controllerBasicPathType(pointer.Elem()) {
+			continue
+		}
 		structure, ok := pointer.Elem().Underlying().(*types.Struct)
 		if !ok {
 			return fmt.Errorf("input.%s requires a struct payload", source)
@@ -119,4 +122,17 @@ func controllerTextType(t types.Type) bool {
 		return false
 	}
 	return types.Identical(signature.Params().At(0).Type(), types.NewSlice(types.Typ[types.Byte])) && types.Identical(signature.Results().At(0).Type(), types.Universe.Lookup("error").Type())
+}
+
+// controllerBasicPathType는 코어의 기본 스칼라만 허용하며 별도 정의한 타입을 제외합니다.
+func controllerBasicPathType(t types.Type) bool {
+	basic, ok := types.Unalias(t).(*types.Basic)
+	if !ok {
+		return false
+	}
+	switch basic.Kind() {
+	case types.Bool, types.String, types.Int, types.Int8, types.Int16, types.Int32, types.Int64, types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr, types.Float32, types.Float64:
+		return true
+	}
+	return false
 }
