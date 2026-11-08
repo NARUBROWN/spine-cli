@@ -307,6 +307,9 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
 def resolve_module_query(path, query):
     with tempfile.TemporaryDirectory(prefix="spine-cli-preview-recipe-") as directory:
         env = dict(os.environ, GOWORK="off", GOFLAGS=" ", GOTOOLCHAIN="local")
+        proxy = run("go", "env", "GOPROXY", cwd=directory, env=env)
+        if proxy == "https://proxy.golang.org,direct":
+            env["GOPROXY"] = "direct"
         try:
             value = json.loads(run("go", "list", "-m", "-json", path + "@" + query, cwd=directory, env=env))
         except ValueError as exc:
