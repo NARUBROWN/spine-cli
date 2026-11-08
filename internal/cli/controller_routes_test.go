@@ -48,7 +48,7 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
  "github.com/NARUBROWN/spine/pkg/httpx"
  )
  type DTO struct{Name string; UserID int}
- type PathDTO struct{ID int}
+ type PathDTO struct{ID int `+"`path:\"id\"`"+`}
  type Payload = input.Body[DTO]
  type Result = httpx.Response[DTO]
  type UserController struct{}
@@ -70,7 +70,7 @@ func TestControllerRoutesResolveTypedContractAndHelpersWithoutExecution(t *testi
 	inspector := controllerFixture(t, `
  func(c *UserController)RegisterRoutes(r *api.Registry){c.users(r)}
  func(c *UserController)users(r *api.Registry){
-  r.POST(endpoint,func(a Payload,p input.Path[PathDTO],q input.Query[DTO])(Result,error){return Result{Body:DTO{Name:a.Name}},nil})
+  r.POST(endpoint,func(a Payload,p *PathDTO,q input.Query[DTO])(Result,error){return Result{Body:DTO{Name:a.Name}},nil})
  }
  `)
 	inspector.inspectControllerRoutes()
@@ -123,7 +123,7 @@ func TestControllerRoutesRejectDynamicAndRecursiveRegistration(t *testing.T) {
 func TestControllerRoutesTrackRegistryVariableAndPackageHelper(t *testing.T) {
 	inspector := controllerFixture(t, `
  func(c *UserController)RegisterRoutes(r *api.Registry){var alias=r;registerUsers(c,alias)}
- func registerUsers(c *UserController,r *api.Registry){r.POST(endpoint,func(a Payload,p input.Path[PathDTO])(Result,error){return Result{},nil})}
+ func registerUsers(c *UserController,r *api.Registry){r.POST(endpoint,func(a Payload,p *PathDTO)(Result,error){return Result{},nil})}
  `)
 	inspector.inspectControllerRoutes()
 	inspector.resolveHandlerSignatures()

@@ -161,10 +161,9 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 	add := func(code, message string) {
 		diagnostics = append(diagnostics, contractDiagnostic{Severity: "error", Code: code, Message: "handler " + handler + ": " + message, Source: relativeSource(source.Fset.Position(fields.Pos())), Hint: "Use one DTO per input source, unique keys and at most one body DTO. Migrate deprecated inputs together."})
 	}
-	legacy, typed, legacyPath, typedPath, body := false, false, false, false, false
+	legacy, typed, legacyPath, scalarPath, pathDTO, body := false, false, false, false, false, false
 	seenTypes, seenKeys := map[string]bool{}, map[string]bool{}
 	index := 0
-	scalarCount := 0
 	for _, field := range fields.List {
 		count := len(field.Names)
 		if count == 0 {
@@ -172,16 +171,11 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 		}
 		for range count {
 			parameter := parameters[index]
-			if parameter.scalarPath {
-				scalarCount++
-				if scalarCount > 1 {
-					add("HTTP_PATH_SCALAR_AMBIGUOUS", "only one scalar path argument is supported")
-				}
-			}
 			index++
 			legacy, typed = legacy || parameter.Deprecated, typed || parameter.SourceDTO
 			legacyPath = legacyPath || parameter.Deprecated && parameter.Binding == "path"
-			typedPath = typedPath || parameter.SourceDTO && parameter.Binding == "path"
+			scalarPath = scalarPath || parameter.scalarPath
+			pathDTO = pathDTO || parameter.SourceDTO && parameter.Binding == "path" && !parameter.scalarPath
 			if parameter.Deprecated {
 				diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_INPUT_API_DEPRECATED", Message: fmt.Sprintf("handler %s parameter %d uses a deprecated %s input", handler, index-1, parameter.Binding), Source: relativeSource(source.Fset.Position(field.Pos())), Hint: "Migrate path, query and header inputs in this handler to separate tagged struct pointers."})
 			}
@@ -207,8 +201,10 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 			}
 		}
 	}
-	if legacyPath && typedPath {
-		add("HTTP_PATH_INPUT_MIXED", "deprecated path wrappers and path DTOs are mixed")
+	if legacyPath && (scalarPath || pathDTO) {
+		add("HTTP_PATH_INPUT_MIXED", "deprecated path wrappers and typed path inputs are mixed")
+	} else if scalarPath && pathDTO {
+		add("HTTP_PATH_INPUT_MIXED", "scalar path inputs and a path DTO are mixed")
 	} else if legacy && typed {
 		add("HTTP_INPUT_API_MIXED", "deprecated inputs and source DTOs are mixed")
 	}

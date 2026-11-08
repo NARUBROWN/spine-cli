@@ -524,9 +524,9 @@ CLI의 Preview, RC, Production 전환과 공개 설치 검증은 [릴리스 운�
 
 정적 검사는 실제 Go 타입으로 인터페이스 구현, DI 반환 타입, 상수 경로와 Registry를 전달하는 보조 호출을 해석합니다. 함수 리터럴의 업무 코드를 등록 코드로 실행하지 않으며 생성자와 init도 실행하지 않습니다. 동적 경로와 함수 값, 재귀 및 미확정 조건은 분석 불완전으로 진단합니다. 선택한 core의 pkg/api와 의존성이 설치돼 있어야 합니다.
 
-`input.Path[T]`, `input.Query[T]`, `input.Body[T]`의 payload와 입력 키를 정적 계약과 OpenAPI에 반영합니다. Path와 Query의 기본 lowerCamel 이름은 명시 source 태그보다 우선하지 않습니다. 수동 검증 규칙과 동적 응답 상태는 추측하지 않습니다.
+`input.Path[T]`, `input.Query[T]`, `input.Body[T]`의 payload와 입력 키를 정적 계약과 OpenAPI에 반영합니다. Query의 기본 lowerCamel 이름은 명시 source 태그보다 우선하지 않습니다. 수동 검증 규칙과 동적 응답 상태는 추측하지 않습니다.
 
-단일 경로 변수에는 `input.Path[int64]`처럼 기본 스칼라와 타입 별칭을 사용할 수 있습니다. 정적 분석은 경로 키의 수와 중복, 고정 크기 정수의 범위를 검사합니다. `int`, `uint`, `uintptr`의 플랫폼별 범위는 추측하지 않고 `x-spine-platform-range-unresolved`로 표시합니다. 코어 `v0.7.0-preview.7` 이하는 스칼라 경로 입력을 지원하지 않아 오류로 거부합니다. 교체된 코어나 지원 여부를 확인할 수 없는 버전에는 경고를 표시하므로 실제 코어 동작을 확인하세요. `--warnings-as-errors`는 이 경고도 오류로 처리합니다.
+각 경로 변수에는 `input.Path[int64]`, `input.Path[string]`처럼 기본 스칼라 또는 타입 별칭을 라우트 순서대로 하나씩 선언합니다. Context, Query와 Body 인자는 경로 순서에서 제외합니다. 정적 분석은 경로 키의 수와 중복, 고정 크기 정수의 범위를 검사합니다. `int`, `uint`, `uintptr`의 플랫폼별 범위는 추측하지 않고 `x-spine-platform-range-unresolved`로 표시합니다. 단일 스칼라 Path는 코어 `v0.7.0-preview.8` 이상, 다중 스칼라 Path는 `v0.7.0-preview.9` 이상을 요구합니다. 교체된 코어나 지원 여부를 확인할 수 없는 버전에는 경고를 표시하므로 실제 코어 동작을 확인하세요. `--warnings-as-errors`는 이 경고도 오류로 처리합니다.
 
 새 컨트롤러의 `--source runtime` 내보내기는 Prepare를 자동 실행하지 않습니다. 수집 전에는 명시적 오류와 정적 내보내기 안내를 반환합니다. 실제 준비가 필요한 앱에서는 호출자가 `spine.DescribePreparedHTTP`를 사용합니다.
 
