@@ -17,7 +17,13 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const contractSchemaVersion = "spine.contract/v1alpha2"
+const (
+	contractSchemaVersion        = "spine.contract/v1alpha2"
+	scalarPathMinimum            = "v0.7.0-preview.8"
+	multiScalarPathMinimum       = "v0.7.0-preview.9"
+	scalarPathUnsupportedMaximum = "v0.7.0-preview.7"
+	multiPathUnsupportedMaximum  = "v0.7.0-preview.8"
+)
 
 type applicationContract struct {
 	SchemaVersion    string                    `json:"schema_version"`
@@ -619,10 +625,13 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			route.schemaSource = matches[0].schemaSource
 			parameters, diagnostics := bindings.parameters(matches[0].httpSource, matches[0].httpFields, route.Path, route.Handler)
 			route.Parameters = parameters
+			scalarPathCount := 0
 			for _, parameter := range parameters {
-				if !parameter.scalarPath {
-					continue
+				if parameter.scalarPath {
+					scalarPathCount++
 				}
+			}
+			if scalarPathCount > 0 {
 				var version string
 				replaced := false
 				for _, module := range i.contract.HTTPAdapter.SelectedModules {
@@ -631,12 +640,17 @@ func (i *contractInspector) resolveHandlerSignatures() {
 						break
 					}
 				}
-				if !replaced && semver.IsValid(version) && semver.Compare(version, "v0.7.0-preview.7") <= 0 {
-					diagnostics = append(diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_SCALAR_CORE_UNSUPPORTED", Message: "The selected Spine core version does not support scalar input.Path.", Source: route.Source, Hint: "Use a path DTO or a core version that supports scalar path inputs."})
-				} else if replaced || !semver.IsValid(version) || semver.Compare(version, "v0.7.0-preview.8") < 0 {
-					diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_PATH_SCALAR_CORE_UNVERIFIED", Message: "Scalar path support in the selected Spine core has not been verified by static analysis.", Source: route.Source, Hint: "Confirm the selected core implements scalar path inputs before running the application."})
+				minimum, unsupportedMaximum := scalarPathMinimum, scalarPathUnsupportedMaximum
+				feature := "scalar input.Path"
+				if scalarPathCount > 1 {
+					minimum, unsupportedMaximum = multiScalarPathMinimum, multiPathUnsupportedMaximum
+					feature = "multiple scalar input.Path arguments"
 				}
-				break
+				if !replaced && semver.IsValid(version) && semver.Compare(version, unsupportedMaximum) <= 0 {
+					diagnostics = append(diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_SCALAR_CORE_UNSUPPORTED", Message: "The selected Spine core version does not support " + feature + ".", Source: route.Source, Hint: "Use a core version at or above " + minimum + "."})
+				} else if replaced || !semver.IsValid(version) || semver.Compare(version, minimum) < 0 {
+					diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_PATH_SCALAR_CORE_UNVERIFIED", Message: "Support for " + feature + " in the selected Spine core has not been verified by static analysis.", Source: route.Source, Hint: "Confirm the selected core implements this path input contract before running the application."})
+				}
 			}
 			i.contract.Diagnostics = append(i.contract.Diagnostics, diagnostics...)
 			route.Returns = matches[0].returns

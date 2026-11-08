@@ -70,6 +70,7 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 		return parameters, diagnostics
 	}
 	pathKeys, pathIndex, index := contractPathKeys(path), 0, 0
+	scalarPathCount, otherPath := 0, false
 	for _, field := range fields.List {
 		shape := catalog.shape(source, field.Type, map[string]bool{})
 		count := len(field.Names)
@@ -84,15 +85,17 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 			parameter.Keys = append([]string(nil), shape.keys...)
 			parameter.scalarPath = shape.scalarPath
 			if shape.scalarPath {
-				if len(pathKeys) != 1 {
-					diagnostics = append(diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_SCALAR_AMBIGUOUS", Message: "A scalar path input requires exactly one route key and one scalar path argument.", Source: relativeSource(source.Fset.Position(field.Pos()))})
-				} else {
-					parameter.Keys = []string{pathKeys[0]}
-					parameter.InputFields = []handlerInputField{{Name: pathKeys[0], Type: shape.payload, source: shape.payloadSource}}
+				scalarPathCount++
+				if pathIndex < len(pathKeys) {
+					parameter.Keys = []string{pathKeys[pathIndex]}
+					parameter.InputFields = []handlerInputField{{Name: pathKeys[pathIndex], Type: shape.payload, source: shape.payloadSource}}
 				}
+				pathIndex++
+			} else if shape.binding == "path" {
+				otherPath = true
 			}
 			parameter.Deprecated = catalog.structured && shape.legacy
-			if shape.binding == "path" && !parameter.SourceDTO {
+			if shape.binding == "path" && !parameter.SourceDTO && !shape.scalarPath {
 				if pathIndex < len(pathKeys) {
 					parameter.Key = pathKeys[pathIndex]
 				}
@@ -121,6 +124,9 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 			}
 			index++
 		}
+	}
+	if scalarPathCount > 0 && !otherPath && scalarPathCount != len(pathKeys) {
+		diagnostics = append(diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_SCALAR_AMBIGUOUS", Message: fmt.Sprintf("Handler %s declares %d scalar path arguments for %d route keys.", handler, scalarPathCount, len(pathKeys)), Source: relativeSource(source.Fset.Position(fields.Pos())), Hint: "Declare one input.Path scalar for each route key in route order."})
 	}
 	if catalog.structured {
 		diagnostics = append(diagnostics, catalog.inputParameterDiagnostics(source, fields, parameters, handler)...)
