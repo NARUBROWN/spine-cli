@@ -20,21 +20,24 @@ func TestStaticOpenAPIInputDTOAndMultipartAgainstRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := strings.Replace(string(source), "app.Constructor(", "app.Constructor(NewInputProbe)\napp.Route(\"POST\", \"/probe/:id\", (*InputProbe).Post)\napp.Constructor(", 1)
+	updated := strings.Replace(string(source), "app.Constructor(", "app.Constructor(NewInputProbe)\napp.Route(\"POST\", \"/probe/:id\", (*InputProbe).Post)\napp.Route(\"POST\", \"/json\", (*InputProbe).JSON)\napp.Constructor(", 1)
 	if updated == string(source) {
 		t.Fatal("registration missing")
 	}
 	writeE2EFile(t, application, updated)
 	writeE2EFile(t, filepath.Join(project, "internal/application/input_probe.go"), `package application
-import ("mime/multipart"; "os")
+import ("mime/multipart"; "os"; clock "time")
 func init() { _ = os.WriteFile("ran-user-code", []byte("yes"), 0600) }
 type PathInput struct { ID int64 `+"`path:\"id\"`"+` }
 type QueryInput struct { Limit *int `+"`query:\"limit\" validate:\"omitempty,min=1\"`"+` }
 type HeaderInput struct { Trace string `+"`header:\"X-Trace-ID\" validate:\"required\"`"+` }
 type UploadInput struct { File *multipart.FileHeader `+"`form:\"file\" json:\"-\" validate:\"required\"`"+` }
+type Date = clock.Time
+type JSONInput struct { Created clock.Time `+"`json:\"created\"`"+`; Modified Date `+"`json:\"modified\"`"+` }
 type InputProbe struct{}
 func NewInputProbe() *InputProbe { return &InputProbe{} }
 func (*InputProbe) Post(path *PathInput, query *QueryInput, header *HeaderInput, body *UploadInput) error { return nil }
+func (*InputProbe) JSON(body *JSONInput) error { return nil }
 `)
 	var docs []map[string]any
 	for _, mode := range []string{"static", "runtime"} {
@@ -54,6 +57,12 @@ func (*InputProbe) Post(path *PathInput, query *QueryInput, header *HeaderInput,
 		docs = append(docs, doc)
 	}
 	for i, doc := range docs {
+		jsonOperation := doc["paths"].(map[string]any)["/json"].(map[string]any)["post"].(map[string]any)
+		jsonBody := jsonOperation["requestBody"].(map[string]any)
+		jsonContent := jsonBody["content"].(map[string]any)
+		if jsonContent["application/json"] == nil || jsonBody["x-spine-unresolved-content"] != nil {
+			t.Errorf("mode %d lost JSON body: %#v", i, jsonBody)
+		}
 		operation := doc["paths"].(map[string]any)["/probe/{id}"].(map[string]any)["post"].(map[string]any)
 		params := operation["parameters"].([]any)
 		names := map[string]bool{}

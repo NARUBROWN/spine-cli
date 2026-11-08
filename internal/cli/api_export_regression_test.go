@@ -185,10 +185,17 @@ func TestStaticOpenAPIFormNestedAliasesAndUnknown(t *testing.T) {
 	writeE2EFile(t, "formtypes.go", `package todo
 import m "mime/multipart"
 import external "example.org/external"
+import clock "time"
+import "net"
+import "encoding/json"
 type File = m.FileHeader
+type Date = clock.Time
+type Other = external.SomeType
 type Inner struct { Upload *File `+"`form:\"upload\"`"+` }
 type Form struct { Inner Inner }
 type Unknown struct { Other external.SomeType }
+type AliasUnknown struct { Other Other }
+type JSONPayload struct { Created clock.Time; Another Date; Duration clock.Duration; IP net.IP; Raw json.RawMessage }
 type Custom string
 func (*Custom) UnmarshalText([]byte) error { return nil }
 type Encoded struct { Value Custom `+"`form:\"value\"`"+` }
@@ -211,6 +218,14 @@ type ExternalFile struct { Upload []external.File `+"`form:\"file\"`"+` }
 	_, known, unresolved = catalog.staticFormContent("*Unknown", "formtypes.go")
 	if known || !unresolved {
 		t.Fatal("unknown embedded fields were treated as resolved")
+	}
+	_, known, unresolved = catalog.staticFormContent("*AliasUnknown", "formtypes.go")
+	if known || !unresolved {
+		t.Fatal("unknown external alias was treated as resolved")
+	}
+	_, known, unresolved = catalog.staticFormContent("*JSONPayload", "formtypes.go")
+	if known || unresolved {
+		t.Fatal("known standard JSON fields were treated as an unknown form")
 	}
 	_, known, unresolved = catalog.staticFormContent("*Encoded", "formtypes.go")
 	if known || !unresolved {

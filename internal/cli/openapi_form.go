@@ -81,10 +81,12 @@ func (catalog *apiSchemas) staticFormContent(typeName, sourcePath string) (map[s
 				nestedSrc, nested, ok := bindings.markerPayload(declaration.source, declaration.spec.Type, map[string]bool{})
 				if ok {
 					collect(nestedSrc, nested, seen)
+				} else if bindings.unknownUntaggedFormType(declaration.source, declaration.spec.Type, map[string]bool{}) {
+					uncertain = true
 				}
 				delete(seen, key)
 			} else if _, external := f.Type.(*ast.SelectorExpr); external {
-				uncertain = true
+				uncertain = bindings.unknownUntaggedFormType(src, f.Type, map[string]bool{}) || uncertain
 			} else if nested, ok := f.Type.(*ast.StructType); ok {
 				collect(src, nested, seen)
 			}
@@ -104,6 +106,30 @@ func (catalog *apiSchemas) staticFormContent(typeName, sourcePath string) (map[s
 		media["application/json"] = map[string]any{"schema": catalog.schema(typeName, sourcePath)}
 	}
 	return media, true, false
+}
+
+// 알려진 표준 타입에는 펼칠 폼 필드가 없습니다. 다른 외부 타입은 보수적으로 남깁니다.
+func (catalog *httpBindingCatalog) unknownUntaggedFormType(source *layoutSource, expr ast.Expr, seen map[string]bool) bool {
+	if paren, ok := expr.(*ast.ParenExpr); ok {
+		return catalog.unknownUntaggedFormType(source, paren.X, seen)
+	}
+	key := canonicalType(source, expr, catalog.module)
+	if declaration, ok := catalog.types[key]; ok {
+		if seen[key] {
+			return true
+		}
+		seen[key] = true
+		return catalog.unknownUntaggedFormType(declaration.source, declaration.spec.Type, seen)
+	}
+	if _, ok := expr.(*ast.SelectorExpr); !ok {
+		return false
+	}
+	switch key {
+	case "time:Time", "time:Duration", "net:IP", "net:IPMask", "net:HardwareAddr", "encoding/json:RawMessage":
+		return false
+	default:
+		return true
+	}
 }
 
 func (catalog *apiSchemas) formFieldSchema(expr ast.Expr, source *layoutSource, seen map[string]bool) (map[string]any, bool, bool) {
