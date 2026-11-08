@@ -136,7 +136,7 @@ class GitHub:
             obj = self.api(f"git/tags/{obj['sha']}")["object"]
         raise ReleaseError("태그가 단일 커밋을 가리키지 않습니다")
 
-    def candidate_evidence(self, tag, prefix="release-manifest-"):
+    def candidate_evidence(self, tag, prefix="release-manifest-", *, allow_absent=False):
         parse_tag(tag)
         name = prefix + tag
         artifacts = []
@@ -147,6 +147,10 @@ class GitHub:
                 break
         else:
             raise ReleaseError("후보 검증 기록 목록을 모두 확인하지 못했습니다")
+        if allow_absent:
+            artifacts = [item for item in artifacts if not item.get("expired", True)]
+            if not artifacts:
+                return None
         if len(artifacts) != 1 or artifacts[0].get("expired", True):
             raise ReleaseError("태그에 대응하는 검증 artifact가 없거나 중복, 만료됐습니다. 새 Preview가 필요합니다")
         artifact = artifacts[0]
@@ -238,6 +242,19 @@ def approval_environment(github, policy, channel="stable"):
         raise ReleaseError("승인 환경은 해당 채널 브랜치에서만 실행할 수 있어야 합니다")
 
 
+def latest_preview_tag(github):
+    refs = github.api("git/matching-refs/tags/v")
+    versions = []
+    for ref in refs:
+        tag = ref["ref"].removeprefix("refs/tags/")
+        if TAG.fullmatch(tag) and parse_tag(tag)[1] == "preview":
+            base, _, number = parse_tag(tag)
+            versions.append((tuple(map(int, base[1:].split("."))), number, tag))
+    if not versions:
+        raise ReleaseError("Preview 태그가 없는 선행 저장소입니다: " + github.repository)
+    return max(versions)[2]
+
+
 def upstream_evidence(recipe, github_factory=None):
     """코어 후보와 모든 플랫폼이 같은 코어를 공개 검증했는지 확인합니다."""
     if github_factory is None:
@@ -250,22 +267,17 @@ def upstream_evidence(recipe, github_factory=None):
     for module in UPSTREAM_MODULES:
         repository = module.removeprefix("github.com/")
         dependency = github_factory(repository)
-        head = dependency.api("git/ref/heads/preview")["object"]["sha"]
-        refs = dependency.api("git/matching-refs/tags/v")
-        versions = []
-        for ref in refs:
-            tag = ref["ref"].removeprefix("refs/tags/")
-            if TAG.fullmatch(tag) and parse_tag(tag)[1] == "preview":
-                base, _, number = parse_tag(tag)
-                versions.append((tuple(map(int, base[1:].split("."))), number, tag))
-        if not versions:
-            raise ReleaseError("Preview 태그가 없는 선행 저장소입니다: " + repository)
-        tag = max(versions)[2]
+        tag = latest_preview_tag(dependency)
         sha = dependency.tag_sha(tag)
-        if not SHA.fullmatch(head or "") or sha != head:
-            raise ReleaseError("선행 저장소의 Preview HEAD가 최신 태그와 다릅니다: " + repository)
+        if not SHA.fullmatch(sha or ""):
+            raise ReleaseError("선행 저장소의 Preview 태그가 올바른 커밋을 가리키지 않습니다: " + repository)
         is_core = module == CORE_MODULE
-        proof = dependency.candidate_evidence(tag, "core-candidate-" if is_core else "release-manifest-")
+        proof = dependency.candidate_evidence(tag, "core-candidate-" if is_core else "release-manifest-", allow_absent=not is_core)
+        if proof is None:
+            if is_core:
+                raise ReleaseError("코어 후보의 발행 검증 기록이 없습니다")
+            snapshots[module] = {"version": tag, "source_sha": sha, "artifact_id": None, "digest": None}
+            continue
         artifact, run_info, manifest = proof["artifact"], proof["workflow_run"], proof["manifest"]
         validation = manifest.get("validation", {})
         components = manifest.get("components", {})
@@ -292,9 +304,9 @@ def upstream_evidence(recipe, github_factory=None):
             if components.get("core_version") != tag:
                 raise ReleaseError("코어 후보의 구성 버전이 태그와 다릅니다: " + repository)
             core_version = tag
-        elif (components.get("core_version") != core_version or
-              validation.get("selected_modules", {}).get(CORE_MODULE) != core_version):
-            raise ReleaseError("선행 플랫폼이 현재 코어를 검증하지 않았습니다: " + repository)
+        elif (not components.get("core_version") or
+              validation.get("selected_modules", {}).get(CORE_MODULE) != components["core_version"]):
+            raise ReleaseError("선행 플랫폼의 코어 검증 기록이 일치하지 않습니다: " + repository)
         snapshots[module] = {"version": tag, "source_sha": sha, "artifact_id": artifact["id"], "digest": artifact["digest"]}
     for module, version in recipe["modules"].items():
         if module in snapshots and snapshots[module]["version"] != version:
@@ -436,6 +448,10 @@ def validate_reports(reports, plan, query):
                 report.get("query") != query or report.get("components") != plan["components"] or
                 set(report.get("entrypoints", [])) != {"spine", "spine-cli"}):
             raise ReleaseError("공개 설치 결과가 발행 계획과 다릅니다")
+        if plan.get("upstream_evidence") is not None and (
+                report.get("upstream_evidence") != plan["upstream_evidence"] or
+                report.get("combination_checks") != ["echo-full", "nethttp-full"]):
+            raise ReleaseError("공개 설치 결과에 코어와 플랫폼의 조합 검증이 없습니다")
     return reports
 
 

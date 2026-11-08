@@ -29,7 +29,7 @@ class Dependency:
     def tag_sha(self, tag):
         return SHA
 
-    def candidate_evidence(self, tag, prefix):
+    def candidate_evidence(self, tag, prefix, *, allow_absent=False):
         self.info["requested_prefix"] = prefix
         return copy.deepcopy(self.info["proof"])
 
@@ -70,23 +70,22 @@ class UpstreamEvidenceTests(unittest.TestCase):
         self.assertEqual(Dependency.data[release.CORE_MODULE]["requested_prefix"], "core-candidate-")
         self.assertIn("github.com/NARUBROWN/spine-nats-platform", result)
 
-    def test_rejects_platform_built_with_old_core(self):
+    def test_accepts_existing_platform_built_with_old_core(self):
         proof = Dependency.data["github.com/NARUBROWN/spine-nats-platform"]["proof"]
         proof["manifest"]["components"]["core_version"] = "v0.7.0-preview.2"
         proof["manifest"]["validation"]["components"]["core_version"] = "v0.7.0-preview.2"
         proof["manifest"]["validation"]["selected_modules"][release.CORE_MODULE] = "v0.7.0-preview.2"
-        with self.assertRaisesRegex(release.ReleaseError, "현재 코어"):
-            self.check()
+        self.assertIn("github.com/NARUBROWN/spine-nats-platform", self.check())
 
-    def test_rejects_unpublished_head_and_failed_workflow(self):
-        for condition in ("head", "workflow"):
+    def test_rejects_failed_workflow_or_inconsistent_previous_validation(self):
+        for condition in ("workflow", "core"):
             with self.subTest(condition=condition):
                 Dependency.data = fixtures()
                 item = Dependency.data["github.com/NARUBROWN/spine-echo-platform"]
-                if condition == "head":
-                    item["head"] = "c" * 40
-                else:
+                if condition == "workflow":
                     item["proof"]["workflow_run"]["conclusion"] = "failure"
+                else:
+                    item["proof"]["manifest"]["validation"]["selected_modules"][release.CORE_MODULE] = "v0.7.0-preview.2"
                 with self.assertRaises(release.ReleaseError):
                     self.check()
 
@@ -94,6 +93,12 @@ class UpstreamEvidenceTests(unittest.TestCase):
         self.recipe["modules"][release.CORE_MODULE] = "v0.7.0-preview.7"
         with self.assertRaisesRegex(release.ReleaseError, "레시피"):
             self.check()
+
+    def test_missing_old_adapter_proof_does_not_force_republication(self):
+        Dependency.data["github.com/NARUBROWN/spine-nats-platform"]["proof"] = None
+        result = self.check()
+        self.assertIsNone(result["github.com/NARUBROWN/spine-nats-platform"]["artifact_id"])
+        self.assertEqual(result["github.com/NARUBROWN/spine-nats-platform"]["version"], "v0.2.0-preview.1")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import time
 
-from release import CORE_MODULE, GitHub, ReleaseError, SHA, TAG, UPSTREAM_MODULES, parse_tag
+from release import CORE_MODULE, GitHub, ReleaseError, SHA, TAG, UPSTREAM_MODULES, latest_preview_tag, parse_tag
 
 CLI = "github.com/NARUBROWN/spine-cli"
 ORDER = (*UPSTREAM_MODULES, CLI)
@@ -23,10 +23,17 @@ def validate_plan(plan, github_factory=GitHub):
         if parse_tag(item["version"])[1] != "preview" or not SHA.fullmatch(item["source_sha"]):
             raise ReleaseError("Preview 버전과 전체 소스 SHA가 필요합니다: " + module)
         github = github_factory(module.removeprefix("github.com/"))
-        head = github.api("git/ref/heads/preview")["object"]["sha"]
         tagged = github.tag_sha(item["version"])
-        if head != item["source_sha"] or (tagged is not None and tagged != head):
-            raise ReleaseError("Preview HEAD 또는 기존 태그가 계획과 다릅니다: " + module)
+        if tagged is not None:
+            if tagged != item["source_sha"]:
+                raise ReleaseError("기존 태그가 계획의 커밋과 다릅니다: " + module)
+            if module != CLI and latest_preview_tag(github) != item["version"]:
+                raise ReleaseError("계획의 선행 태그가 최신 Preview 태그와 다릅니다: " + module)
+            check_existing(github, module, item, core_version=plan[CORE_MODULE]["version"])
+            continue
+        head = github.api("git/ref/heads/preview")["object"]["sha"]
+        if head != item["source_sha"]:
+            raise ReleaseError("Preview HEAD가 계획과 다릅니다: " + module)
         raw = github.api("contents/.github/release-policy.json?ref=" + head)
         policy = json.loads(base64.b64decode(raw["content"]))
         if parse_tag(item["version"])[0] != policy["next_version"]:
@@ -37,17 +44,14 @@ def validate_plan(plan, github_factory=GitHub):
             selected = policy["channels"]["preview"]["core_version"]
             if selected != plan[CORE_MODULE]["version"] or policy["ci_core"] != plan[CORE_MODULE]["source_sha"]:
                 raise ReleaseError("플랫폼의 코어 버전 또는 CI 소스가 계획과 다릅니다: " + module)
-        if tagged is not None:
-            check_existing(github, module, item, core_version=plan[CORE_MODULE]["version"])
-        else:
-            base, channel, sequence = parse_tag(item["version"])
-            refs = github.api(f"git/matching-refs/tags/{base}-{channel}.")
-            tags = [ref["ref"].removeprefix("refs/tags/") for ref in refs]
-            existing = [parse_tag(tag)[2] for tag in tags if TAG.fullmatch(tag)]
-            if existing and sequence <= max(existing):
-                raise ReleaseError("후보 번호가 이미 발행된 번호보다 크지 않습니다: " + module)
-            if any(run["status"] != "completed" for run in workflow_runs(github)):
-                raise ReleaseError("이미 진행 중인 Preview 발행이 있습니다: " + module)
+        base, channel, sequence = parse_tag(item["version"])
+        refs = github.api(f"git/matching-refs/tags/{base}-{channel}.")
+        tags = [ref["ref"].removeprefix("refs/tags/") for ref in refs]
+        existing = [parse_tag(tag)[2] for tag in tags if TAG.fullmatch(tag)]
+        if existing and sequence <= max(existing):
+            raise ReleaseError("후보 번호가 이미 발행된 번호보다 크지 않습니다: " + module)
+        if any(run["status"] != "completed" for run in workflow_runs(github)):
+            raise ReleaseError("이미 진행 중인 Preview 발행이 있습니다: " + module)
     return plan
 
 
@@ -57,7 +61,11 @@ def workflow_runs(github):
 
 def check_existing(github, module, item, *, core_version):
     prefix = "core-candidate-" if module == CORE_MODULE else "release-manifest-"
-    proof = github.candidate_evidence(item["version"], prefix)
+    proof = github.candidate_evidence(item["version"], prefix, allow_absent=module not in (CORE_MODULE, CLI))
+    if proof is None:
+        if module in (CORE_MODULE, CLI):
+            raise ReleaseError("코어 또는 CLI의 발행 검증 기록이 없습니다: " + module)
+        return
     manifest, run, artifact = proof["manifest"], proof["workflow_run"], proof["artifact"]
     report = manifest.get("validation", {})
     schema = "spine-cli.release-manifest/v1" if module == CLI else "spine.release-manifest/v1"
@@ -81,10 +89,11 @@ def check_existing(github, module, item, *, core_version):
         if (manifest.get("kind") != scope or manifest.get("module") != module or
                 report.get("scope") != scope or
                 manifest.get("source_tree") != github.api("git/commits/" + item["source_sha"])["tree"]["sha"] or
-                manifest.get("components", {}).get("core_version") != core_version or
+                not manifest.get("components", {}).get("core_version") or
+                (module == CORE_MODULE and manifest.get("components", {}).get("core_version") != core_version) or
                 report.get("selected_modules", {}).get(module) != item["version"] or
-                report.get("selected_modules", {}).get(CORE_MODULE) != core_version):
-            raise ReleaseError("기존 태그가 계획의 코어 조합을 검증하지 않았습니다: " + module)
+                report.get("selected_modules", {}).get(CORE_MODULE) != manifest.get("components", {}).get("core_version")):
+            raise ReleaseError("기존 태그의 발행 검증 기록이 일치하지 않습니다: " + module)
 
 
 def dispatch_and_wait(module, item, *, core_version, timeout=21600, github_factory=GitHub, sleep=time.sleep, now=time.monotonic):

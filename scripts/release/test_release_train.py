@@ -99,11 +99,54 @@ class ReleaseTrainTests(unittest.TestCase):
                "path": ".github/workflows/preview.yml"}
         artifact = {"workflow_run": {"id": 10, "head_sha": SHA}}
         github = FakeGitHub("NARUBROWN/spine")
-        github.candidate_evidence = lambda tag, prefix: {"manifest": manifest, "workflow_run": run, "artifact": artifact}
+        github.candidate_evidence = lambda tag, prefix, **kwargs: {"manifest": manifest, "workflow_run": run, "artifact": artifact}
         train.check_existing(github, module, item, core_version=item["version"])
         run["conclusion"] = "failure"
         with self.assertRaises(release.ReleaseError):
             train.check_existing(github, module, item, core_version=item["version"])
+
+    def test_existing_adapter_can_use_older_core_without_republication(self):
+        module = "github.com/NARUBROWN/spine-nats-platform"
+        item = sample()[module]
+        old_core = "v0.7.0-preview.2"
+        components = {"core_version": old_core}
+        manifest = {"schema_version": "spine.release-manifest/v1", "repository": "NARUBROWN/spine-nats-platform",
+                    "module": module, "kind": "platform", "source_tree": "b" * 40,
+                    "version": item["version"], "source_sha": SHA, "channel": "preview", "branch": "preview",
+                    "components": components, "workflow_run_id": "10", "workflow_run_attempt": "1",
+                    "validation": {"result": "passed", "scope": "platform", "version": item["version"],
+                                   "source_sha": SHA, "components": components,
+                                   "selected_modules": {module: item["version"], release.CORE_MODULE: old_core}}}
+        run = {"id": 10, "run_attempt": 1, "status": "completed", "conclusion": "success",
+               "event": "workflow_dispatch", "head_sha": SHA, "head_branch": "preview",
+               "path": ".github/workflows/preview.yml"}
+        github = FakeGitHub("NARUBROWN/spine-nats-platform")
+        github.candidate_evidence = lambda tag, prefix, **kwargs: {"manifest": manifest, "workflow_run": run,
+                                                         "artifact": {"workflow_run": {"id": 10, "head_sha": SHA}}}
+        train.check_existing(github, module, item, core_version="v0.7.0-preview.8")
+
+    def test_existing_adapter_without_old_artifact_can_be_retested(self):
+        module = "github.com/NARUBROWN/spine-nats-platform"
+        github = FakeGitHub("NARUBROWN/spine-nats-platform")
+        github.candidate_evidence = lambda tag, prefix, **kwargs: None
+        train.check_existing(github, module, sample()[module], core_version="v0.7.0-preview.8")
+
+    def test_reused_adapter_does_not_require_matching_head_or_new_policy(self):
+        class ReusedGitHub(FakeGitHub):
+            def tag_sha(self, tag):
+                return SHA if self.repository.endswith("/spine-nats-platform") else None
+            def api(self, path):
+                if self.repository.endswith("/spine-nats-platform"):
+                    if path == "git/matching-refs/tags/v":
+                        return [{"ref": "refs/tags/v0.2.0-preview.1"}]
+                    raise AssertionError("기존 태그 재사용에 현재 브랜치 정책은 필요하지 않습니다")
+                return super().api(path)
+        with patch.object(train, "check_existing") as check:
+            train.validate_plan(sample(), ReusedGitHub)
+        self.assertEqual(check.call_count, 1)
+        self.assertEqual(check.call_args.args[1], "github.com/NARUBROWN/spine-nats-platform")
+        with patch.object(train, "latest_preview_tag", return_value="v0.2.0-preview.2"), self.assertRaisesRegex(release.ReleaseError, "최신 Preview"):
+            train.validate_plan(sample(), ReusedGitHub)
 
     def test_existing_publication_in_progress_prevents_dispatch(self):
         item = sample()[release.CORE_MODULE]
