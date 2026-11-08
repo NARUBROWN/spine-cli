@@ -28,6 +28,7 @@ type httpBindingShape struct {
 	kind          string
 	source        string
 	keys          []string
+	scalarPath    bool
 	legacy        bool
 	problem       string
 }
@@ -81,6 +82,15 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 			parameter.Payload, parameter.payloadSource, parameter.InputFields = shape.payload, shape.payloadSource, shape.fields
 			parameter.SourceDTO = shape.source != "" && shape.kind == "pointer"
 			parameter.Keys = append([]string(nil), shape.keys...)
+			parameter.scalarPath = shape.scalarPath
+			if shape.scalarPath {
+				if len(pathKeys) != 1 {
+					diagnostics = append(diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_SCALAR_AMBIGUOUS", Message: "A scalar path input requires exactly one route key and one scalar path argument.", Source: relativeSource(source.Fset.Position(field.Pos()))})
+				} else {
+					parameter.Keys = []string{pathKeys[0]}
+					parameter.InputFields = []handlerInputField{{Name: pathKeys[0], Type: shape.payload, source: shape.payloadSource}}
+				}
+			}
 			parameter.Deprecated = catalog.structured && shape.legacy
 			if shape.binding == "path" && !parameter.SourceDTO {
 				if pathIndex < len(pathKeys) {

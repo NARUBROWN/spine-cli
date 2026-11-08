@@ -25,6 +25,9 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 	default:
 		return httpBindingShape{}, false
 	}
+	if scalar, ok := catalog.scalarPathPayload(source, node.Index, map[string]bool{}); binding == "path" && ok {
+		return httpBindingShape{binding: "path", kind: "pointer", source: "path", scalarPath: true, payload: scalar, payloadSource: source.Path}, true
+	}
 	payloadSource, structure, ok := catalog.markerPayload(source, node.Index, map[string]bool{})
 	if !ok {
 		return httpBindingShape{kind: "unsupported", problem: "input." + marker + " requires a concrete struct payload"}, true
@@ -110,4 +113,33 @@ func controllerLowerCamel(name string) string {
 		words[index] = string(chars)
 	}
 	return strings.Join(words, "")
+}
+
+// scalarPathPayload는 기본 타입과 타입 별칭만 해석하고 새 정의 타입은 거부합니다.
+func (catalog *httpBindingCatalog) scalarPathPayload(source *layoutSource, expression ast.Expr, visiting map[string]bool) (string, bool) {
+	if paren, ok := expression.(*ast.ParenExpr); ok {
+		return catalog.scalarPathPayload(source, paren.X, visiting)
+	}
+	if ident, ok := expression.(*ast.Ident); ok {
+		switch ident.Name {
+		case "bool", "string", "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "float32", "float64", "byte", "rune":
+			if _, shadowed := catalog.types[canonicalType(source, expression, catalog.module)]; !shadowed {
+				if ident.Name == "byte" {
+					return "uint8", true
+				}
+				if ident.Name == "rune" {
+					return "int32", true
+				}
+				return ident.Name, true
+			}
+		}
+	}
+	key := canonicalType(source, expression, catalog.module)
+	declaration, ok := catalog.types[key]
+	if !ok || !declaration.spec.Assign.IsValid() || visiting[key] {
+		return "", false
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+	return catalog.scalarPathPayload(declaration.source, declaration.spec.Type, visiting)
 }

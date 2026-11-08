@@ -164,6 +164,7 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 	legacy, typed, legacyPath, typedPath, body := false, false, false, false, false
 	seenTypes, seenKeys := map[string]bool{}, map[string]bool{}
 	index := 0
+	scalarCount := 0
 	for _, field := range fields.List {
 		count := len(field.Names)
 		if count == 0 {
@@ -171,6 +172,12 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 		}
 		for range count {
 			parameter := parameters[index]
+			if parameter.scalarPath {
+				scalarCount++
+				if scalarCount > 1 {
+					add("HTTP_PATH_SCALAR_AMBIGUOUS", "only one scalar path argument is supported")
+				}
+			}
 			index++
 			legacy, typed = legacy || parameter.Deprecated, typed || parameter.SourceDTO
 			legacyPath = legacyPath || parameter.Deprecated && parameter.Binding == "path"
@@ -178,7 +185,7 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 			if parameter.Deprecated {
 				diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_INPUT_API_DEPRECATED", Message: fmt.Sprintf("handler %s parameter %d uses a deprecated %s input", handler, index-1, parameter.Binding), Source: relativeSource(source.Fset.Position(field.Pos())), Hint: "Migrate path, query and header inputs in this handler to separate tagged struct pointers."})
 			}
-			if parameter.Binding == "body" || parameter.SourceDTO {
+			if parameter.Binding == "body" || parameter.SourceDTO && !parameter.scalarPath {
 				identity := catalog.dtoIdentity(source, field.Type)
 				if seenTypes[identity] {
 					add("HTTP_INPUT_DTO_DUPLICATED", "the same DTO type appears more than once")
