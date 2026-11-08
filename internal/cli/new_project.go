@@ -24,6 +24,7 @@ type installationStage struct {
 type newProjectOptions struct {
 	Name                       resourceName
 	Module, Layout, Platform   string
+	DependencyChannel          string
 	Frontend, FrontendRoot     string
 	Events                     []eventPlatformSpec
 	Validator                  string
@@ -39,7 +40,7 @@ type newProjectOptions struct {
 }
 
 func parseNewOptions(args []string) (newProjectOptions, error) {
-	options := newProjectOptions{Layout: layeredLayout, Platform: "echo", Validator: "none", WebSocketPlatform: "none", Frontend: "none", FrontendRoot: "frontend"}
+	options := newProjectOptions{Layout: layeredLayout, Platform: "echo", DependencyChannel: defaultDependencyChannel, Validator: "none", WebSocketPlatform: "none", Frontend: "none", FrontendRoot: "frontend"}
 	frontendSet, frontendRootSet := false, false
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return options, fmt.Errorf("project name is required")
@@ -51,7 +52,7 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	options.Name, options.Module = name, "github.com/your-org/"+name.Route
 	for index := 1; index < len(args); index++ {
 		switch args[index] {
-		case "--module", "--layout", "--platform", "--event-platform", "--validator", "--websocket-platform", "--frontend", "--frontend-root", "--if-match":
+		case "--module", "--layout", "--channel", "--platform", "--event-platform", "--validator", "--websocket-platform", "--frontend", "--frontend-root", "--if-match":
 			key := args[index]
 			if index+1 == len(args) {
 				return options, fmt.Errorf("%s requires a value", key)
@@ -62,6 +63,8 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 				options.Module = args[index]
 			case "--layout":
 				options.Layout = args[index]
+			case "--channel":
+				options.DependencyChannel = strings.ToLower(args[index])
 			case "--platform":
 				options.Platform = args[index]
 			case "--event-platform":
@@ -106,6 +109,9 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 }
 
 func validateNewProjectOptions(options newProjectOptions) (newProjectOptions, error) {
+	if err := validateDependencyChannel(options.DependencyChannel); err != nil {
+		return options, err
+	}
 	if options.Layout != layeredLayout && options.Layout != "legacy" {
 		return options, fmt.Errorf("unsupported layout: %s", options.Layout)
 	}
@@ -161,6 +167,7 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 	config := defaultProjectConfig(options.Module)
 	config.Layout, config.Platform = options.Layout, options.Platform
 	config.Recipe, config.Events, config.Validator = currentAssemblyRecipe, options.Events, options.Validator
+	config.DependencyChannel = options.DependencyChannel
 	config.WebSocketPlatform = options.WebSocketPlatform
 	if options.Frontend != "" && options.Frontend != "none" {
 		config.FrontendConfigured = true
@@ -307,7 +314,7 @@ func runNewWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
 	stages := []installationStage{{"scaffold", "pending"}, {"dependencies", "skipped"}, {"modules", "skipped"}, {"contract", "skipped"}, {"build", "skipped"}, {"publish", "pending"}}
 	modules := []selectedModule{}
 	dir := options.Name.Route
-	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "frontend": options.Frontend, "frontend_root": options.FrontendRoot, "recipe": currentAssemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator, options.Events...), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
+	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "frontend": options.Frontend, "frontend_root": options.FrontendRoot, "recipe": currentAssemblyRecipe, "dependency_channel": options.DependencyChannel, "stability": dependencyStability(options.DependencyChannel), "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator, options.Events...), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
 	finish := func(code int, stage string, err error) int {
 		if err != nil {
 			for index := range stages {
@@ -338,8 +345,8 @@ func runNewWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	queries := currentAssemblyModules(options)
-	result["module_queries"], result["dependency_channel"] = queries, "preview"
-	options.Modules, err = previewModuleResolver(ctx, queries)
+	result["module_queries"] = queries
+	options.Modules, err = resolveDependencyModules(ctx, queries, options.DependencyChannel)
 	if err != nil {
 		return finish(3, "dependencies", err)
 	}
@@ -347,7 +354,7 @@ func runNewWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
 		return finish(3, "dependencies", err)
 	}
 	if options.Frontend != "" && options.Frontend != "none" {
-		options.FrontendDescriptor, err = resolveFrontendProvider(ctx, options.Frontend)
+		options.FrontendDescriptor, err = resolveFrontendProvider(ctx, options.Frontend, options.DependencyChannel)
 		if err != nil {
 			return finish(3, "dependencies", err)
 		}
@@ -405,7 +412,7 @@ func runNewWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
 	}
 	// 생성 모드와 최종 내용도 해시에 넣어 다른 레시피의 계획을 재사용하지 못하게 합니다.
 	digest := sha256.New()
-	fmt.Fprintf(digest, "%s\n%s\n%s\n%t\n%t\n", state, currentAssemblyRecipe, options.Platform, options.SkipInstall, options.Write.Force)
+	fmt.Fprintf(digest, "%s\n%s\n%s\n%s\n%t\n%t\n", state, currentAssemblyRecipe, options.DependencyChannel, options.Platform, options.SkipInstall, options.Write.Force)
 	metadata, _ := json.Marshal(descriptorFingerprints(options))
 	digest.Write(metadata)
 	for _, path := range paths {
@@ -465,7 +472,7 @@ func runNewWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
 			fmt.Fprintf(out, "Would create Spine application in %s\n%s", dir, result["diff"])
 			printDryRunHash(out, baseHash)
 		} else {
-			fmt.Fprintf(out, "Created Spine application in %s (%s, release recipe %s)\n\nNext steps:\n  cd %s\n", dir, options.Platform, currentAssemblyRecipe, dir)
+			fmt.Fprintf(out, "Created Spine application in %s (%s, %s channel, recipe %s)\n\nNext steps:\n  cd %s\n", dir, options.Platform, options.DependencyChannel, currentAssemblyRecipe, dir)
 			if options.FrontendDescriptor != nil {
 				fmt.Fprintf(out, "  npm --prefix %s install\n", options.FrontendRoot)
 			}

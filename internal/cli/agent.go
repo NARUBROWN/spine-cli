@@ -94,15 +94,16 @@ func currentCommandSchema() commandSchema {
 			c.Options["depends"] = d
 		}
 		if c.Name == "new" {
-			c.Options["platform"] = optionDefinition{Type: "string", Description: "HTTP provider or none; provider resolves spine-<provider>-platform@preview and metadata"}
-			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "[name:]provider resolves NARUBROWN/spine-<provider>-platform@preview and spine-platform.json; environment prefix SPINE_<NAME>_"}
+			c.Options["channel"] = optionDefinition{Type: "string", Enum: []string{"preview", "rc", "main"}, Description: "Dependency channel; defaults to preview, rc selects published RC or release tags, and main selects published release tags"}
+			c.Options["platform"] = optionDefinition{Type: "string", Description: "HTTP provider or none; provider resolves from the selected dependency channel and metadata"}
+			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "[name:]provider resolves NARUBROWN/spine-<provider>-platform from the selected channel and spine-platform.json; environment prefix SPINE_<NAME>_"}
 			c.Options["websocket-platform"] = optionDefinition{Type: "string", Description: "WebSocket provider or none; provider requires HTTP and resolves platform metadata"}
-			c.Options["validator"] = optionDefinition{Type: "string", Description: "Default none; provider resolves NARUBROWN/spine-validator-<provider>@preview and spine-platform.json; minimum Go comes from metadata"}
-			c.Options["frontend"] = optionDefinition{Type: "string", Description: "Default none; react is built in; other providers resolve github.com/NARUBROWN/spine-frontend-<provider>@preview and spine-frontend.json"}
+			c.Options["validator"] = optionDefinition{Type: "string", Description: "Default none; provider resolves NARUBROWN/spine-validator-<provider> from the selected channel and spine-platform.json; minimum Go comes from metadata"}
+			c.Options["frontend"] = optionDefinition{Type: "string", Description: "Default none; react is built in; other providers resolve github.com/NARUBROWN/spine-frontend-<provider> from the selected channel and spine-frontend.json"}
 			c.Options["frontend-root"] = optionDefinition{Type: "string", Description: "Project-relative frontend directory; defaults to frontend; alone it selects the built-in React CSR provider"}
 			c.Options["interactive"] = optionDefinition{Type: "boolean", Description: "Prompt for providers in non-terminal input; cannot be combined with --json"}
 			c.Options["no-interactive"] = optionDefinition{Type: "boolean", Description: "Skip provider prompts, including when input is a terminal"}
-			c.Options["skip-install"] = optionDefinition{Type: "boolean", Description: "Resolve Preview branches and generate files without dependency installation or build verification; requires Go and may use network"}
+			c.Options["skip-install"] = optionDefinition{Type: "boolean", Description: "Resolve the selected dependency channel and generate files without dependency installation or build verification; requires Go and may use network"}
 			c.Effects.Network = true
 			c.Options["layout"] = optionDefinition{Type: "string", Enum: []string{layeredLayout, "legacy"}, Description: "New projects default to layered-v1; legacy preserves the previous generation rules"}
 		}
@@ -155,6 +156,7 @@ type projectContextConfig struct {
 	Layout            string              `json:"layout"`
 	Platform          string              `json:"platform,omitempty"`
 	Recipe            string              `json:"recipe,omitempty"`
+	DependencyChannel string              `json:"dependency_channel,omitempty"`
 	Events            []eventPlatformSpec `json:"event_platforms,omitempty"`
 	Validator         string              `json:"validator,omitempty"`
 	WebSocketPlatform string              `json:"websocket_platform,omitempty"`
@@ -208,7 +210,7 @@ func runContext(args []string, out, errOut io.Writer) int {
 		SchemaVersion: contextSchemaVersion,
 		CLIVersion:    version,
 		ProjectRoot:   filepath.Clean(absoluteRoot),
-		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform, FrontendRoot: config.FrontendRoot, FrontendEntry: config.FrontendEntry, FrontendOutput: config.FrontendOutput, FrontendAPIPrefix: config.FrontendAPIPrefix, FrontendProvider: frontendProvider, FrontendDisabled: config.FrontendDisabled},
+		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, DependencyChannel: config.DependencyChannel, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform, FrontendRoot: config.FrontendRoot, FrontendEntry: config.FrontendEntry, FrontendOutput: config.FrontendOutput, FrontendAPIPrefix: config.FrontendAPIPrefix, FrontendProvider: frontendProvider, FrontendDisabled: config.FrontendDisabled},
 		Capabilities:  currentCapabilities(),
 		Doctor:        doctor,
 		NextActions: []nextAction{

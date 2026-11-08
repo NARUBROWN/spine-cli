@@ -17,23 +17,24 @@ func TestNewWizardPromptsInProviderOrderAndSupportsCustomFrontendRoot(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := strings.NewReader("2\n\n\n\ny\n\nweb\n")
+	input := strings.NewReader("\n2\n\n\n\ny\n\nweb\n")
 	var output bytes.Buffer
 	options, err = promptNewProjectOptions([]string{"shop"}, options, input, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.Platform != "echo" || len(options.Events) != 0 || options.WebSocketPlatform != "none" || options.Validator != "none" || options.Frontend != "react" || options.FrontendRoot != "web" {
+	if options.DependencyChannel != "preview" || options.Platform != "echo" || len(options.Events) != 0 || options.WebSocketPlatform != "none" || options.Validator != "none" || options.Frontend != "react" || options.FrontendRoot != "web" {
 		t.Fatalf("unexpected wizard selections: %#v", options)
 	}
 	positions := []int{
-		strings.Index(output.String(), "HTTP adapter를 선택하세요"),
-		strings.Index(output.String(), "Event adapter를 선택하세요"),
-		strings.Index(output.String(), "WebSocket를 선택하세요"),
-		strings.Index(output.String(), "Validator를 선택하세요"),
-		strings.Index(output.String(), "Frontend를 사용할까요"),
-		strings.Index(output.String(), "Frontend provider를 선택하세요"),
-		strings.Index(output.String(), "Frontend root 경로"),
+		strings.Index(output.String(), "Select Dependency channel"),
+		strings.Index(output.String(), "Select HTTP adapter"),
+		strings.Index(output.String(), "Select Event adapter"),
+		strings.Index(output.String(), "Select WebSocket"),
+		strings.Index(output.String(), "Select Validator"),
+		strings.Index(output.String(), "Enable a frontend?"),
+		strings.Index(output.String(), "Select Frontend provider"),
+		strings.Index(output.String(), "Frontend root path"),
 	}
 	for index, position := range positions {
 		if position < 0 || (index > 0 && position <= positions[index-1]) {
@@ -45,9 +46,9 @@ func TestNewWizardPromptsInProviderOrderAndSupportsCustomFrontendRoot(t *testing
 func TestNewWizardResolvesAnUnlistedFrontendByProviderName(t *testing.T) {
 	var output bytes.Buffer
 	provider, err := promptDynamicChoice(bufio.NewReader(strings.NewReader("solid\n")), &output, "Frontend", []promptChoice{
-		{value: "none", label: "프론트엔드 사용 안 함"},
+		{value: "none", label: "Disabled"},
 		{value: "react", label: "React CSR"},
-	}, "none", true, "provider module 규약")
+	}, "none", true, "Provider module contract")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,10 +68,10 @@ func TestNewWizardSkipsFrontendForUnsupportedHTTPProviders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.Frontend != "none" || strings.Contains(output.String(), "Frontend를 사용할까요") {
+	if options.Frontend != "none" || strings.Contains(output.String(), "Enable a frontend?") {
 		t.Fatalf("unsupported HTTP provider offered frontend selection: options=%#v\n%s", options, output.String())
 	}
-	if !strings.Contains(output.String(), "Echo와 net/http") {
+	if !strings.Contains(output.String(), "Echo and net/http") {
 		t.Fatalf("unsupported HTTP provider did not explain frontend serving support: %s", output.String())
 	}
 }

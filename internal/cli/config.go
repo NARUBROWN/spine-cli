@@ -17,6 +17,7 @@ type projectConfig struct {
 	Layout             string
 	Platform           string
 	Recipe             string
+	DependencyChannel  string
 	Events             []eventPlatformSpec
 	Validator          string
 	WebSocketPlatform  string
@@ -43,6 +44,9 @@ func projectConfigTemplate(config projectConfig) string {
 	}
 	if config.Recipe != "" {
 		result += fmt.Sprintf("recipe = %q\n", config.Recipe)
+	}
+	if config.DependencyChannel != "" {
+		result += fmt.Sprintf("dependency_channel = %q\n", config.DependencyChannel)
 	}
 	if config.WebSocketPlatform != "" {
 		result += fmt.Sprintf("websocket_platform = %q\n", config.WebSocketPlatform)
@@ -98,7 +102,7 @@ func loadProjectConfig() (projectConfig, error) {
 			if enabled {
 				config.FrontendConfigured = true
 			}
-		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "validator", "websocket_platform", "frontend_provider", "frontend_root", "frontend_entry", "frontend_output", "frontend_api_prefix":
+		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "dependency_channel", "validator", "websocket_platform", "frontend_provider", "frontend_root", "frontend_entry", "frontend_output", "frontend_api_prefix":
 			unquoted, err := strconv.Unquote(value)
 			if err != nil || unquoted == "" {
 				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
@@ -119,6 +123,11 @@ func loadProjectConfig() (projectConfig, error) {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported recipe %q", lineNumber+1, unquoted)
 				}
 				config.Recipe = unquoted
+			} else if key == "dependency_channel" {
+				if err := validateDependencyChannel(unquoted); err != nil {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: %w", lineNumber+1, err)
+				}
+				config.DependencyChannel = unquoted
 			} else if key == "websocket_platform" {
 				if unquoted != "none" && !validProviderName(unquoted) {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported WebSocket platform %q", lineNumber+1, unquoted)
@@ -187,6 +196,12 @@ func loadProjectConfig() (projectConfig, error) {
 	}
 	if config.Module == "" {
 		return projectConfig{}, fmt.Errorf("spine.toml: module is required")
+	}
+	if config.Recipe == currentAssemblyRecipe && config.DependencyChannel == "" {
+		config.DependencyChannel = defaultDependencyChannel
+	}
+	if config.DependencyChannel != "" && config.Recipe != currentAssemblyRecipe {
+		return projectConfig{}, fmt.Errorf("spine.toml: dependency_channel requires recipe %q", currentAssemblyRecipe)
 	}
 	if config.WebSocketPlatform != "" && config.WebSocketPlatform != "none" && config.Platform == "none" {
 		return config, fmt.Errorf("WebSocket platform requires HTTP")

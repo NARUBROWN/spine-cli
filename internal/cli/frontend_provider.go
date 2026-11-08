@@ -186,7 +186,7 @@ func readFrontendProviderDescriptor(reader io.Reader, provider string, requireSt
 	return &descriptor, nil
 }
 
-func resolveFrontendProvider(ctx context.Context, provider string) (*frontendProviderDescriptor, error) {
+func resolveFrontendProvider(ctx context.Context, provider, channel string) (*frontendProviderDescriptor, error) {
 	if provider == "react" {
 		return defaultReactFrontendDescriptor(), nil
 	}
@@ -194,7 +194,7 @@ func resolveFrontendProvider(ctx context.Context, provider string) (*frontendPro
 	if path == "" {
 		return nil, fmt.Errorf("invalid frontend provider name %q", provider)
 	}
-	resolved, err := previewModuleResolver(ctx, []selectedModule{{Path: path, Version: "preview"}})
+	resolved, err := resolveDependencyModules(ctx, []selectedModule{{Path: path, Version: "preview"}}, channel)
 	if err != nil {
 		return nil, fmt.Errorf("search frontend provider %q: %w", provider, err)
 	}
