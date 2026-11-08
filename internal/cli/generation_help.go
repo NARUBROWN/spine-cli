@@ -21,8 +21,8 @@ func generationHelp(command string, args []string, out, errOut io.Writer) (bool,
 			kind = args[0]
 		}
 		if command == "new" {
-			fmt.Fprintln(out, "Usage: spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform provider|none] [--event-platform [name:]provider ...] [--validator none|provider] [--websocket-platform none|provider] [--skip-install] [--dry-run] [--json] [--if-match <hash>] [--force]")
-			fmt.Fprintln(out, "\n기본값: layered-v1, HTTP echo, WebSocket none, validator none. --websocket-platform은 독립 WS provider를 선택하며 HTTP가 필요합니다. 선택한 Preview 의존성을 조회하고 설치, 정적 검사, 빌드를 수행합니다. 이벤트는 --event-platform을 반복해 선택합니다. --platform none은 이벤트 worker입니다. playground는 Go 1.26.0 이상이 필요합니다. 생성 후 cd <project>와 spine dev를 실행합니다.\n--skip-install: 버전과 메타데이터는 조회하지만 설치와 빌드는 생략합니다. 생성 후 go mod tidy를 실행합니다.\n--force: --skip-install과 함께만 사용합니다.\n\n예:\n  spine new shop-api --module example.com/shop\n  spine new shop-api --module example.com/shop --skip-install")
+			fmt.Fprintln(out, "Usage: spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform provider|none] [--event-platform [name:]provider ...] [--validator none|provider] [--websocket-platform none|provider] [--frontend none|provider] [--frontend-root <path>] [--interactive|--no-interactive] [--skip-install] [--dry-run] [--json] [--if-match <hash>] [--force]")
+			fmt.Fprintln(out, "\n터미널에서 실행하면 HTTP, event, WebSocket, validator, frontend를 순서대로 선택합니다. 기본값: layered-v1, HTTP echo, event 없음, WebSocket none, validator none, frontend none. 선택지 번호와 이름 검색을 지원합니다. 목록에 없는 provider 이름은 해당 provider module 규약으로 조회합니다.\n--interactive: 비대화형 입력에서도 선택 절차를 시작합니다. --json과 함께 사용할 수 없습니다. --no-interactive: 터미널에서도 선택 절차를 건너뜁니다.\n--frontend provider: React CSR은 내장 provider이며, 다른 provider는 github.com/NARUBROWN/spine-frontend-<provider>@preview에서 spine-frontend.json을 읽습니다. --frontend-root의 기본값은 frontend입니다.\n--websocket-platform은 HTTP provider가 필요합니다. 선택한 Preview 의존성을 조회하고 설치, 정적 검사, 빌드를 수행합니다. 이벤트는 --event-platform을 반복해 선택합니다. --platform none은 이벤트 worker입니다. playground는 Go 1.26.0 이상이 필요합니다. 생성 후 cd <project>를 실행합니다.\n--skip-install: 버전과 메타데이터는 조회하지만 설치와 빌드는 생략합니다. 생성 후 go mod tidy를 실행합니다. frontend를 선택하면 npm --prefix <frontend-root> install도 실행하세요.\n--force: --skip-install과 함께만 사용합니다.\n\n예:\n  spine new shop-api --module example.com/shop\n  spine new shop-api --module example.com/shop --frontend react --frontend-root web")
 			return true, 0
 		}
 		usage, ok := generatorUsage(kind)
@@ -44,7 +44,7 @@ func generationHelp(command string, args []string, out, errOut io.Writer) (bool,
 
 func generationValueOption(argument string) bool {
 	switch argument {
-	case "--module", "--layout", "--platform", "--event-platform", "--validator", "--websocket-platform", "--if-match", "--field", "--depends", "--method", "--path", "--handler", "--topic", "--storage":
+	case "--module", "--layout", "--platform", "--event-platform", "--validator", "--websocket-platform", "--frontend", "--frontend-root", "--if-match", "--field", "--depends", "--method", "--path", "--handler", "--topic", "--storage":
 		return true
 	}
 	return false

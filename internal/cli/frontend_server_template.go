@@ -6,16 +6,58 @@ const frontendOutputMarker = ".spine-frontend-output"
 const frontendDefaultAPIPrefix = "/api"
 
 type frontendResponseCapture struct {
+ response http.ResponseWriter
  header http.Header
+ initialHeader http.Header
  status int
  body bytes.Buffer
 }
-func newFrontendResponseCapture() *frontendResponseCapture { return &frontendResponseCapture{header: make(http.Header)} }
-func (w *frontendResponseCapture) Header() http.Header { return w.header }
-func (w *frontendResponseCapture) WriteHeader(status int) { if w.status == 0 { w.status = status } }
+func newFrontendResponseCapture(response http.ResponseWriter) *frontendResponseCapture {
+ return &frontendResponseCapture{response: response, initialHeader: cloneFrontendHeader(response.Header())}
+}
+func (w *frontendResponseCapture) Header() http.Header {
+ if w.status == http.StatusNotFound { return w.header }
+ return w.response.Header()
+}
+func (w *frontendResponseCapture) WriteHeader(status int) {
+ if w.status != 0 { return }
+ if status >= 100 && status < 200 && status != http.StatusSwitchingProtocols {
+  w.response.WriteHeader(status)
+  return
+ }
+ w.status = status
+ if status == http.StatusNotFound {
+  w.header = cloneFrontendHeader(w.response.Header())
+  replaceFrontendHeaderMap(w.response.Header(), w.initialHeader)
+  return
+ }
+ w.response.WriteHeader(status)
+}
 func (w *frontendResponseCapture) Write(contents []byte) (int, error) {
- if w.status == 0 { w.status = http.StatusOK }
- return w.body.Write(contents)
+ if w.status == http.StatusNotFound { return w.body.Write(contents) }
+ if w.status == 0 { w.WriteHeader(http.StatusOK) }
+ return w.response.Write(contents)
+}
+func (w *frontendResponseCapture) Flush() {
+ if w.status == http.StatusNotFound { return }
+ if w.status == 0 { w.WriteHeader(http.StatusOK) }
+ if flusher, ok := w.response.(http.Flusher); ok { flusher.Flush() }
+}
+func (w *frontendResponseCapture) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+ if w.status == http.StatusNotFound { return nil, nil, http.ErrNotSupported }
+ hijacker, ok := w.response.(http.Hijacker)
+ if !ok { return nil, nil, http.ErrNotSupported }
+ return hijacker.Hijack()
+}
+func (w *frontendResponseCapture) Unwrap() http.ResponseWriter { return w.response }
+func cloneFrontendHeader(source http.Header) http.Header {
+ result := make(http.Header, len(source))
+ for key, values := range source { result[key] = append([]string(nil), values...) }
+ return result
+}
+func replaceFrontendHeaderMap(target, source http.Header) {
+ for key := range target { delete(target, key) }
+ for key, values := range source { target[key] = append([]string(nil), values...) }
 }
 
 func frontendStaticRoot() string {
@@ -38,14 +80,11 @@ func frontendStaticFallback(root, apiPrefix string) func(http.Handler) http.Hand
    if request.Header.Get("Upgrade") != "" { next.ServeHTTP(w, request); return }
    wantsHTML := strings.Contains(request.Header.Get("Accept"), "text/html")
    if !wantsHTML && filepath.Ext(request.URL.Path) == "" { next.ServeHTTP(w, request); return }
-   captured := newFrontendResponseCapture()
+   captured := newFrontendResponseCapture(w)
    next.ServeHTTP(captured, request)
    status := captured.status
    if status == 0 { status = http.StatusOK }
-   if status != http.StatusNotFound {
-    copyFrontendResponse(w, captured, status, request.Method)
-    return
-   }
+   if status != http.StatusNotFound { return }
    if name, ok := frontendRelativePath(request.URL.Path); ok {
     if serveFrontendFile(w, request, root, name) { return }
    }
@@ -75,13 +114,11 @@ func serveFrontendFile(w http.ResponseWriter, request *http.Request, root, name 
  return true
 }
 func copyFrontendResponse(w http.ResponseWriter, captured *frontendResponseCapture, status int, method string) {
- for key, values := range captured.header { for _, value := range values { w.Header().Add(key, value) } }
+ replaceFrontendHeaderMap(w.Header(), captured.header)
  w.WriteHeader(status)
  if method != http.MethodHead { _, _ = w.Write(captured.body.Bytes()) }
 }
 func replaceFrontendHeaders(w http.ResponseWriter, captured *frontendResponseCapture) {
- headers := w.Header()
- for key := range headers { delete(headers, key) }
- for key, values := range captured.header { headers[key] = append([]string(nil), values...) }
+	replaceFrontendHeaderMap(w.Header(), captured.header)
 }
 `

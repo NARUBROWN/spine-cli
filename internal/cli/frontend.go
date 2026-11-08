@@ -2,6 +2,7 @@ package cli
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,10 +16,12 @@ import (
 )
 
 type frontendSettings struct {
-	root      string
-	entry     string
-	output    string
-	apiPrefix string
+	root           string
+	entry          string
+	output         string
+	apiPrefix      string
+	descriptor     frontendProviderDescriptor
+	descriptorHash string
 }
 
 const frontendOutputMarker = ".spine-frontend-output"
@@ -41,11 +44,7 @@ func sameFrontendSettings(left, right *frontendSettings) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
-	return left.root == right.root && left.entry == right.entry && left.output == right.output && left.apiPrefix == right.apiPrefix
-}
-
-var frontendEntryCandidates = []string{
-	"src/main.tsx", "src/main.jsx", "src/main.ts", "src/main.js",
+	return left.root == right.root && left.entry == right.entry && left.output == right.output && left.apiPrefix == right.apiPrefix && left.descriptorHash == right.descriptorHash
 }
 
 func validateProjectRelativePath(value string) error {
@@ -60,6 +59,12 @@ func validateProjectRelativePath(value string) error {
 }
 
 func resolveFrontendSettings(projectRoot string, config projectConfig) (*frontendSettings, error) {
+	if config.FrontendDisabled {
+		return nil, nil
+	}
+	if !config.FrontendConfigured && !projectHasFrontendServingAdapter(projectRoot, config) {
+		return nil, nil
+	}
 	root := filepath.Join(projectRoot, filepath.FromSlash(config.FrontendRoot))
 	info, err := os.Stat(root)
 	if os.IsNotExist(err) && !config.FrontendConfigured {
@@ -71,9 +76,17 @@ func resolveFrontendSettings(projectRoot string, config projectConfig) (*fronten
 	if !info.IsDir() {
 		return nil, fmt.Errorf("frontend_root %q is not a directory", config.FrontendRoot)
 	}
+	provider := config.FrontendProvider
+	if provider == "" {
+		provider = "react"
+	}
+	descriptor, err := loadProjectFrontendDescriptor(root, provider)
+	if err != nil {
+		return nil, err
+	}
 	entry := config.FrontendEntry
 	if entry == "" {
-		for _, candidate := range frontendEntryCandidates {
+		for _, candidate := range descriptor.EntryCandidates {
 			if candidateInfo, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(candidate))); statErr == nil && !candidateInfo.IsDir() {
 				entry = candidate
 				break
@@ -91,6 +104,9 @@ func resolveFrontendSettings(projectRoot string, config projectConfig) (*fronten
 	if err != nil || entryRelative == ".." || strings.HasPrefix(entryRelative, ".."+string(filepath.Separator)) || filepath.IsAbs(entryRelative) {
 		return nil, fmt.Errorf("frontend_entry %q must remain inside frontend_root %q", entry, config.FrontendRoot)
 	}
+	if err := validateProjectRelativePath(filepath.ToSlash(entryRelative)); err != nil {
+		return nil, fmt.Errorf("frontend_entry %q must remain inside frontend_root %q", entry, config.FrontendRoot)
+	}
 	entryInfo, err := os.Stat(entryPath)
 	if err != nil {
 		return nil, fmt.Errorf("could not find frontend entry %q: %w", filepath.ToSlash(filepath.Join(config.FrontendRoot, entry)), err)
@@ -99,7 +115,12 @@ func resolveFrontendSettings(projectRoot string, config projectConfig) (*fronten
 		return nil, fmt.Errorf("frontend_entry %q is a directory", entry)
 	}
 	output := filepath.Join(projectRoot, filepath.FromSlash(config.FrontendOutput))
-	return &frontendSettings{root: root, entry: entryPath, output: output, apiPrefix: config.FrontendAPIPrefix}, nil
+	descriptorBytes, err := json.Marshal(descriptor)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode frontend provider settings: %w", err)
+	}
+	descriptorHash := fmt.Sprintf("%x", sha256.Sum256(descriptorBytes))
+	return &frontendSettings{root: root, entry: entryPath, output: output, apiPrefix: config.FrontendAPIPrefix, descriptor: *descriptor, descriptorHash: descriptorHash}, nil
 }
 
 func frontendSourceState(projectRoot string, config projectConfig) (string, bool, error) {
@@ -169,16 +190,28 @@ func newFrontendBuilder(projectRoot string, config projectConfig, production boo
 		Platform:          api.PlatformBrowser,
 		Format:            api.FormatESModule,
 		Target:            api.ES2020,
-		JSX:               api.JSXAutomatic,
-		JSXImportSource:   "react",
+		JSXImportSource:   settings.descriptor.JSXImportSource,
 		Metafile:          true,
 		Write:             false,
 		LogLevel:          api.LogLevelSilent,
-		Loader:            map[string]api.Loader{".js": api.LoaderJSX},
 		MinifyWhitespace:  production,
 		MinifyIdentifiers: production,
 		MinifySyntax:      production,
 		LegalComments:     api.LegalCommentsLinked,
+	}
+	switch settings.descriptor.JSX {
+	case "automatic":
+		options.JSX = api.JSXAutomatic
+	case "transform":
+		options.JSX = api.JSXTransform
+	case "preserve":
+		options.JSX = api.JSXPreserve
+	}
+	if len(settings.descriptor.Loaders) > 0 {
+		options.Loader = make(map[string]api.Loader, len(settings.descriptor.Loaders))
+		for extension, loader := range settings.descriptor.Loaders {
+			options.Loader[extension] = frontendEsbuildLoader(loader)
+		}
 	}
 	if !production {
 		options.Sourcemap = api.SourceMapLinked
@@ -189,6 +222,16 @@ func newFrontendBuilder(projectRoot string, config projectConfig, production boo
 		return nil, true, formatEsbuildMessages(contextErr.Errors)
 	}
 	return &frontendBuilder{settings: *settings, context: ctx}, true, nil
+}
+
+func frontendEsbuildLoader(name string) api.Loader {
+	return map[string]api.Loader{
+		"js": api.LoaderJS, "jsx": api.LoaderJSX, "ts": api.LoaderTS, "tsx": api.LoaderTSX,
+		"json": api.LoaderJSON, "text": api.LoaderText, "base64": api.LoaderBase64,
+		"dataurl": api.LoaderDataURL, "file": api.LoaderFile, "binary": api.LoaderBinary,
+		"copy": api.LoaderCopy, "css": api.LoaderCSS, "local-css": api.LoaderLocalCSS,
+		"global-css": api.LoaderGlobalCSS,
+	}[name]
 }
 
 func (builder *frontendBuilder) close() {

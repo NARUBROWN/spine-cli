@@ -70,6 +70,12 @@ func platformModuleIdentity(path string) (kind, provider string) {
 		return "", ""
 	}
 	name := strings.TrimPrefix(path, prefix)
+	if strings.HasPrefix(name, "frontend-") {
+		provider = strings.TrimPrefix(name, "frontend-")
+		if validProviderName(provider) {
+			return "frontend", provider
+		}
+	}
 	if strings.HasPrefix(name, "validator-") {
 		provider = strings.TrimPrefix(name, "validator-")
 		if validProviderName(provider) {

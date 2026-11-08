@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -123,6 +124,59 @@ func createFrontendOverlay(projectRoot string, config projectConfig, settings *f
 		return nil, err
 	}
 	return &frontendOverlay{path: overlayPath, cleanup: cleanup}, nil
+}
+
+func supportsFrontendServingPlatform(platform string) bool {
+	return platform == "echo" || platform == "nethttp"
+}
+
+func projectFrontendServingAdapter(projectRoot string, config projectConfig) (string, string, bool) {
+	if config.Platform != "" && !supportsFrontendServingPlatform(config.Platform) {
+		return "", "", false
+	}
+	composition := filepath.Join(projectRoot, filepath.FromSlash(config.Composition))
+	entries, err := os.ReadDir(composition)
+	if err != nil {
+		return "", "", false
+	}
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		if entry.IsDir() || !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(composition, entry.Name()), nil, 0)
+		if err != nil {
+			return "", "", false
+		}
+		kind, _, found := findFrontendPlatformOption(file)
+		if found && (config.Platform == "" || config.Platform == kind) {
+			return kind, file.Name.Name, true
+		}
+	}
+	return "", "", false
+}
+
+func projectHasFrontendServingAdapter(projectRoot string, config projectConfig) bool {
+	_, _, ok := projectFrontendServingAdapter(projectRoot, config)
+	return ok
+}
+
+func frontendOverlayFingerprint(projectRoot string, config projectConfig, settings *frontendSettings) string {
+	const overlayCacheVersion = "frontend-overlay-v2"
+	kind, packageName, ok := projectFrontendServingAdapter(projectRoot, config)
+	if !ok || settings == nil {
+		return overlayCacheVersion + "\n" + installedVersion() + "\nunavailable"
+	}
+	defaultStaticRelative, err := filepath.Rel(filepath.Join(projectRoot, "bin"), settings.output)
+	if err != nil {
+		return overlayCacheVersion + "\n" + installedVersion() + "\nerror:" + err.Error()
+	}
+	source, err := frontendOverlaySource(kind, packageName, defaultStaticRelative, settings.apiPrefix)
+	if err != nil {
+		return overlayCacheVersion + "\n" + installedVersion() + "\nerror:" + err.Error()
+	}
+	digest := sha256.Sum256(source)
+	return fmt.Sprintf("%s\n%s\n%x", overlayCacheVersion, installedVersion(), digest)
 }
 
 func frontendPlatformAliasUsed(file *ast.File, alias string) bool {
@@ -328,10 +382,7 @@ func frontendEchoStaticFallback(root, apiPrefix string) echo.MiddlewareFunc {
 				return next(c)
 			}
 			original := c.Response()
-			capture := newFrontendResponseCapture()
-			for key, values := range original.Header() {
-				capture.Header()[key] = append([]string(nil), values...)
-			}
+			capture := newFrontendResponseCapture(original)
 			c.SetResponse(echo.NewResponse(capture, c.Echo().Logger))
 			handlerErr := next(c)
 			capturedResponse, unwrapErr := echo.UnwrapResponse(c.Response())
@@ -342,11 +393,6 @@ func frontendEchoStaticFallback(root, apiPrefix string) echo.MiddlewareFunc {
 			status := capturedResponse.Status
 			if handlerErr != nil {
 				if !frontendEchoErrorIsNotFound(handlerErr) || (status != 0 && status != http.StatusNotFound) {
-					if capturedResponse.Committed {
-						copyFrontendEchoResponse(original, capture, status, request.Method)
-					} else {
-						replaceFrontendHeaders(original, capture)
-					}
 					return handlerErr
 				}
 				status = http.StatusNotFound
@@ -354,11 +400,6 @@ func frontendEchoStaticFallback(root, apiPrefix string) echo.MiddlewareFunc {
 				status = http.StatusOK
 			}
 			if status != http.StatusNotFound {
-				if capturedResponse.Committed {
-					copyFrontendEchoResponse(original, capture, status, request.Method)
-				} else {
-					replaceFrontendHeaders(original, capture)
-				}
 				return nil
 			}
 			if name, ok := frontendRelativePath(request.URL.Path); ok && serveFrontendFile(original, request, root, name) {
@@ -372,7 +413,6 @@ func frontendEchoStaticFallback(root, apiPrefix string) echo.MiddlewareFunc {
 					copyFrontendEchoResponse(original, capture, http.StatusNotFound, request.Method)
 					return nil
 				}
-				replaceFrontendHeaders(original, capture)
 				return handlerErr
 			}
 			copyFrontendEchoResponse(original, capture, http.StatusNotFound, request.Method)
@@ -412,7 +452,7 @@ func spineCLIFrontendNethttpFactory(options ...nethttpplatform.NetHTTPOption) ad
 		return nil, fmt.Errorf("unsupported frontend HTTP platform %q", kind)
 	}
 	var source strings.Builder
-	source.WriteString("package " + packageName + "\n\nimport (\n\"bytes\"\n\"net/http\"\n\"os\"\n\"path/filepath\"\n\"strings\"\n")
+	source.WriteString("package " + packageName + "\n\nimport (\n\"bufio\"\n\"bytes\"\n\"net\"\n\"net/http\"\n\"os\"\n\"path/filepath\"\n\"strings\"\n")
 	source.WriteString(aliases)
 	source.WriteString(")\n")
 	serverHelpers := strings.Replace(frontendServerHelpers, `const frontendStaticOutput = "frontend"`, "const frontendStaticOutput = "+strconv.Quote(filepath.ToSlash(defaultStaticRelative)), 1)

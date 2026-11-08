@@ -22,21 +22,25 @@ type installationStage struct {
 }
 
 type newProjectOptions struct {
-	Name                     resourceName
-	Module, Layout, Platform string
-	Events                   []eventPlatformSpec
-	Validator                string
-	WebSocketPlatform        string
-	Modules                  []selectedModule
-	ValidatorDescriptor      *platformDescriptor
-	HTTPDescriptor           *platformDescriptor
-	WebSocketDescriptor      *platformDescriptor
-	SkipInstall, JSON        bool
-	Write                    writeOptions
+	Name                       resourceName
+	Module, Layout, Platform   string
+	Frontend, FrontendRoot     string
+	Events                     []eventPlatformSpec
+	Validator                  string
+	WebSocketPlatform          string
+	Modules                    []selectedModule
+	ValidatorDescriptor        *platformDescriptor
+	HTTPDescriptor             *platformDescriptor
+	WebSocketDescriptor        *platformDescriptor
+	FrontendDescriptor         *frontendProviderDescriptor
+	SkipInstall, JSON          bool
+	Interactive, NoInteractive bool
+	Write                      writeOptions
 }
 
 func parseNewOptions(args []string) (newProjectOptions, error) {
-	options := newProjectOptions{Layout: layeredLayout, Platform: "echo", Validator: "none", WebSocketPlatform: "none"}
+	options := newProjectOptions{Layout: layeredLayout, Platform: "echo", Validator: "none", WebSocketPlatform: "none", Frontend: "none", FrontendRoot: "frontend"}
+	frontendSet, frontendRootSet := false, false
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return options, fmt.Errorf("project name is required")
 	}
@@ -47,7 +51,7 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	options.Name, options.Module = name, "github.com/your-org/"+name.Route
 	for index := 1; index < len(args); index++ {
 		switch args[index] {
-		case "--module", "--layout", "--platform", "--event-platform", "--validator", "--websocket-platform", "--if-match":
+		case "--module", "--layout", "--platform", "--event-platform", "--validator", "--websocket-platform", "--frontend", "--frontend-root", "--if-match":
 			key := args[index]
 			if index+1 == len(args) {
 				return options, fmt.Errorf("%s requires a value", key)
@@ -70,9 +74,19 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 				options.Validator = args[index]
 			case "--websocket-platform":
 				options.WebSocketPlatform = args[index]
+			case "--frontend":
+				options.Frontend = args[index]
+				frontendSet = true
+			case "--frontend-root":
+				options.FrontendRoot = args[index]
+				frontendRootSet = true
 			case "--if-match":
 				options.Write.IfMatch = args[index]
 			}
+		case "--interactive":
+			options.Interactive = true
+		case "--no-interactive":
+			options.NoInteractive = true
 		case "--skip-install":
 			options.SkipInstall = true
 		case "--dry-run":
@@ -85,6 +99,13 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 			return options, fmt.Errorf("unknown option: %s", args[index])
 		}
 	}
+	if frontendRootSet && !frontendSet {
+		options.Frontend = "react"
+	}
+	return validateNewProjectOptions(options)
+}
+
+func validateNewProjectOptions(options newProjectOptions) (newProjectOptions, error) {
 	if options.Layout != layeredLayout && options.Layout != "legacy" {
 		return options, fmt.Errorf("unsupported layout: %s", options.Layout)
 	}
@@ -99,6 +120,24 @@ func parseNewOptions(args []string) (newProjectOptions, error) {
 	}
 	if options.WebSocketPlatform != "none" && options.WebSocketPlatform == options.Platform {
 		return options, fmt.Errorf("HTTP and WebSocket providers must use different platform modules")
+	}
+	if options.Frontend != "none" && !frontendProviderModuleName.MatchString(options.Frontend) {
+		return options, fmt.Errorf("invalid frontend provider: %s", options.Frontend)
+	}
+	if options.Frontend != "none" && !supportsFrontendServingPlatform(options.Platform) {
+		return options, fmt.Errorf("--frontend requires the echo or nethttp HTTP platform")
+	}
+	if options.FrontendRoot == "" || validateProjectRelativePath(options.FrontendRoot) != nil {
+		return options, fmt.Errorf("--frontend-root must be a project-relative path")
+	}
+	if options.Frontend != "none" && (filepath.Clean(filepath.FromSlash(options.FrontendRoot)) == "." || projectPathContains(options.FrontendRoot, "bin/frontend") || projectPathContains("bin/frontend", options.FrontendRoot)) {
+		return options, fmt.Errorf("--frontend-root must not overlap bin/frontend")
+	}
+	if options.Interactive && options.NoInteractive {
+		return options, fmt.Errorf("--interactive and --no-interactive cannot be used together")
+	}
+	if options.Interactive && options.JSON {
+		return options, fmt.Errorf("--interactive cannot be used with --json")
 	}
 	for _, event := range options.Events {
 		if (options.Platform != "none" && event.Provider == options.Platform) || (options.WebSocketPlatform != "none" && event.Provider == options.WebSocketPlatform) {
@@ -123,6 +162,13 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 	config.Layout, config.Platform = options.Layout, options.Platform
 	config.Recipe, config.Events, config.Validator = currentAssemblyRecipe, options.Events, options.Validator
 	config.WebSocketPlatform = options.WebSocketPlatform
+	if options.Frontend != "" && options.Frontend != "none" {
+		config.FrontendConfigured = true
+		config.FrontendProvider = options.Frontend
+		config.FrontendRoot = options.FrontendRoot
+	} else {
+		config.FrontendDisabled = true
+	}
 	application, err := assemblyApplication(options)
 	if err != nil {
 		return nil, err
@@ -150,6 +196,50 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 		files["internal/application/platform_config.go"] = assemblyConfig(options)
 		files["internal/application/platform_config_test.go"] = assemblyConfigTest(options)
 	}
+	if options.Frontend != "" && options.Frontend != "none" {
+		descriptor := options.FrontendDescriptor
+		if descriptor == nil && options.Frontend == "react" {
+			descriptor = defaultReactFrontendDescriptor()
+		}
+		if descriptor == nil {
+			return nil, fmt.Errorf("frontend metadata was not resolved: %s", options.Frontend)
+		}
+		if err := validateFrontendProviderDescriptor(descriptor, options.Frontend, true); err != nil {
+			return nil, err
+		}
+		projectDescriptor, err := frontendProjectDescriptor(descriptor)
+		if err != nil {
+			return nil, err
+		}
+		manifest, err := json.MarshalIndent(projectDescriptor, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		root := filepath.ToSlash(filepath.Clean(filepath.FromSlash(options.FrontendRoot)))
+		files[filepath.ToSlash(filepath.Join(root, frontendProviderManifest))] = string(manifest) + "\n"
+		for _, starter := range descriptor.StarterFiles {
+			path := filepath.ToSlash(filepath.Join(root, filepath.FromSlash(starter.Path)))
+			if _, exists := files[path]; exists {
+				return nil, fmt.Errorf("frontend starter file %q conflicts with another generated file", path)
+			}
+			files[path] = starter.Contents
+		}
+		packagePath := filepath.ToSlash(filepath.Join(root, "package.json"))
+		if _, exists := files[packagePath]; exists {
+			return nil, fmt.Errorf("frontend package manifest %q conflicts with another generated file", packagePath)
+		}
+		packageContents, err := renderFrontendPackageJSON(options.Name.Route+"-frontend", descriptor.NPMDependencies)
+		if err != nil {
+			return nil, err
+		}
+		files[packagePath] = packageContents
+		if !strings.Contains(files[".gitignore"], "node_modules/") {
+			if files[".gitignore"] != "" && !strings.HasSuffix(files[".gitignore"], "\n") {
+				files[".gitignore"] += "\n"
+			}
+			files[".gitignore"] += "node_modules/\n"
+		}
+	}
 	for path, source := range files {
 		if strings.HasSuffix(path, ".go") {
 			formatted, err := format.Source([]byte(source))
@@ -160,6 +250,21 @@ func newProjectFiles(options newProjectOptions) (map[string]string, error) {
 		}
 	}
 	return files, nil
+}
+
+func renderFrontendPackageJSON(name string, dependencies map[string]string) (string, error) {
+	manifest := struct {
+		Name         string            `json:"name"`
+		Version      string            `json:"version"`
+		Private      bool              `json:"private"`
+		Type         string            `json:"type"`
+		Dependencies map[string]string `json:"dependencies,omitempty"`
+	}{Name: name, Version: "0.1.0", Private: true, Type: "module", Dependencies: dependencies}
+	contents, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(contents) + "\n", nil
 }
 
 func inspectStagedProject(root string) (applicationContract, error) {
@@ -175,6 +280,10 @@ func inspectStagedProject(root string) (applicationContract, error) {
 }
 
 func runNew(args []string, out, errOut io.Writer) int {
+	return runNewWithInput(args, os.Stdin, out, errOut)
+}
+
+func runNewWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
 	if handled, code := generationHelp("new", args, out, errOut); handled {
 		return code
 	}
@@ -183,10 +292,22 @@ func runNew(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 2
 	}
+	if shouldRunNewWizard(in, options) {
+		options, err = promptNewProjectOptions(args, options, in, out)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 2
+		}
+		options, err = validateNewProjectOptions(options)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 2
+		}
+	}
 	stages := []installationStage{{"scaffold", "pending"}, {"dependencies", "skipped"}, {"modules", "skipped"}, {"contract", "skipped"}, {"build", "skipped"}, {"publish", "pending"}}
 	modules := []selectedModule{}
 	dir := options.Name.Route
-	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "recipe": currentAssemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator, options.Events...), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
+	result := map[string]any{"project": dir, "module": options.Module, "layout": options.Layout, "directory": dir, "platform": options.Platform, "frontend": options.Frontend, "frontend_root": options.FrontendRoot, "recipe": currentAssemblyRecipe, "stability": "prerelease", "event_platforms": options.Events, "validator": options.Validator, "websocket_platform": options.WebSocketPlatform, "minimum_go": assemblyGoVersion(options.Validator, options.Events...), "target_modules": currentAssemblyModules(options), "install_skipped": options.SkipInstall, "execution_boundary": "dependency resolution, static inspection and compilation only; no application initialization, tests or listeners"}
 	finish := func(code int, stage string, err error) int {
 		if err != nil {
 			for index := range stages {
@@ -224,6 +345,16 @@ func runNew(args []string, out, errOut io.Writer) int {
 	}
 	if err := resolveProjectDescriptors(ctx, &options); err != nil {
 		return finish(3, "dependencies", err)
+	}
+	if options.Frontend != "" && options.Frontend != "none" {
+		options.FrontendDescriptor, err = resolveFrontendProvider(ctx, options.Frontend)
+		if err != nil {
+			return finish(3, "dependencies", err)
+		}
+		result["frontend_provider"] = options.FrontendDescriptor.Framework
+		if options.FrontendDescriptor.Module.Version != "" {
+			result["frontend_provider_module"] = options.FrontendDescriptor.Module
+		}
 	}
 	result["minimum_go"] = projectGoVersion(options)
 	result["platform_descriptors"] = descriptorFingerprints(options)
@@ -335,6 +466,9 @@ func runNew(args []string, out, errOut io.Writer) int {
 			printDryRunHash(out, baseHash)
 		} else {
 			fmt.Fprintf(out, "Created Spine application in %s (%s, release recipe %s)\n\nNext steps:\n  cd %s\n", dir, options.Platform, currentAssemblyRecipe, dir)
+			if options.FrontendDescriptor != nil {
+				fmt.Fprintf(out, "  npm --prefix %s install\n", options.FrontendRoot)
+			}
 			if options.SkipInstall {
 				fmt.Fprintln(out, "  go mod tidy\n  spine dev\n\nDependency installation and build verification were skipped.")
 			} else {

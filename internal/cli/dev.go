@@ -150,7 +150,11 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 	lastFrontendAttemptEnabled := frontendEnabled
 	var frontend *frontendBuilder
 	if frontendEnabled {
-		frontend, _, err = newFrontendBuilder(projectRoot, config, false, processErr)
+		var builderEnabled bool
+		frontend, builderEnabled, err = newFrontendBuilder(projectRoot, config, false, processErr)
+		if err == nil && (!builderEnabled || frontend == nil) {
+			err = fmt.Errorf("frontend settings changed during startup")
+		}
 		if err != nil {
 			fail("frontend_build_failed", fmt.Sprintf("could not initialize frontend builder: %v", err))
 			return 1
@@ -264,7 +268,11 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 					if !sameFrontendSettings(frontendSettingsOf(frontend), settings) {
 						var replacement *frontendBuilder
 						if settings != nil {
-							replacement, _, settingsErr = newFrontendBuilder(projectRoot, updatedConfig, false, processErr)
+							var builderEnabled bool
+							replacement, builderEnabled, settingsErr = newFrontendBuilder(projectRoot, updatedConfig, false, processErr)
+							if settingsErr == nil && (!builderEnabled || replacement == nil) {
+								settingsErr = fmt.Errorf("frontend settings changed during rebuild")
+							}
 							if settingsErr == nil {
 								settingsErr = replacement.rebuild(processErr)
 							}
@@ -278,7 +286,11 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 						} else {
 							frontend.close()
 							frontend = replacement
-							emit("frontend_build_succeeded", "Frontend build succeeded.", map[string]any{"initial": false})
+							if replacement != nil {
+								emit("frontend_build_succeeded", "Frontend build succeeded.", map[string]any{"initial": false})
+							} else {
+								emit("frontend_disabled", "Frontend is disabled.", map[string]any{})
+							}
 						}
 					} else if frontendChanged && frontend != nil {
 						if buildErr := frontend.rebuild(processErr); buildErr != nil {
@@ -390,7 +402,7 @@ func cachedDevBinaryAtContext(ctx context.Context, cacheRoot, projectRoot string
 	settings := frontendSettingsArgument(frontend)
 	cacheDigest := sourceDigest
 	if settings != nil {
-		cacheDigest += "\nfrontend-overlay-v1"
+		cacheDigest += "\n" + frontendOverlayFingerprint(projectRoot, config, settings)
 	}
 	key := devCacheKey(config, cacheDigest, projectRoot)
 	directory := filepath.Join(cacheRoot, key)

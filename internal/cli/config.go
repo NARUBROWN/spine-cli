@@ -24,11 +24,13 @@ type projectConfig struct {
 	FrontendEntry      string
 	FrontendOutput     string
 	FrontendAPIPrefix  string
+	FrontendProvider   string
+	FrontendDisabled   bool
 	FrontendConfigured bool
 }
 
 func defaultProjectConfig(module string) projectConfig {
-	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080, Layout: layeredLayout, Platform: "echo", FrontendRoot: "frontend", FrontendOutput: "bin/frontend", FrontendAPIPrefix: "/api"}
+	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080, Layout: layeredLayout, Platform: "echo", FrontendRoot: "frontend", FrontendOutput: "bin/frontend", FrontendAPIPrefix: "/api", FrontendProvider: "react"}
 }
 
 func projectConfigTemplate(config projectConfig) string {
@@ -56,10 +58,16 @@ func projectConfigTemplate(config projectConfig) string {
 		result += "event_platforms = [" + strings.Join(specs, ", ") + "]\n"
 	}
 	if config.FrontendConfigured {
-		result += fmt.Sprintf("frontend_root = %q\nfrontend_output = %q\nfrontend_api_prefix = %q\n", config.FrontendRoot, config.FrontendOutput, config.FrontendAPIPrefix)
+		provider := config.FrontendProvider
+		if provider == "" {
+			provider = "react"
+		}
+		result += fmt.Sprintf("frontend_enabled = true\nfrontend_provider = %q\nfrontend_root = %q\nfrontend_output = %q\nfrontend_api_prefix = %q\n", provider, config.FrontendRoot, config.FrontendOutput, config.FrontendAPIPrefix)
 		if config.FrontendEntry != "" {
 			result += fmt.Sprintf("frontend_entry = %q\n", config.FrontendEntry)
 		}
+	} else if config.FrontendDisabled {
+		result += "frontend_enabled = false\n"
 	}
 	return result
 }
@@ -69,7 +77,7 @@ func loadProjectConfig() (projectConfig, error) {
 	if err != nil {
 		return projectConfig{}, fmt.Errorf("spine.toml is required: %w", err)
 	}
-	config := projectConfig{Entrypoint: ".", Composition: ".", Port: 8080, FrontendRoot: "frontend", FrontendOutput: "bin/frontend", FrontendAPIPrefix: "/api"}
+	config := projectConfig{Entrypoint: ".", Composition: ".", Port: 8080, FrontendRoot: "frontend", FrontendOutput: "bin/frontend", FrontendAPIPrefix: "/api", FrontendProvider: "react"}
 	for lineNumber, line := range strings.Split(string(contents), "\n") {
 		line = strings.TrimSpace(strings.SplitN(line, "#", 2)[0])
 		if line == "" {
@@ -81,7 +89,16 @@ func loadProjectConfig() (projectConfig, error) {
 		}
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		switch key {
-		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "validator", "websocket_platform", "frontend_root", "frontend_entry", "frontend_output", "frontend_api_prefix":
+		case "frontend_enabled":
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return projectConfig{}, fmt.Errorf("spine.toml:%d: frontend_enabled must be true or false", lineNumber+1)
+			}
+			config.FrontendDisabled = !enabled
+			if enabled {
+				config.FrontendConfigured = true
+			}
+		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "validator", "websocket_platform", "frontend_provider", "frontend_root", "frontend_entry", "frontend_output", "frontend_api_prefix":
 			unquoted, err := strconv.Unquote(value)
 			if err != nil || unquoted == "" {
 				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
@@ -109,6 +126,12 @@ func loadProjectConfig() (projectConfig, error) {
 				config.WebSocketPlatform = unquoted
 			} else if key == "validator" {
 				config.Validator = unquoted
+			} else if key == "frontend_provider" {
+				if !frontendProviderModuleName.MatchString(unquoted) {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported frontend provider %q", lineNumber+1, unquoted)
+				}
+				config.FrontendConfigured = true
+				config.FrontendProvider = unquoted
 			} else if key == "frontend_root" || key == "frontend_entry" || key == "frontend_output" {
 				if err := validateProjectRelativePath(unquoted); err != nil {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: %s %w", lineNumber+1, key, err)
