@@ -3,26 +3,34 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 // projectConfig는 CLI 공통 설정만 보관하며 앱별 설정은 애플리케이션에서 관리합니다.
 type projectConfig struct {
-	Module            string
-	Entrypoint        string
-	Composition       string
-	Port              int
-	Layout            string
-	Platform          string
-	Recipe            string
-	Events            []eventPlatformSpec
-	Validator         string
-	WebSocketPlatform string
+	Module             string
+	Entrypoint         string
+	Composition        string
+	Port               int
+	Layout             string
+	Platform           string
+	Recipe             string
+	Events             []eventPlatformSpec
+	Validator          string
+	WebSocketPlatform  string
+	FrontendRoot       string
+	FrontendEntry      string
+	FrontendOutput     string
+	FrontendAPIPrefix  string
+	FrontendProvider   string
+	FrontendDisabled   bool
+	FrontendConfigured bool
 }
 
 func defaultProjectConfig(module string) projectConfig {
-	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080, Layout: layeredLayout, Platform: "echo"}
+	return projectConfig{Module: module, Entrypoint: ".", Composition: "./internal/application", Port: 8080, Layout: layeredLayout, Platform: "echo", FrontendRoot: "frontend", FrontendOutput: "bin/frontend", FrontendAPIPrefix: "/api", FrontendProvider: "react"}
 }
 
 func projectConfigTemplate(config projectConfig) string {
@@ -49,6 +57,18 @@ func projectConfigTemplate(config projectConfig) string {
 		}
 		result += "event_platforms = [" + strings.Join(specs, ", ") + "]\n"
 	}
+	if config.FrontendConfigured {
+		provider := config.FrontendProvider
+		if provider == "" {
+			provider = "react"
+		}
+		result += fmt.Sprintf("frontend_enabled = true\nfrontend_provider = %q\nfrontend_root = %q\nfrontend_output = %q\nfrontend_api_prefix = %q\n", provider, config.FrontendRoot, config.FrontendOutput, config.FrontendAPIPrefix)
+		if config.FrontendEntry != "" {
+			result += fmt.Sprintf("frontend_entry = %q\n", config.FrontendEntry)
+		}
+	} else if config.FrontendDisabled {
+		result += "frontend_enabled = false\n"
+	}
 	return result
 }
 
@@ -57,7 +77,7 @@ func loadProjectConfig() (projectConfig, error) {
 	if err != nil {
 		return projectConfig{}, fmt.Errorf("spine.toml is required: %w", err)
 	}
-	config := projectConfig{Entrypoint: ".", Composition: ".", Port: 8080}
+	config := projectConfig{Entrypoint: ".", Composition: ".", Port: 8080, FrontendRoot: "frontend", FrontendOutput: "bin/frontend", FrontendAPIPrefix: "/api", FrontendProvider: "react"}
 	for lineNumber, line := range strings.Split(string(contents), "\n") {
 		line = strings.TrimSpace(strings.SplitN(line, "#", 2)[0])
 		if line == "" {
@@ -69,7 +89,16 @@ func loadProjectConfig() (projectConfig, error) {
 		}
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		switch key {
-		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "validator", "websocket_platform":
+		case "frontend_enabled":
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return projectConfig{}, fmt.Errorf("spine.toml:%d: frontend_enabled must be true or false", lineNumber+1)
+			}
+			config.FrontendDisabled = !enabled
+			if enabled {
+				config.FrontendConfigured = true
+			}
+		case "module", "entrypoint", "composition", "layout", "platform", "recipe", "validator", "websocket_platform", "frontend_provider", "frontend_root", "frontend_entry", "frontend_output", "frontend_api_prefix":
 			unquoted, err := strconv.Unquote(value)
 			if err != nil || unquoted == "" {
 				return projectConfig{}, fmt.Errorf("spine.toml:%d: %s must be a non-empty quoted string", lineNumber+1, key)
@@ -97,6 +126,31 @@ func loadProjectConfig() (projectConfig, error) {
 				config.WebSocketPlatform = unquoted
 			} else if key == "validator" {
 				config.Validator = unquoted
+			} else if key == "frontend_provider" {
+				if !frontendProviderModuleName.MatchString(unquoted) {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported frontend provider %q", lineNumber+1, unquoted)
+				}
+				config.FrontendConfigured = true
+				config.FrontendProvider = unquoted
+			} else if key == "frontend_root" || key == "frontend_entry" || key == "frontend_output" {
+				if err := validateProjectRelativePath(unquoted); err != nil {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: %s %w", lineNumber+1, key, err)
+				}
+				config.FrontendConfigured = true
+				switch key {
+				case "frontend_root":
+					config.FrontendRoot = filepath.ToSlash(filepath.Clean(filepath.FromSlash(unquoted)))
+				case "frontend_entry":
+					config.FrontendEntry = filepath.ToSlash(filepath.Clean(filepath.FromSlash(unquoted)))
+				case "frontend_output":
+					config.FrontendOutput = filepath.ToSlash(filepath.Clean(filepath.FromSlash(unquoted)))
+				}
+			} else if key == "frontend_api_prefix" {
+				if !strings.HasPrefix(unquoted, "/") || unquoted == "/" || strings.ContainsAny(unquoted, "?#") || strings.Contains(unquoted, "..") {
+					return projectConfig{}, fmt.Errorf("spine.toml:%d: frontend_api_prefix must be an absolute URL path", lineNumber+1)
+				}
+				config.FrontendConfigured = true
+				config.FrontendAPIPrefix = strings.TrimSuffix(unquoted, "/")
 			} else {
 				if unquoted != layeredLayout && unquoted != "legacy" {
 					return projectConfig{}, fmt.Errorf("spine.toml:%d: unsupported layout %q", lineNumber+1, unquoted)
@@ -137,6 +191,9 @@ func loadProjectConfig() (projectConfig, error) {
 	if config.WebSocketPlatform != "" && config.WebSocketPlatform != "none" && config.Platform == "none" {
 		return config, fmt.Errorf("WebSocket platform requires HTTP")
 	}
+	if config.FrontendRoot == "." || config.FrontendOutput == "." || projectPathContains(config.FrontendRoot, config.FrontendOutput) || projectPathContains(config.FrontendOutput, config.FrontendRoot) {
+		return projectConfig{}, fmt.Errorf("spine.toml: frontend_output must be outside frontend_root")
+	}
 	validator := config.Validator
 	if validator == "" {
 		validator = "none"
@@ -145,4 +202,12 @@ func loadProjectConfig() (projectConfig, error) {
 		return projectConfig{}, err
 	}
 	return config, nil
+}
+
+func projectPathContains(parent, child string) bool {
+	relative, err := filepath.Rel(filepath.Clean(filepath.FromSlash(parent)), filepath.Clean(filepath.FromSlash(child)))
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative))
 }

@@ -279,6 +279,9 @@ func assemblyReadme(options newProjectOptions) string {
 	} else {
 		source.WriteString("\n검증기를 생략했습니다. DTO의 `validate` 태그는 자동 검사되지 않습니다.\n")
 	}
+	if options.Frontend != "" && options.Frontend != "none" && options.FrontendDescriptor != nil {
+		fmt.Fprintf(&source, "\n## Frontend\n\n%s provider를 `%s` 아래에 배치했습니다. `npm --prefix %s install`로 프론트 패키지를 설치한 뒤 `spine dev`, `spine run` 또는 `spine build`를 실행하세요. `spine dev`는 프론트 변경을 감시하고 `run`과 `build`는 최적화 번들을 생성합니다. provider 설정은 `%s/spine-frontend.json`에 저장되어 있습니다.\n", options.FrontendDescriptor.Framework, options.FrontendRoot, options.FrontendRoot, options.FrontendRoot)
+	}
 	source.WriteString("\n## 실행과 검사\n\n```sh\nspine contract check\nspine verify\nspine dev\n```\n")
 	if options.Platform != "" && options.Platform != "none" {
 		source.WriteString("\n`GET /health`를 제공합니다. `SPINE_PORT` 또는 CLI의 `spine.toml` port로 포트를 정합니다.\n")

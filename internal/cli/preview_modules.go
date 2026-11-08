@@ -57,9 +57,15 @@ func resolvePreviewModules(ctx context.Context, targets []selectedModule) ([]sel
 			kind, _ := platformModuleIdentity(module.Path)
 			if kind != "" {
 				reason := "platform repository lookup failed"
+				if kind == "frontend" {
+					reason = "frontend provider repository lookup failed"
+				}
 				message := strings.ToLower(module.Error.Err)
 				if strings.Contains(message, "not found") || strings.Contains(message, "404") || strings.Contains(message, "unknown revision") || strings.Contains(message, "terminal prompts disabled") || strings.Contains(message, "no such file") {
 					reason = "platform repository or preview branch not found or inaccessible"
+					if kind == "frontend" {
+						reason = "frontend provider repository or preview branch not found or inaccessible"
+					}
 				}
 				return nil, fmt.Errorf("%s: %s@preview: %s", reason, module.Path, module.Error.Err)
 			}
