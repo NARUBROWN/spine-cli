@@ -29,7 +29,6 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		if scalar, ok := catalog.scalarPathPayload(source, node.Index, map[string]bool{}); ok {
 			return httpBindingShape{binding: "path", kind: "pointer", source: "path", scalarPath: true, payload: scalar, payloadSource: source.Path}, true
 		}
-		return httpBindingShape{kind: "unsupported", problem: "input.Path requires a basic scalar payload"}, true
 	}
 	payloadSource, structure, ok := catalog.markerPayload(source, node.Index, map[string]bool{})
 	if !ok {
