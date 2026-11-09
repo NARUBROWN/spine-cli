@@ -16,7 +16,7 @@ func layeredProject(t *testing.T) {
 	t.Helper()
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo", "--skip-install"}, &out, &errOut); code != 0 {
+	if code := runNew([]string{"todo", "--module", "example.com/todo", "--channel", "preview", "--skip-install"}, &out, &errOut); code != 0 {
 		t.Fatalf("new: %s", errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {

@@ -17,7 +17,7 @@ func TestNewSkipInstallIsOfflineAndGuardsMode(t *testing.T) {
 	inTempDir(t)
 	t.Setenv("PATH", t.TempDir())
 	var out, errOut bytes.Buffer
-	args := []string{"new", "inventory", "--module", "example.com/inventory", "--skip-install"}
+	args := []string{"new", "inventory", "--module", "example.com/inventory", "--channel", "preview", "--skip-install"}
 	if code := Run(append(append([]string{}, args...), "--dry-run", "--json"), &out, &errOut); code != 0 {
 		t.Fatalf("offline plan: %d %s", code, errOut.String())
 	}
@@ -109,7 +109,7 @@ func TestPlatformCompositionFormsAndAdapterDiagnostics(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			inTempDir(t)
 			var out, errOut bytes.Buffer
-			if code := runNew([]string{"todo", "--module", "example.com/todo", "--skip-install"}, &out, &errOut); code != 0 {
+			if code := runNew([]string{"todo", "--module", "example.com/todo", "--channel", "preview", "--skip-install"}, &out, &errOut); code != 0 {
 				t.Fatal(errOut.String())
 			}
 			if err := os.Chdir("todo"); err != nil {

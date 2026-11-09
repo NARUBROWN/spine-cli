@@ -16,7 +16,7 @@ import (
 // 테스트는 브랜치 이동과 조회 실패를 외부 저장소 변경 없이 재현합니다.
 var previewModuleResolver = resolvePreviewModules
 
-const defaultDependencyChannel = "preview"
+const defaultDependencyChannel = "main"
 
 var releaseCandidateVersion = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-rc\.[1-9][0-9]*$`)
 

@@ -86,7 +86,7 @@ func TestDynamicPlatformMissingRepositoryAndMetadata(t *testing.T) {
 		{[]string{"--websocket-platform", "emptybus"}, "does not provide spine-platform.json"},
 	} {
 		var out, errOut bytes.Buffer
-		args := append([]string{"new", "sample", "--skip-install", "--json"}, scenario.args...)
+		args := append([]string{"new", "sample", "--channel", "preview", "--skip-install", "--json"}, scenario.args...)
 		if code := Run(args, &out, &errOut); code != 3 || !strings.Contains(out.String()+errOut.String(), scenario.want) {
 			t.Fatalf("missing repository/metadata error: %d %s %s", code, out.String(), errOut.String())
 		}
@@ -106,7 +106,7 @@ func TestDynamicPlatformMetadataInvalidatesPlan(t *testing.T) {
 	platformDescriptorResolver = func(context.Context, string, string, selectedModule, bool) (*platformDescriptor, error) {
 		return d, nil
 	}
-	args := []string{"sample", "--platform", "none", "--event-platform", "newbus", "--skip-install", "--json"}
+	args := []string{"sample", "--channel", "preview", "--platform", "none", "--event-platform", "newbus", "--skip-install", "--json"}
 	var out, errOut bytes.Buffer
 	if code := runNew(append(append([]string{}, args...), "--dry-run"), &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
@@ -160,7 +160,7 @@ func TestDynamicTransportMetadataAndPlanHash(t *testing.T) {
 			if kind == "websocket" {
 				option = "--websocket-platform"
 			}
-			args := []string{"sample", option, "custom", "--skip-install", "--json"}
+			args := []string{"sample", "--channel", "preview", option, "custom", "--skip-install", "--json"}
 			var out, errs bytes.Buffer
 			if code := runNew(append(append([]string{}, args...), "--dry-run"), &out, &errs); code != 0 {
 				t.Fatalf("plan: %d %s", code, errs.String())

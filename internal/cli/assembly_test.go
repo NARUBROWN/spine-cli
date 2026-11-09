@@ -22,9 +22,9 @@ func TestAssemblyArgumentsAndPlanIsolation(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{
-		{"new", "sample", "--skip-install", "--event-platform", "kafka", "--validator", "playground"},
-		{"new", "sample", "--skip-install", "--platform", "none", "--event-platform", "rabbitmq"},
-		{"new", "sample", "--skip-install", "--platform", "none", "--event-platform", "events:nats"},
+		{"new", "sample", "--channel", "preview", "--skip-install", "--event-platform", "kafka", "--validator", "playground"},
+		{"new", "sample", "--channel", "preview", "--skip-install", "--platform", "none", "--event-platform", "rabbitmq"},
+		{"new", "sample", "--channel", "preview", "--skip-install", "--platform", "none", "--event-platform", "events:nats"},
 	} {
 		var out, errOut bytes.Buffer
 		if code := Run(append(append([]string{}, args...), "--dry-run", "--json"), &out, &errOut); code != 0 {
@@ -77,7 +77,7 @@ func TestAssemblyStaticDiagnosticsAndSemanticDrift(t *testing.T) {
 	}
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"sample", "--module", "example.com/sample", "--skip-install", "--event-platform", "kafka", "--event-platform", "rabbitmq"}, &out, &errOut); code != 0 {
+	if code := runNew([]string{"sample", "--module", "example.com/sample", "--channel", "preview", "--skip-install", "--event-platform", "kafka", "--event-platform", "rabbitmq"}, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
 	if err := os.Chdir("sample"); err != nil {

@@ -116,7 +116,7 @@ spine new nats-worker --platform none --event-platform events:nats
 
 | 옵션 | 값과 기본 동작 |
 | --- | --- |
-| `--channel` | `preview` (기본값), `rc`, `main`; 코어와 provider의 조회 채널을 선택하고 `spine.toml`에 저장 |
+| `--channel` | `preview`, `rc`, `main` (기본값); 코어와 provider의 조회 채널을 선택하고 `spine.toml`에 저장 |
 | `--platform` | HTTP provider, `echo` (기본값), `none` (이벤트 플랫폼 필요) |
 | `--event-platform` | 반복 가능한 `[name:]provider`; 선택한 채널에서 `spine-<provider>-platform` 조회 |
 | `--websocket-platform` | WebSocket provider 또는 `none` (기본값), provider 선택 시 HTTP 필요 |
@@ -156,7 +156,7 @@ WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playgr
 
 ### 공개 버전 레시피
 
-새 앱의 `platform-contracts-preview` 레시피는 `dependency_channel`을 함께 기록합니다. 기본 `preview`는 코어와 선택한 provider의 `@preview` 브랜치를 조회하고, `rc`는 공개 RC 또는 더 높은 정식 태그, `main`은 공개 정식 태그만 선택합니다. 해석된 태그 또는 pseudo-version을 `go.mod`와 JSON 결과의 `target_modules`에 기록하고, 원래 조회 조건은 `module_queries`에 제공합니다. `spine update`도 저장된 채널을 유지합니다.
+새 앱의 `platform-contracts-preview` 레시피는 `dependency_channel`을 함께 기록합니다. 기본 `main`은 코어와 선택한 provider의 최신 공개 정식 태그를 선택합니다. `preview`는 각 `@preview` 브랜치를 조회하고, `rc`는 공개 RC 또는 더 높은 정식 태그를 선택합니다. 기존 `platform-contracts-preview` 프로젝트에 `dependency_channel`이 없으면 `preview`로 해석합니다. 해석된 태그 또는 pseudo-version을 `go.mod`와 JSON 결과의 `target_modules`에 기록하고, 원래 조회 조건은 `module_queries`에 제공합니다. `spine update`도 저장된 채널을 유지합니다.
 
 `--dry-run` 이후 브랜치가 이동해 생성 또는 업데이트 내용이 바뀌면 기존 해시를 이용한 적용은 실패합니다. 새 계획을 검토한 뒤 적용하세요. 기존 `platform-contracts-v0.7.0-preview.1`, `platform-contracts-v0.7.0-preview.2`와 정식 `platform-contracts-v0.6.5` 앱은 레시피를 직접 바꾸기 전까지 기존 버전 조합을 유지합니다.
 

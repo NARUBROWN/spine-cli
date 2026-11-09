@@ -52,7 +52,7 @@ func TestNATSAssemblySelection(t *testing.T) {
 func TestNATSPlanIsolationAndLegacyRecipeGuard(t *testing.T) {
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	args := []string{"worker", "--platform", "none", "--event-platform", "events:nats", "--skip-install"}
+	args := []string{"worker", "--channel", "preview", "--platform", "none", "--event-platform", "events:nats", "--skip-install"}
 	if code := runNew(args, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}

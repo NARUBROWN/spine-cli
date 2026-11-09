@@ -44,7 +44,7 @@ func TestWebSocketSelectionPlanAndDiagnostics(t *testing.T) {
 		}
 	}
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"sample", "--module", "example.com/sample", "--skip-install", "--websocket-platform", "gorilla"}, &out, &errOut); code != 0 {
+	if code := runNew([]string{"sample", "--module", "example.com/sample", "--channel", "preview", "--skip-install", "--websocket-platform", "gorilla"}, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
 	if err := os.Chdir("sample"); err != nil {
@@ -104,7 +104,7 @@ func TestWebSocketPlanCannotReuseDifferentSelection(t *testing.T) {
 	inTempDir(t)
 	t.Setenv("PATH", t.TempDir())
 	var out, errOut bytes.Buffer
-	if code := Run([]string{"new", "sample", "--skip-install", "--dry-run", "--json"}, &out, &errOut); code != 0 {
+	if code := Run([]string{"new", "sample", "--channel", "preview", "--skip-install", "--dry-run", "--json"}, &out, &errOut); code != 0 {
 		t.Fatal(code, errOut.String())
 	}
 	var plan struct {
@@ -117,7 +117,7 @@ func TestWebSocketPlanCannotReuseDifferentSelection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if code := Run([]string{"new", "sample", "--skip-install", "--websocket-platform", "gorilla", "--if-match", plan.Result.Hash, "--json"}, &out, &errOut); code != 4 {
+	if code := Run([]string{"new", "sample", "--channel", "preview", "--skip-install", "--websocket-platform", "gorilla", "--if-match", plan.Result.Hash, "--json"}, &out, &errOut); code != 4 {
 		t.Fatalf("changed selection reused reviewed plan: %d %s", code, out.String())
 	}
 	if _, err := os.Stat("sample"); !os.IsNotExist(err) {

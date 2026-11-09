@@ -21,15 +21,15 @@
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
-- 새 프로젝트의 레시피: `platform-contracts-preview`; `dependency_channel`은 `preview` (기본값), `rc`, `main` 중 하나이며 update에서도 유지한다.
+- 새 프로젝트의 레시피: `platform-contracts-preview`; `dependency_channel`은 `preview`, `rc`, `main` (기본값) 중 하나이며 update에서도 유지한다.
 - recipe 미지정 기존 Echo 앱의 update 레시피: `echo-v0.1.0-spine-v0.6.0`
-- Gorilla WS 기본 채널: `@preview`
-- 새 앱 Spine 기본 채널: `github.com/NARUBROWN/spine@preview`; `rc`는 공개 RC 또는 더 높은 정식 태그, `main`은 공개 정식 태그만 선택한다.
+- Gorilla WS 기본 채널: `main`의 최신 공개 정식 태그
+- 새 앱 Spine 기본 채널: `main`의 `github.com/NARUBROWN/spine` 최신 공개 정식 태그; `rc`는 공개 RC 또는 더 높은 정식 태그, `main`은 공개 정식 태그만 선택한다.
 - 기존 `platform-contracts-v0.7.0-preview.1` 앱의 `update`는 코어 `v0.7.0-preview.1`을 유지한다. `.2` 전환은 recipe를 명시적으로 바꾸고 dry-run/base_hash를 검토해 적용한다.
-- Kafka와 RabbitMQ 기본 채널: `@preview`
-- playground 기본 채널: `@preview`
+- Kafka와 RabbitMQ 기본 채널: `main`의 최신 공개 정식 태그
+- playground 기본 채널: `main`의 최신 공개 정식 태그
 - 기존 platform-contracts-v0.6.5 앱은 정식 조합을 유지한다. 이 Preview 소스의 기능을 정식 CLI @latest나 과거 코어에 있다고 가정하지 않는다.
-- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform@preview`
+- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform`의 최신 공개 정식 태그
 - Echo 플랫폼 설치, 프로젝트 의존성 갱신과 HTTP 반환형 진단은 CLI v0.3.0에서 제공한다.
 - CLI v0.4.0은 위 v0.6.0/v0.1.0 공개 조합과 adapter v2 계약을 지원한다. v0.3.0 태그는 이전 v1 레시피를 사용한다.
 - 라이선스: MIT
@@ -297,7 +297,7 @@ spine new <project>
 `--module` 생략 시 `github.com/your-org/<project>`를 사용한다. 기본 layout은 layered-v1이다.
 `new`는 `spine.New(echoplatform.Option(), spine.WithEventAdapter(name, factory), spine.WithValidator(validator))`로 선택한 구현을 조립한다.
 기본값은 HTTP echo, WebSocket none, 이벤트 없음, validator none이다. --websocket-platform gorilla는 gorillaplatform.Option()을 추가하며 HTTP echo가 필요하다. --platform none은 이벤트 플랫폼이 필요하며 Echo 의존성, HTTP 옵션, health를 생략한다.
---event-platform은 반복 가능한 [name:]provider이며 NARUBROWN/spine-<provider>-platform@preview를 조회한다. --validator provider는 NARUBROWN/spine-validator-<provider>@preview를 조회하며 none은 검증기를 생략한다. provider는 소문자로 시작하고 소문자, 숫자와 연속하지 않는 -/_를 사용한다. 이벤트 등록 이름은 [a-z][a-z0-9_]*이며 기본 이름에서는 -를 _로 바꾼다. 중복 이름은 오류다.
+--event-platform은 반복 가능한 [name:]provider이며 NARUBROWN/spine-<provider>-platform의 선택한 채널을 조회한다. --validator provider는 NARUBROWN/spine-validator-<provider>의 선택한 채널을 조회하며 none은 검증기를 생략한다. provider는 소문자로 시작하고 소문자, 숫자와 연속하지 않는 -/_를 사용한다. 이벤트 등록 이름은 [a-z][a-z0-9_]*이며 기본 이름에서는 -를 _로 바꾼다. 중복 이름은 오류다.
 NATS는 JetStream이며 <PREFIX>URLS, <PREFIX>STREAM, <PREFIX>CONSUMER_PREFIX가 필요하다. stream은 실행 전에 생성한다. <PREFIX>TOPIC_PREFIX와 USER, PASSWORD, TOKEN, CREDENTIALS_FILE 인증 설정은 선택이다. 기본 실패 정책은 reject이며 NATS 앱은 Go 1.26.0 이상이 필요하다. Core NATS pub/sub, request/reply, 자동 DLQ는 포함하지 않는다.
 이벤트와 validator는 선택한 모듈 버전의 spine-platform.json 메타데이터로 생성자, 설정 필드와 최소 Go를 읽는다. 새 provider 등록에 CLI 패치가 필요하지 않다. 저장소/Preview 조회 실패와 메타데이터 누락을 구분해 원인과 모듈 경로를 표시하고 프로젝트를 만들지 않는다. Kafka, RabbitMQ와 playground의 메타데이터 없는 버전에는 호환 설명을 사용한다. 형식은 PLATFORMS.md를 참고한다.
 메타데이터에 선언한 생성자의 오류를 반환한다. 두 layout에 생성자, Route, Consumers().Register 연결 방식을 유지한다.

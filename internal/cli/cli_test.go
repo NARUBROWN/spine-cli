@@ -1515,6 +1515,30 @@ func TestLoadProjectConfig(t *testing.T) {
 	}
 }
 
+func TestNewDefaultChannelAndLegacyConfig(t *testing.T) {
+	options, err := parseNewOptions([]string{"example"})
+	if err != nil || options.DependencyChannel != "main" {
+		t.Fatalf("new project channel = %q, error = %v", options.DependencyChannel, err)
+	}
+	inTempDir(t)
+	contents := "module = \"example.com/app\"\nrecipe = \"platform-contracts-preview\"\n"
+	if err := os.WriteFile("spine.toml", []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := loadProjectConfig()
+	if err != nil || config.DependencyChannel != "preview" {
+		t.Fatalf("legacy project channel = %q, error = %v", config.DependencyChannel, err)
+	}
+}
+
+func TestDefaultChannelSelectsLatestRelease(t *testing.T) {
+	versions := []string{"v0.6.5", "v0.7.1", "v0.7.2-preview.1", "v0.7.2-rc.1"}
+	got, err := latestDependencyVersion(versions, defaultDependencyChannel)
+	if err != nil || got != "v0.7.1" {
+		t.Fatalf("latest release = %q, error = %v", got, err)
+	}
+}
+
 func TestCompletionAndProjectName(t *testing.T) {
 	inTempDir(t)
 	if err := os.WriteFile("go.mod", []byte("module example.com/my-api\n"), 0o644); err != nil {
@@ -1862,5 +1886,5 @@ func runLegacyNew(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	return runNew(append(args, "--layout", "legacy", "--skip-install"), out, errOut)
+	return runNew(append(args, "--layout", "legacy", "--channel", "preview", "--skip-install"), out, errOut)
 }

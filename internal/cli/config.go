@@ -198,7 +198,7 @@ func loadProjectConfig() (projectConfig, error) {
 		return projectConfig{}, fmt.Errorf("spine.toml: module is required")
 	}
 	if config.Recipe == currentAssemblyRecipe && config.DependencyChannel == "" {
-		config.DependencyChannel = defaultDependencyChannel
+		config.DependencyChannel = "preview"
 	}
 	if config.DependencyChannel != "" && config.Recipe != currentAssemblyRecipe {
 		return projectConfig{}, fmt.Errorf("spine.toml: dependency_channel requires recipe %q", currentAssemblyRecipe)
