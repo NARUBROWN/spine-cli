@@ -18,6 +18,12 @@ import zipfile
 TAG = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(preview|rc)\.([1-9]\d*))?\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 WORKFLOWS = {"preview": "preview.yml", "rc": "rc.yml", "stable": "release.yml"}
+CORE_MODULE = "github.com/NARUBROWN/spine"
+UPSTREAM_MODULES = tuple("github.com/NARUBROWN/" + name for name in (
+    "spine", "spine-echo-platform", "spine-nethttp-platform", "spine-gorilla-platform",
+    "spine-kafka-platform", "spine-rabbitmq-platform", "spine-nats-platform",
+    "spine-validator-playground",
+))
 
 
 class ReleaseError(Exception):
@@ -83,10 +89,11 @@ def validate_policy(policy):
 
 
 class GitHub:
-    def __init__(self, repository):
+    def __init__(self, repository, *, token=None):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
             raise ReleaseError("저장소 이름이 올바르지 않습니다")
         self.repository = repository
+        self.env = dict(os.environ, GH_TOKEN=token) if token else None
 
     def api(self, path, *, missing=False, method="GET", data=None):
         endpoint = f"repos/{self.repository}" + ("/" + path if path else "")
@@ -94,7 +101,7 @@ class GitHub:
         if data is not None:
             args += ["--input", "-"]
         result = subprocess.run(args, input=json.dumps(data) if data is not None else None,
-                                text=True, capture_output=True, encoding="utf-8")
+                                text=True, capture_output=True, encoding="utf-8", env=self.env)
         if result.returncode:
             # 인증, 통신 오류를 '태그 없음'으로 해석하지 않습니다.
             try:
@@ -129,9 +136,9 @@ class GitHub:
             obj = self.api(f"git/tags/{obj['sha']}")["object"]
         raise ReleaseError("태그가 단일 커밋을 가리키지 않습니다")
 
-    def candidate_evidence(self, tag):
+    def candidate_evidence(self, tag, prefix="release-manifest-", *, allow_absent=False):
         parse_tag(tag)
-        name = "release-manifest-" + tag
+        name = prefix + tag
         artifacts = []
         for page in range(1, 101):
             items = self.api(f"actions/artifacts?name={name}&per_page=100&page={page}")["artifacts"]
@@ -140,6 +147,10 @@ class GitHub:
                 break
         else:
             raise ReleaseError("후보 검증 기록 목록을 모두 확인하지 못했습니다")
+        if allow_absent:
+            artifacts = [item for item in artifacts if not item.get("expired", True)]
+            if not artifacts:
+                return None
         if len(artifacts) != 1 or artifacts[0].get("expired", True):
             raise ReleaseError("태그에 대응하는 검증 artifact가 없거나 중복, 만료됐습니다. 새 Preview가 필요합니다")
         artifact = artifacts[0]
@@ -148,7 +159,7 @@ class GitHub:
             archive = Path(directory) / "manifest.zip"
             with archive.open("wb") as output:
                 result = subprocess.run(["gh", "api", f"repos/{self.repository}/actions/artifacts/{int(artifact['id'])}/zip"],
-                                        stdout=output, stderr=subprocess.PIPE)
+                                        stdout=output, stderr=subprocess.PIPE, env=self.env)
             if result.returncode:
                 raise ReleaseError("후보 검증 artifact를 다운로드하지 못했습니다: " + result.stderr.decode("utf-8", errors="replace").strip())
             if artifact.get("digest") != "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest():
@@ -231,6 +242,78 @@ def approval_environment(github, policy, channel="stable"):
         raise ReleaseError("승인 환경은 해당 채널 브랜치에서만 실행할 수 있어야 합니다")
 
 
+def latest_preview_tag(github):
+    refs = github.api("git/matching-refs/tags/v")
+    versions = []
+    for ref in refs:
+        tag = ref["ref"].removeprefix("refs/tags/")
+        if TAG.fullmatch(tag) and parse_tag(tag)[1] == "preview":
+            base, _, number = parse_tag(tag)
+            versions.append((tuple(map(int, base[1:].split("."))), number, tag))
+    if not versions:
+        raise ReleaseError("Preview 태그가 없는 선행 저장소입니다: " + github.repository)
+    return max(versions)[2]
+
+
+def upstream_evidence(recipe, github_factory=None):
+    """코어 후보와 모든 플랫폼이 같은 코어를 공개 검증했는지 확인합니다."""
+    if github_factory is None:
+        token = os.environ.get("RELEASE_EVIDENCE_TOKEN", "")
+        if not token.strip():
+            raise ReleaseError("선행 저장소의 Actions 검증 기록을 읽을 RELEASE_EVIDENCE_TOKEN이 필요합니다")
+        github_factory = lambda repository: GitHub(repository, token=token)
+    snapshots = {}
+    core_version = None
+    for module in UPSTREAM_MODULES:
+        repository = module.removeprefix("github.com/")
+        dependency = github_factory(repository)
+        tag = latest_preview_tag(dependency)
+        sha = dependency.tag_sha(tag)
+        if not SHA.fullmatch(sha or ""):
+            raise ReleaseError("선행 저장소의 Preview 태그가 올바른 커밋을 가리키지 않습니다: " + repository)
+        is_core = module == CORE_MODULE
+        proof = dependency.candidate_evidence(tag, "core-candidate-" if is_core else "release-manifest-", allow_absent=not is_core)
+        if proof is None:
+            if is_core:
+                raise ReleaseError("코어 후보의 발행 검증 기록이 없습니다")
+            snapshots[module] = {"version": tag, "source_sha": sha, "artifact_id": None, "digest": None}
+            continue
+        artifact, run_info, manifest = proof["artifact"], proof["workflow_run"], proof["manifest"]
+        validation = manifest.get("validation", {})
+        components = manifest.get("components", {})
+        scope = "core" if is_core else "platform"
+        if (manifest.get("schema_version") != "spine.release-manifest/v1" or
+                manifest.get("repository") != repository or manifest.get("module") != module or
+                manifest.get("kind") != scope or manifest.get("channel") != "preview" or
+                manifest.get("branch") != "preview" or manifest.get("version") != tag or
+                manifest.get("source_sha") != sha or
+                manifest.get("source_tree") != dependency.api("git/commits/" + sha)["tree"]["sha"] or
+                validation.get("result") != "passed" or validation.get("scope") != scope or
+                validation.get("version") != tag or validation.get("source_sha") != sha or
+                validation.get("components") != components or
+                validation.get("selected_modules", {}).get(module) != tag or
+                run_info.get("status") != "completed" or run_info.get("conclusion") != "success" or
+                run_info.get("event") != "workflow_dispatch" or run_info.get("head_branch") != "preview" or
+                run_info.get("head_sha") != sha or run_info.get("path", "").split("@")[0] != ".github/workflows/preview.yml" or
+                str(run_info.get("id")) != manifest.get("workflow_run_id") or
+                str(run_info.get("run_attempt")) != manifest.get("workflow_run_attempt") or
+                artifact.get("workflow_run", {}).get("id") != run_info.get("id") or
+                artifact.get("workflow_run", {}).get("head_sha") != sha):
+            raise ReleaseError("선행 발행의 태그와 공개 검증 기록이 다릅니다: " + repository)
+        if is_core:
+            if components.get("core_version") != tag:
+                raise ReleaseError("코어 후보의 구성 버전이 태그와 다릅니다: " + repository)
+            core_version = tag
+        elif (not components.get("core_version") or
+              validation.get("selected_modules", {}).get(CORE_MODULE) != components["core_version"]):
+            raise ReleaseError("선행 플랫폼의 코어 검증 기록이 일치하지 않습니다: " + repository)
+        snapshots[module] = {"version": tag, "source_sha": sha, "artifact_id": artifact["id"], "digest": artifact["digest"]}
+    for module, version in recipe["modules"].items():
+        if module in snapshots and snapshots[module]["version"] != version:
+            raise ReleaseError("CLI 생성 레시피와 선행 태그가 다릅니다: " + module)
+    return snapshots
+
+
 def make_plan(github, policy, channel, version, source, reason="", now=None):
     validate_policy(policy)
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -300,6 +383,8 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
             "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "1"),
             "repository": github.repository}
     plan["required_public_os"] = policy["required_public_os"]
+    if channel == "preview" and policy["recipe"]["id"] == "platform-contracts-preview":
+        plan["upstream_evidence"] = upstream_evidence(plan["components"]["recipe"])
     plan["notes_sha256"] = hashlib.sha256(notes(plan, policy).encode()).hexdigest()
     return plan
 
@@ -366,6 +451,10 @@ def validate_reports(reports, plan, query):
                 report.get("query") != query or report.get("components") != plan["components"] or
                 set(report.get("entrypoints", [])) != {"spine", "spine-cli"}):
             raise ReleaseError("공개 설치 결과가 발행 계획과 다릅니다")
+        if plan.get("upstream_evidence") is not None and (
+                report.get("upstream_evidence") != plan["upstream_evidence"] or
+                report.get("combination_checks") != ["echo-full", "nethttp-full"]):
+            raise ReleaseError("공개 설치 결과에 코어와 플랫폼의 조합 검증이 없습니다")
     return reports
 
 
@@ -382,8 +471,8 @@ def publish(github, policy, plan, verified_sha, reports_directory):
     # 승인 대기 중 태그, 정책, 관찰 기간이 바뀌었는지 쓰기 직전에 다시 검사합니다.
     fresh = make_plan(github, policy, plan["channel"], plan["version"],
                       plan["source_tag"] or plan["source_sha"], plan["observation_override_reason"])
-    for key in ("source_sha", "source_tree", "branch", "promotion_pr", "source_evidence", "channel", "version", "components", "notes_sha256", "required_public_os"):
-        if fresh[key] != plan[key]:
+    for key in ("source_sha", "source_tree", "branch", "promotion_pr", "source_evidence", "channel", "version", "components", "notes_sha256", "required_public_os", "upstream_evidence"):
+        if fresh.get(key) != plan.get(key):
             raise ReleaseError("승인한 계획이 바뀌었습니다. 새 실행이 필요합니다")
     github.api("git/refs", method="POST", data={"ref": f"refs/tags/{plan['version']}", "sha": verified_sha})
 
@@ -392,6 +481,8 @@ def finish(github, policy, plan, reports_directory, manifest_path="release-manif
     reports = collect_reports(reports_directory, plan, plan["version"])
     if github.tag_sha(plan["version"]) != plan["source_sha"]:
         raise ReleaseError("공개 태그가 발행 계획과 다릅니다")
+    if "upstream_evidence" in plan and upstream_evidence(plan["components"]["recipe"]) != plan["upstream_evidence"]:
+        raise ReleaseError("태그 생성 후 선행 발행 근거가 바뀌었습니다")
     manifest = dict(plan, validation={"result": "passed", "version": plan["version"],
                                     "source_sha": plan["source_sha"], "components": plan["components"],
                                     "reports": reports})

@@ -21,6 +21,7 @@ jobs:
   publish:
     uses: ./.github/workflows/release-pipeline.yml
     secrets:
+      RELEASE_EVIDENCE_TOKEN: ${{ secrets.RELEASE_EVIDENCE_TOKEN }}
       DISCORD_WEBHOOK_PREVIEW: ${{ secrets.DISCORD_WEBHOOK_PREVIEW }}
       DISCORD_WEBHOOK_RC: ${{ secrets.DISCORD_WEBHOOK_RC }}
       DISCORD_WEBHOOK_RELEASE: ${{ secrets.DISCORD_WEBHOOK_RELEASE }}

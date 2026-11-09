@@ -168,7 +168,7 @@ class ReleasePolicyTests(unittest.TestCase):
     def test_repository_preview_recipe_cannot_ship_as_stable_default(self):
         policy = copy.deepcopy(REPOSITORY_POLICY)
         self.github.policy = policy
-        with patch.object(release, "resolve_module_query", return_value="v0.7.0-preview.2"):
+        with patch.object(release, "resolve_module_query", return_value="v0.7.0-preview.2"), patch.object(release, "upstream_evidence", return_value={}):
             plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
         recipe = plan["components"]["recipe"]
         self.assertEqual(recipe["id"], "platform-contracts-preview")

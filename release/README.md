@@ -16,6 +16,16 @@ Preview와 RC는 `vX.Y.Z-preview.N`, `vX.Y.Z-rc.N`, 정식은 `vX.Y.Z` 태그를
 
 Preview 기본 생성은 `platform-contracts-preview` 레시피로 각 Spine 모듈의 `@preview`를 조회합니다. 발행 계획은 조회 조건과 해석된 고정 버전을 manifest에 함께 기록합니다. 검증 중 브랜치가 이동해 계획과 생성 결과가 달라지면 발행을 중단하고 새 계획으로 다시 검증합니다.
 
+CLI Preview 발행 전에 코어 후보를 발행하고 Echo, net/http, Gorilla WebSocket, Kafka, RabbitMQ, NATS와 playground validator의 공개 태그를 확인합니다. 플랫폼을 변경할 필요가 없다면 기존에 발행된 태그를 그대로 사용합니다. CLI는 태그와 소스 커밋을 발행 계획에 기록하고, 발행 검증 기록이 남아 있으면 출처와 체크섬도 확인합니다. 오래된 플랫폼의 검증 기록이 만료됐거나 없더라도 새로운 조합 검사를 통과하면 다시 발행할 필요가 없습니다. 코어 후보는 발행 검증 기록이 필요합니다.
+
+기존 발행 기록은 새 코어와의 호환성을 보증하지 않습니다. CLI의 태그 생성 전후 공개 설치 검사는 계획에 기록된 새 코어와 플랫폼을 함께 사용해 Echo와 net/http 앱을 생성하고 빌드와 테스트를 수행합니다. 이 검사는 세 운영체제에서 실행하며 실제 브로커 송수신을 보증하지 않습니다. 구성 결과가 계획과 다르거나 검증이 실패하면 발행을 중단합니다.
+
+CLI 저장소의 `RELEASE_EVIDENCE_TOKEN` secret에는 코어와 7개 플랫폼 저장소의 Actions 읽기 권한이 있는 자격 증명이 필요합니다. 이 값은 선행 저장소의 검증 artifact 조회에만 사용합니다. CLI 태그 생성은 기존 워크플로 토큰과 승인 환경을 사용합니다. secret이 없거나 읽기 권한이 부족하면 발행을 중단합니다.
+
+전체 Preview 발행은 `scripts/release/release_train.py --plan 계획.json`으로 먼저 확인합니다. JSON 객체에 코어, 위 7개 플랫폼과 CLI의 전체 모듈 경로를 키로 넣고, 각각 `version`과 `source_sha`를 지정합니다. 새로 발행할 후보는 Preview 브랜치에 미리 병합하고, 변경이 없는 플랫폼은 기존 태그와 그 태그의 커밋을 지정합니다. 실행 전 후보 번호, 진행 중인 발행과 기존 검증 기록을 확인합니다. 확인한 계획에 `--execute`를 추가하면 코어, 필요한 플랫폼, CLI 순서로 발행하고 앞 단계의 성공을 기다립니다. 이미 검증된 태그는 재발행하지 않습니다. 기존 승인 환경은 그대로 적용되므로 승인이 필요한 단계는 지정 리뷰어가 처리해야 합니다. GitHub CLI에는 각 저장소의 Actions 실행 권한이 필요합니다.
+
+CLI는 태그 생성 전에 선행 발행 기록을 다시 확인하고, 태그 생성 후 기록이 달라지면 최종 manifest를 만들지 않습니다. 순차 실행은 다른 작업자의 동시 발행을 잠그지 않습니다. CLI의 발행 후 검증이 끝날 때까지 별도의 코어와 플랫폼 Preview 발행을 시작하지 마세요.
+
 세 채널 모두 `release-preview`, `release-rc`, `release-stable` 승인 환경을 사용합니다. 지정 리뷰어가 태그, 검증 계획과 릴리스 노트 초안을 검토한 뒤 승인해야 태그를 만듭니다. 환경은 해당 채널 브랜치만 허용하며 관리자 우회를 허용하지 않습니다. [GitHub 승인 환경](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
 
 릴리스 계획 artifact의 `release-title.txt`, `release-notes.md`, `release-plan.json`을 승인 전에 확인합니다. 본문은 `release/notes/vX.Y.Z.md`와 계획의 버전, 소스, 이전 단계, 레시피 해시, 긴급 단축 사유로 구성합니다. 본문 해시를 계획에 저장하고 태그 생성 직전에 다시 계산합니다. Preview와 RC에서는 이 초안을 GitHub Release에 게시하지 않습니다. 본문을 수정하면 새 소스에서 새 계획을 검토해야 합니다. 테스트 결과는 성공을 확인한 뒤 manifest에 첨부합니다.
@@ -108,6 +118,8 @@ run과 dev는 Unix에서 종료 요청을 앱의 SIGINT로 전달하고 기본 1
 ## 실패와 복구
 
 태그 생성 전 실패는 수정 후 새 계획으로 검증합니다. Preview나 RC의 태그 생성 후 설치 검사가 실패하면 해당 후보는 승격할 수 없습니다. 실패한 실행은 workflow 로그와 artifact에서 확인하고 새 번호로 다시 발행합니다.
+
+CLI `v0.4.3-preview.11`은 코어 태그가 CLI 발행 중 생성되어 태그 생성 후 세 운영체제 검사가 실패했습니다. 기존 태그와 기존 계획을 수정하거나 별도 단일 운영체제 검증 결과로 공식 manifest를 만들지 않습니다. 기존 플랫폼을 재사용할 수 있으면 새 코어와의 조합을 검증하고, CLI Preview를 새 번호로 발행해 세 운영체제의 공개 설치와 최종 manifest를 확인하세요.
 
 정식 태그 이후 실패는 태그를 삭제하거나 이동해 감추지 않습니다. 이전 검증 버전을 명시해 CLI를 재설치하고 수정 버전을 준비합니다. 잘못된 버전의 자동 선택을 막아야 하면 새 정식 버전의 go.mod에 retract를 추가하는 방법을 검토합니다. [Go retract](https://go.dev/ref/mod#go-mod-file-retract)
 
