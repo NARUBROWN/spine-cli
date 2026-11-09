@@ -73,7 +73,7 @@ def direct_dependencies(module):
 
 def expected_dependencies(required, recipe, upstream, case):
     allowed = dict(recipe["modules"])
-    allowed.update({module: value["version"] for module, value in upstream.items()})
+    allowed.update({module: value.get("selected_version", value["version"]) for module, value in upstream.items()})
     for path, version in required.items():
         if allowed.get(path) != version:
             raise ReleaseError("기본 생성 의존성이 계획과 다릅니다: " + path)

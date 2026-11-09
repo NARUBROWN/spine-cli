@@ -308,8 +308,11 @@ def upstream_evidence(recipe, github_factory=None):
               validation.get("selected_modules", {}).get(CORE_MODULE) != components["core_version"]):
             raise ReleaseError("선행 플랫폼의 코어 검증 기록이 일치하지 않습니다: " + repository)
         snapshots[module] = {"version": tag, "source_sha": sha, "artifact_id": artifact["id"], "digest": artifact["digest"]}
+    for module, snapshot in snapshots.items():
+        snapshot["selected_version"] = resolve_module_query(module, "preview")
     for module, version in recipe["modules"].items():
-        if module in snapshots and snapshots[module]["version"] != version:
+        if module in snapshots and (snapshots[module]["version"] != version or
+                                    snapshots[module]["selected_version"] != version):
             raise ReleaseError("CLI 생성 레시피와 선행 태그가 다릅니다: " + module)
     return snapshots
 

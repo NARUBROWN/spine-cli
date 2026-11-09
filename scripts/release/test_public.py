@@ -31,6 +31,16 @@ class PublicEvidenceTests(unittest.TestCase):
         with self.assertRaises(release.ReleaseError):
             verify_public.expected_dependencies(required, recipe, upstream, "echo-full")
 
+    def test_combination_requires_the_planned_preview_commit(self):
+        module = "github.com/NARUBROWN/spine-kafka-platform"
+        selected = "v0.2.0-preview.2.0.20261108124442-0628cf02bee1"
+        upstream = {module: {"version": "v0.2.0-preview.2", "selected_version": selected}}
+        allowed = verify_public.expected_dependencies({module: selected}, {"modules": {}}, upstream, "http")
+        self.assertEqual(allowed[module], selected)
+        for wrong in ("v0.2.0-preview.2", "v0.2.0-preview.3"):
+            with self.assertRaises(release.ReleaseError):
+                verify_public.expected_dependencies({module: wrong}, {"modules": {}}, upstream, "http")
+
     def test_updated_module_distinguishes_indirect_dependencies(self):
         module = {"Require": [{"Path": "example.com/core", "Version": "v1.0.0"},
                               {"Path": "example.com/transitive", "Version": "v2.0.0", "Indirect": True}]}
