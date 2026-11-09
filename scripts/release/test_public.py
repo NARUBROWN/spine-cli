@@ -41,6 +41,19 @@ class PublicEvidenceTests(unittest.TestCase):
             with self.assertRaises(release.ReleaseError):
                 verify_public.expected_dependencies({module: wrong}, {"modules": {}}, upstream, "http")
 
+    def test_rc_reports_require_exact_full_cohort_on_every_os(self):
+        cohort = {"github.com/NARUBROWN/spine": "v0.7.0-rc.1"}
+        plan = {"required_public_os": ["linux", "darwin", "windows"], "source_sha": "a" * 40,
+                "components": {}, "rc_cohort": cohort}
+        reports = [{"os": os, "result": "passed", "source_sha": plan["source_sha"], "query": "v1.0.0",
+                    "components": {}, "entrypoints": ["spine", "spine-cli"], "rc_cohort": cohort,
+                    "rc_combination_checks": ["echo-full", "nethttp-full"]} for os in plan["required_public_os"]]
+        release.validate_reports(reports, plan, "v1.0.0")
+        bad = copy.deepcopy(reports)
+        bad[0]["rc_cohort"] = {}
+        with self.assertRaises(release.ReleaseError):
+            release.validate_reports(bad, plan, "v1.0.0")
+
     def test_updated_module_distinguishes_indirect_dependencies(self):
         module = {"Require": [{"Path": "example.com/core", "Version": "v1.0.0"},
                               {"Path": "example.com/transitive", "Version": "v2.0.0", "Indirect": True}]}

@@ -8,6 +8,8 @@ CLI를 `preview → rc → main` 순서로 승격하고 각 채널에서 태그�
 | RC | `v0.4.3-rc.1` | Actions artifact | 발행하지 않음 |
 | Production | `v0.4.3` | Actions artifact와 Release 첨부 파일 | 정식 발행 |
 
+RC 발행 검증은 `.github/release-policy.json`의 `rc_cohort`에 기록된 코어와 플랫폼 태그를 사용합니다. 공개 CLI로 두 레이아웃의 Echo와 net/http 전체 조합을 생성하고 업데이트하며 모듈 그래프가 고정한 RC 버전과 일치하는지 검사합니다. 기본 Preview 채널은 그대로 유지합니다.
+
 ## 정책과 승인
 
 `.github/release-policy.json`에 다음 버전, 관찰 시간, 기본 생성 레시피와 공개 검증 OS를 고정합니다. 초기 대상은 `v0.4.3`이고 Preview는 72시간, RC는 24시간 관찰합니다. `stable_interval_hours: 0`은 정식 출시의 추가 최소 간격을 두지 않는다는 뜻입니다. 관찰 시간과 필수 검증은 그대로 적용합니다.

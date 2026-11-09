@@ -304,8 +304,9 @@ def upstream_evidence(recipe, github_factory=None):
             if components.get("core_version") != tag:
                 raise ReleaseError("코어 후보의 구성 버전이 태그와 다릅니다: " + repository)
             core_version = tag
-        elif (not components.get("core_version") or
-              validation.get("selected_modules", {}).get(CORE_MODULE) != components["core_version"]):
+        elif (not validation.get("selected_modules", {}).get(CORE_MODULE) or
+              (components.get("core_version") and
+               validation.get("selected_modules", {}).get(CORE_MODULE) != components["core_version"])):
             raise ReleaseError("선행 플랫폼의 코어 검증 기록이 일치하지 않습니다: " + repository)
         snapshots[module] = {"version": tag, "source_sha": sha, "artifact_id": artifact["id"], "digest": artifact["digest"]}
     for module, snapshot in snapshots.items():
@@ -386,6 +387,11 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
             "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "1"),
             "repository": github.repository}
     plan["required_public_os"] = policy["required_public_os"]
+    if channel == "rc" and policy.get("rc_cohort"):
+        cohort = policy["rc_cohort"]
+        if set(cohort) != set(UPSTREAM_MODULES) or any(not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*", v) for v in cohort.values()):
+            raise ReleaseError("RC 조합에는 코어와 일곱 플랫폼의 정확한 RC 태그가 필요합니다")
+        plan["rc_cohort"] = cohort
     if channel == "preview" and policy["recipe"]["id"] == "platform-contracts-preview":
         plan["upstream_evidence"] = upstream_evidence(plan["components"]["recipe"])
     plan["notes_sha256"] = hashlib.sha256(notes(plan, policy).encode()).hexdigest()
@@ -458,6 +464,10 @@ def validate_reports(reports, plan, query):
                 report.get("upstream_evidence") != plan["upstream_evidence"] or
                 report.get("combination_checks") != ["echo-full", "nethttp-full"]):
             raise ReleaseError("공개 설치 결과에 코어와 플랫폼의 조합 검증이 없습니다")
+        if plan.get("rc_cohort") is not None and (
+                report.get("rc_cohort") != plan["rc_cohort"] or
+                report.get("rc_combination_checks") != ["echo-full", "nethttp-full"]):
+            raise ReleaseError("RC 공개 설치 결과에 전체 RC 조합 검증이 없습니다")
     return reports
 
 
@@ -474,7 +484,7 @@ def publish(github, policy, plan, verified_sha, reports_directory):
     # 승인 대기 중 태그, 정책, 관찰 기간이 바뀌었는지 쓰기 직전에 다시 검사합니다.
     fresh = make_plan(github, policy, plan["channel"], plan["version"],
                       plan["source_tag"] or plan["source_sha"], plan["observation_override_reason"])
-    for key in ("source_sha", "source_tree", "branch", "promotion_pr", "source_evidence", "channel", "version", "components", "notes_sha256", "required_public_os", "upstream_evidence"):
+    for key in ("source_sha", "source_tree", "branch", "promotion_pr", "source_evidence", "channel", "version", "components", "notes_sha256", "required_public_os", "upstream_evidence", "rc_cohort"):
         if fresh.get(key) != plan.get(key):
             raise ReleaseError("승인한 계획이 바뀌었습니다. 새 실행이 필요합니다")
     github.api("git/refs", method="POST", data={"ref": f"refs/tags/{plan['version']}", "sha": verified_sha})

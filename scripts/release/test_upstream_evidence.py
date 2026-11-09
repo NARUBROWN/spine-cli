@@ -89,6 +89,15 @@ class UpstreamEvidenceTests(unittest.TestCase):
         proof["manifest"]["validation"]["selected_modules"][release.CORE_MODULE] = "v0.7.0-preview.2"
         self.assertIn("github.com/NARUBROWN/spine-nats-platform", self.check())
 
+    def test_independent_platform_manifest_records_actual_contract_dependency(self):
+        proof = Dependency.data["github.com/NARUBROWN/spine-nats-platform"]["proof"]
+        proof["manifest"]["components"].pop("core_version")
+        proof["manifest"]["validation"]["components"].pop("core_version", None)
+        self.assertIn("github.com/NARUBROWN/spine-nats-platform", self.check())
+        proof["manifest"]["validation"]["selected_modules"].pop(release.CORE_MODULE)
+        with self.assertRaises(release.ReleaseError):
+            self.check()
+
     def test_rejects_failed_workflow_or_inconsistent_previous_validation(self):
         for condition in ("workflow", "core"):
             with self.subTest(condition=condition):

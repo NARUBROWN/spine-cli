@@ -24,6 +24,7 @@ TREE = "d" * 40
 REPOSITORY_POLICY = json.loads((Path(__file__).resolve().parents[2] / ".github/release-policy.json").read_text(encoding="utf-8"))
 # 채널 승격 자체의 검사는 저장소가 현재 선택한 Preview 레시피와 분리합니다.
 POLICY = copy.deepcopy(REPOSITORY_POLICY)
+POLICY.pop("rc_cohort", None)
 POLICY["recipe"] = {"id": "platform-contracts-v0.6.5", "modules": {
     "github.com/NARUBROWN/spine": "v0.6.5",
     **{f"github.com/NARUBROWN/spine-{name}": "v0.1.0" for name in (
