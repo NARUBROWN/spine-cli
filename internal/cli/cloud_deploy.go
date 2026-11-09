@@ -25,8 +25,10 @@ type cloudDeployRequest struct {
 	Artifact     []byte `json:"artifact"`
 }
 type cloudDeployResult struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
+	ID             string  `json:"id"`
+	Status         string  `json:"status"`
+	FailureMessage *string `json:"failure_message"`
+	ErrorMessage   string  `json:"error_message"`
 }
 
 type cloudDeploymentStatus struct {
@@ -34,6 +36,8 @@ type cloudDeploymentStatus struct {
 	Status         string  `json:"status"`
 	PublicURL      *string `json:"public_url"`
 	FailureMessage *string `json:"failure_message"`
+	ErrorCode      string  `json:"error_code"`
+	ErrorMessage   string  `json:"error_message"`
 }
 
 func waitCloudDeployment(ctx context.Context, client *http.Client, api, appID, deploymentID, token string, interval time.Duration) (cloudDeploymentStatus, error) {
@@ -53,10 +57,15 @@ func waitCloudDeployment(ctx context.Context, client *http.Client, api, appID, d
 		if err != nil {
 			return empty, errors.New("could not check deployment status; check the dashboard")
 		}
+		if res.StatusCode != http.StatusOK {
+			err = cloudResponseError(res, "could not check deployment status; check the dashboard")
+			res.Body.Close()
+			return empty, err
+		}
 		var items []cloudDeploymentStatus
 		err = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&items)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || err != nil {
+		if err != nil {
 			return empty, errors.New("could not check deployment status; check the dashboard")
 		}
 		for _, item := range items {
@@ -74,17 +83,7 @@ func waitCloudDeployment(ctx context.Context, client *http.Client, api, appID, d
 				}
 				return item, nil
 			case "failed":
-				if item.FailureMessage != nil {
-					switch *item.FailureMessage {
-					case "insufficient cpu capacity":
-						return empty, errors.New("deployment rejected: host CPU usage is above 80%; try again later")
-					case "insufficient memory capacity":
-						return empty, errors.New("deployment rejected: insufficient instance memory capacity; try again later")
-					case "capacity measurement unavailable":
-						return empty, errors.New("deployment rejected: host capacity could not be measured; try again later")
-					}
-				}
-				return empty, errors.New("deployment failed; check the dashboard for details")
+				return empty, cloudDeploymentFailure(item.ErrorMessage, item.FailureMessage)
 			case "uploading", "queued", "starting", "healthchecking", "publishing":
 			default:
 				return empty, errors.New("invalid deployment status")
@@ -98,6 +97,24 @@ func waitCloudDeployment(ctx context.Context, client *http.Client, api, appID, d
 		case <-timer.C:
 		}
 	}
+}
+
+// 이전 관리 API의 실패 사유는 호환성을 위해 알려진 값만 해석한다.
+func cloudDeploymentFailure(message string, legacy *string) error {
+	if message = safeCloudMessage(message); message != "" {
+		return errors.New(message)
+	}
+	if legacy != nil {
+		switch *legacy {
+		case "insufficient cpu capacity":
+			return errors.New("deployment rejected: host CPU usage is above 80%; try again later")
+		case "insufficient memory capacity":
+			return errors.New("deployment rejected: insufficient instance memory capacity; try again later")
+		case "capacity measurement unavailable":
+			return errors.New("deployment rejected: host capacity could not be measured; try again later")
+		}
+	}
+	return errors.New("deployment failed; check the dashboard for details")
 }
 
 func newCloudRequestID() (string, error) {
@@ -138,18 +155,19 @@ func submitCloudArtifact(ctx context.Context, client *http.Client, api, appID, r
 		return empty, errors.New("deployment request failed; retry using the same request ID")
 	}
 	defer res.Body.Close()
-	switch res.StatusCode {
-	case 401:
-		return empty, errors.New("authentication failed; run spine cloud auth login")
-	case 403, 404:
-		return empty, errors.New("app not found or deployment service unavailable")
-	case 409:
-		return empty, errors.New("request ID conflicts with an existing deployment")
-	case 413:
-		return empty, errors.New("deployment artifact exceeds the server limit")
-	}
 	if res.StatusCode != http.StatusAccepted && res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
-		return empty, errors.New("deployment service unavailable; retry using the same request ID")
+		fallback := "deployment service unavailable; retry using the same request ID"
+		switch res.StatusCode {
+		case http.StatusUnauthorized:
+			fallback = "authentication failed; run spine cloud auth login"
+		case http.StatusForbidden, http.StatusNotFound:
+			fallback = "app not found or deployment service unavailable"
+		case http.StatusConflict:
+			fallback = "request ID conflicts with an existing deployment"
+		case http.StatusRequestEntityTooLarge:
+			fallback = "deployment artifact exceeds the server limit"
+		}
+		return empty, cloudResponseError(res, fallback)
 	}
 	var result cloudDeployResult
 	if json.NewDecoder(io.LimitReader(res.Body, 65536)).Decode(&result) != nil || !cloudUserID.MatchString(result.ID) || (result.Status != "uploading" && result.Status != "queued" && result.Status != "starting" && result.Status != "healthchecking" && result.Status != "publishing" && result.Status != "succeeded" && result.Status != "failed") {
@@ -268,6 +286,10 @@ func runDeploy(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(out, "Deployment %s submitted with status %s.\n", result.ID, result.Status)
+	if result.Status == "failed" {
+		fmt.Fprintln(errOut, cloudDeploymentFailure(result.ErrorMessage, result.FailureMessage))
+		return 1
+	}
 
 	waitCtx, waitCancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer waitCancel()

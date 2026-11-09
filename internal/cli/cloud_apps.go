@@ -48,10 +48,10 @@ func cloudAppsRequest(ctx context.Context, client *http.Client, api, token, meth
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnauthorized {
-		return nil, errCloudSessionRequired
+		return nil, cloudResponseError(res, errCloudSessionRequired.Error())
 	}
-	if res.StatusCode == http.StatusConflict {
-		return nil, errCloudAppNameExists
+	if (method == http.MethodGet && res.StatusCode != http.StatusOK) || (method == http.MethodPost && res.StatusCode != http.StatusCreated) {
+		return nil, cloudResponseError(res, "could not load or create an app")
 	}
 	var apps []cloudApp
 	if method == http.MethodGet && res.StatusCode == http.StatusOK {
@@ -127,6 +127,7 @@ func ensureCloudApp(ctx context.Context, client *http.Client, api, token, name s
 	if !errors.Is(err, errCloudAppNameExists) {
 		return empty, false, err
 	}
+	conflictErr := err
 	apps, err = cloudAppsRequest(ctx, client, api, token, http.MethodGet, "")
 	if err != nil {
 		return empty, false, err
@@ -136,5 +137,5 @@ func ensureCloudApp(ctx context.Context, client *http.Client, api, token, name s
 			return app, false, nil
 		}
 	}
-	return empty, false, errCloudAppNameExists
+	return empty, false, conflictErr
 }
