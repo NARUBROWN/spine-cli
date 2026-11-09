@@ -541,3 +541,7 @@ SPINE_CONTROLLER_CORE_SOURCE=/path/to/spine go test ./internal/cli -run TestCont
 ## Spine Cloud 인증 미리보기
 
 `spine cloud auth login`으로 브라우저에서 일회용 코드를 승인하면 세션이 운영체제 자격 증명 저장소에 보관됩니다. `spine cloud auth status`로 현재 계정을 확인하고, `spine cloud auth logout`으로 현재 세션을 서버에서 폐기한 뒤 저장된 자격 증명을 삭제할 수 있습니다. 다른 기기의 세션은 유지됩니다. 인증에는 호환되는 Spine Cloud 서비스와 운영체제 자격 증명 저장소가 필요합니다.
+
+## Spine Cloud 배포 미리보기
+
+`spine.toml`이 있는 프로젝트 디렉터리에서 `spine deploy`를 실행합니다. 로그인 후 정적 계약을 확인하고 Linux ARM64 실행 파일을 빌드해 Spine Cloud에 제출합니다. 앱이 없으면 모듈 이름을 기준으로 만들며, 기존 앱을 지정하려면 `--app <app-id>`를 사용합니다. 서버가 배포 성공을 보고할 때까지 기다립니다. 프론트엔드 정적 파일 배포는 아직 지원하지 않습니다.

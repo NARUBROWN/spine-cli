@@ -110,6 +110,8 @@ func runCommand(args []string, out, errOut io.Writer) int {
 	case "version", "--version", "-v":
 		fmt.Fprintln(out, "spine-cli", version)
 		return 0
+	case "deploy":
+		return runDeploy(args[1:], out, errOut)
 	case "cloud":
 		return runCloud(args[1:], out, errOut)
 	case "new":
@@ -174,6 +176,7 @@ Usage:
   spine context [--json]
   spine licenses
   spine cloud auth login|status|logout
+  spine deploy [--app <app-id>] [--api <https-origin>] [--request-id <uuid>]
 
 Layout:
   New projects use layered-v1 role roots with optional nested groups.

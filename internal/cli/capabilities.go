@@ -25,6 +25,7 @@ type capabilityDefinition struct {
 
 func currentCapabilities() capabilityReport {
 	capabilities := []capabilityDefinition{
+		{Name: "cloud.deploy", Implemented: true, Stability: "experimental", Evidence: "validate and build a static Linux ARM64 artifact, submit to Spine Cloud and wait for deployment", Limit: "requires a compatible Spine Cloud service and agent; frontend assets are not supported"},
 		{Name: "cloud.auth", Implemented: true, Stability: "experimental", Evidence: "browser device authorization, system credential storage, session refresh and current-session logout", Limit: "requires a compatible Spine Cloud service and system credential store"},
 		{Name: "frontend.react-csr-build", Implemented: true, Stability: "experimental", Evidence: "esbuild Go API bundles React JSX/TSX, CSS imports and imported assets; run and build use production minification; implicit detection requires a supported Echo or net/http composition", Limit: "frontend package dependencies must already be installed; TypeScript type checking remains a separate project tool"},
 		{Name: "frontend.dev-watch", Implemented: true, Stability: "experimental", Evidence: "spine dev fingerprints files under frontend_root and uses an incremental esbuild context; front-only changes replace static output without rebuilding the Go process", Limit: "poll interval is 500ms; node_modules and generated output are excluded"},

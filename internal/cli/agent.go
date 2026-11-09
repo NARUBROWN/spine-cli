@@ -57,6 +57,7 @@ type commandEffects struct {
 func currentCommandSchema() commandSchema {
 	jsonOption := optionDefinition{Type: "boolean", Description: "Emit the versioned machine-readable result protocol"}
 	commands := []commandDefinition{
+		{Name: "deploy", Summary: "Build and deploy a Linux ARM64 application to Spine Cloud", Options: map[string]optionDefinition{"app": {Type: "string"}, "api": {Type: "string"}, "request-id": {Type: "string"}}, Effects: commandEffects{WritesFiles: true, Network: true, LongRunning: true}},
 		{Name: "cloud auth login", Summary: "Sign in to Spine Cloud", Effects: commandEffects{WritesFiles: true, Network: true}},
 		{Name: "cloud auth status", Summary: "Check the Spine Cloud session", Effects: commandEffects{WritesFiles: true, Network: true}},
 		{Name: "cloud auth logout", Summary: "Revoke and remove the current Spine Cloud session", Effects: commandEffects{WritesFiles: true, Network: true}},
