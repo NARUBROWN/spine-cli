@@ -276,7 +276,7 @@ func assemblyValue(expression ast.Expr, body *ast.BlockStmt, before token.Pos) a
 func knownEventOptions(args []ast.Expr, imports map[string]string) bool {
 	for _, arg := range args {
 		known := false
-		for _, name := range []string{"WithEventConsumerRetry", "WithEventSettlementTimeout"} {
+		for _, name := range []string{"WithEventConsumerRetry", "WithEventSettlementTimeout", "WithEventPublisherErrorHistory", "WithEventConsumerErrorHistory"} {
 			if call, ok := importedCall(arg, imports, spineImportPath, name); ok && len(call.Args) == 1 && !call.Ellipsis.IsValid() {
 				known = true
 			}
