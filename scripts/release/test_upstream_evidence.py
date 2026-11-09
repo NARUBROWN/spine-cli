@@ -25,6 +25,8 @@ class Dependency:
             return [{"ref": "refs/tags/" + self.info["tag"]}]
         if path == "git/commits/" + SHA:
             return {"tree": {"sha": TREE}}
+        if path == f"compare/{SHA}...{self.info.get('head')}":
+            return self.info["comparison"]
         raise AssertionError(path)
 
     def tag_sha(self, tag):
@@ -112,6 +114,42 @@ class UpstreamEvidenceTests(unittest.TestCase):
 
     def test_rejects_resolved_recipe_drift(self):
         self.recipe["modules"][release.CORE_MODULE] = "v0.7.0-preview.7"
+        with self.assertRaisesRegex(release.ReleaseError, "레시피"):
+            self.check()
+
+    def set_readme_only_head(self):
+        module = release.CORE_MODULE
+        item = Dependency.data[module]
+        item["head"] = "c" * 40
+        item["selected_version"] = CORE + ".0.20261108124442-" + item["head"][:12]
+        self.recipe["modules"][module] = item["selected_version"]
+        item["comparison"] = {"status": "ahead", "merge_base_commit": {"sha": SHA},
+                              "files": [{"status": "modified", "filename": "README.zh-Hans.md"}]}
+        return item
+
+    def test_accepts_readme_only_head_and_records_both_commits(self):
+        item = self.set_readme_only_head()
+        snapshot = self.check()[release.CORE_MODULE]
+        self.assertEqual(snapshot["source_sha"], SHA)
+        self.assertEqual(snapshot["selected_source_sha"], item["head"])
+        self.assertEqual(snapshot["selected_version"], item["selected_version"])
+
+    def test_rejects_a_source_change_even_with_readme_changes(self):
+        item = self.set_readme_only_head()
+        item["comparison"]["files"].append({"status": "modified", "filename": "go.mod"})
+        with self.assertRaisesRegex(release.ReleaseError, "레시피"):
+            self.check()
+
+    def test_rejects_a_head_that_no_longer_matches_the_selected_version(self):
+        item = self.set_readme_only_head()
+        item["head"] = "d" * 40
+        with self.assertRaisesRegex(release.ReleaseError, "레시피"):
+            self.check()
+
+    def test_rejects_readme_changes_on_an_unrelated_history(self):
+        item = self.set_readme_only_head()
+        item["comparison"]["status"] = "diverged"
+        item["comparison"]["merge_base_commit"]["sha"] = "d" * 40
         with self.assertRaisesRegex(release.ReleaseError, "레시피"):
             self.check()
 

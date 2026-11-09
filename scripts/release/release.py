@@ -255,6 +255,24 @@ def latest_preview_tag(github):
     return max(versions)[2]
 
 
+def readme_only_preview_head(github, tagged_sha, selected_version):
+    suffix = re.search(r"[.-]\d{14}-([0-9a-f]{12})\Z", selected_version)
+    if not suffix:
+        return None
+    head = github.api("git/ref/heads/preview")["object"]["sha"]
+    if not SHA.fullmatch(head) or not head.startswith(suffix[1]):
+        return None
+    comparison = github.api(f"compare/{tagged_sha}...{head}")
+    readmes = {"README.md", "README.en.md", "README.ja.md", "README.zh-Hans.md", "README.zh-Hant.md"}
+    files = comparison.get("files") or []
+    # 검증된 태그 이후 기존 채널별 README만 수정됐는지 확인합니다.
+    if (comparison.get("status") == "ahead" and comparison.get("merge_base_commit", {}).get("sha") == tagged_sha
+            and 0 < len(files) <= len(readmes)
+            and all(file.get("status") == "modified" and file.get("filename") in readmes for file in files)):
+        return head
+    return None
+
+
 def upstream_evidence(recipe, github_factory=None):
     """코어 후보와 모든 플랫폼이 같은 코어를 공개 검증했는지 확인합니다."""
     if github_factory is None:
@@ -312,9 +330,18 @@ def upstream_evidence(recipe, github_factory=None):
     for module, snapshot in snapshots.items():
         snapshot["selected_version"] = resolve_module_query(module, "preview")
     for module, version in recipe["modules"].items():
-        if module in snapshots and (snapshots[module]["version"] != version or
-                                    snapshots[module]["selected_version"] != version):
+        if module not in snapshots:
+            continue
+        snapshot = snapshots[module]
+        if snapshot["selected_version"] != version:
             raise ReleaseError("CLI 생성 레시피와 선행 태그가 다릅니다: " + module)
+        if snapshot["version"] == version:
+            continue
+        dependency = github_factory(module.removeprefix("github.com/"))
+        selected_sha = readme_only_preview_head(dependency, snapshot["source_sha"], version)
+        if selected_sha is None:
+            raise ReleaseError("CLI 생성 레시피와 선행 태그가 다릅니다: " + module)
+        snapshot["selected_source_sha"] = selected_sha
     return snapshots
 
 

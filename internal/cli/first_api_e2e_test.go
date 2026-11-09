@@ -22,7 +22,9 @@ func TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	install := regexp.MustCompile(`(?m)^go install (github.com/NARUBROWN/spine-cli(?:/[^@\s]+)?)@latest$`).FindStringSubmatch(string(readme))
+	const packagePattern = `(github\.com/NARUBROWN/spine-cli/cmd/spine)`
+	const versionPattern = `(?:latest|v\d+\.\d+\.\d+(?:-(?:preview|rc)\.[1-9]\d*)?)`
+	install := regexp.MustCompile(`(?m)^go install ` + packagePattern + `@` + versionPattern + `$`).FindStringSubmatch(string(readme))
 	if len(install) != 2 {
 		t.Fatal("README lacks the public installation command")
 	}
