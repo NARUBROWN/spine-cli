@@ -526,7 +526,7 @@ CLI의 Preview, RC, Production 전환과 공개 설치 검증은 [릴리스 운�
 
 `input.Path[T]`, `input.Query[T]`, `input.Body[T]`의 payload와 입력 키를 정적 계약과 OpenAPI에 반영합니다. Query의 기본 lowerCamel 이름은 명시 source 태그보다 우선하지 않습니다. 수동 검증 규칙과 동적 응답 상태는 추측하지 않습니다.
 
-각 경로 변수에는 `input.Path[int64]`, `input.Path[string]`처럼 기본 스칼라 또는 타입 별칭을 라우트 순서대로 하나씩 선언합니다. Context, Query와 Body 인자는 경로 순서에서 제외합니다. 정적 분석은 경로 키의 수와 중복, 고정 크기 정수의 범위를 검사합니다. `int`, `uint`, `uintptr`의 플랫폼별 범위는 추측하지 않고 `x-spine-platform-range-unresolved`로 표시합니다. 단일 스칼라 Path는 코어 `v0.7.0-preview.8` 이상, 다중 스칼라 Path는 `v0.7.0-preview.9` 이상을 요구합니다. 교체된 코어나 지원 여부를 확인할 수 없는 버전에는 경고를 표시하므로 실제 코어 동작을 확인하세요. `--warnings-as-errors`는 이 경고도 오류로 처리합니다.
+각 경로 변수에는 `input.Path[int64]`, `input.Path[string]`처럼 기본 스칼라 또는 타입 별칭을 라우트 순서대로 하나씩 선언합니다. Context, Query와 Body 인자는 경로 순서에서 제외합니다. 정적 분석은 경로 키의 수와 중복, 고정 크기 정수의 범위를 검사합니다. `int`, `uint`, `uintptr`의 플랫폼별 범위는 추측하지 않고 `x-spine-platform-range-unresolved`로 표시합니다. 단일 스칼라 Path는 코어 `v0.7.0-preview.8` 이상, 다중 스칼라 Path는 실제 수정이 포함된 `v0.7.1` 이상을 요구합니다. 교체된 코어나 지원 여부를 확인할 수 없는 버전에는 경고를 표시하므로 실제 코어 동작을 확인하세요. `--warnings-as-errors`는 이 경고도 오류로 처리합니다.
 
 새 컨트롤러의 `--source runtime` 내보내기는 Prepare를 자동 실행하지 않습니다. 수집 전에는 명시적 오류와 정적 내보내기 안내를 반환합니다. 실제 준비가 필요한 앱에서는 호출자가 `spine.DescribePreparedHTTP`를 사용합니다.
 

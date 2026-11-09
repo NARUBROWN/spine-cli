@@ -20,9 +20,9 @@ import (
 const (
 	contractSchemaVersion        = "spine.contract/v1alpha2"
 	scalarPathMinimum            = "v0.7.0-preview.8"
-	multiScalarPathMinimum       = "v0.7.0-preview.9"
+	multiScalarPathMinimum       = "v0.7.1"
 	scalarPathUnsupportedMaximum = "v0.7.0-preview.7"
-	multiPathUnsupportedMaximum  = "v0.7.0-preview.8"
+	multiPathUnsupportedMaximum  = "v0.7.0"
 )
 
 type applicationContract struct {
