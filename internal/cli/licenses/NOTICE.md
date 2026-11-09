@@ -5,6 +5,11 @@ Spine CLI statically includes the following Go modules. Their license texts are 
 | Module | Version | License file |
 | --- | --- | --- |
 | `github.com/evanw/esbuild` | `v0.28.2` | `esbuild-MIT.txt` |
+| `github.com/gofrs/flock` | `v0.12.1` | `flock.txt` |
+| `github.com/zalando/go-keyring` | `v0.2.6` | `go-keyring.txt` |
+| `al.essio.dev/pkg/shellescape` | `v1.5.1` | `shellescape.txt` |
+| `github.com/godbus/dbus/v5` | `v5.1.0` | `dbus.txt` |
+| `github.com/danieljoos/wincred` | `v1.2.2` | `wincred.txt` |
 | `golang.org/x/mod` | `v0.30.0` | `x-mod-BSD-3-Clause.txt` |
 | `golang.org/x/sync` | `v0.17.0` | `x-sync-BSD-3-Clause.txt` |
 | `golang.org/x/sys` | `v0.37.0` | `x-sys-BSD-3-Clause.txt` |

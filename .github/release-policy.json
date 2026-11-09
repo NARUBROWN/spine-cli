@@ -1,12 +1,12 @@
 {
   "schema_version": "spine-cli.release-policy/v1",
-  "next_version": "v0.4.3",
+  "next_version": "v0.4.4",
   "preview_hours": 72,
   "rc_hours": 24,
   "stable_interval_hours": 0,
   "approval_environment": "release-stable",
   "reviewer_login": "NARUBROWN",
-  "notes_path": "release/notes/v0.4.3.md",
+  "notes_path": "release/notes/v0.4.4.md",
   "recipe": {
     "id": "platform-contracts-preview",
     "modules": {

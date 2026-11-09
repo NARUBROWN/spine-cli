@@ -49,7 +49,7 @@ spine version
 
 ### 이번 Preview 설치
 
-컨트롤러 경로와 역할 표식 예제에는 CLI `v0.4.3-preview.8` 후보에 포함되는 기능이 필요합니다. 공개 발행 전에는 소스 조합으로 확인합니다. 해당 소스 체크아웃의 루트에서는 다음과 같이 설치합니다. 로컬 소스 설치본은 `0.4.3-dev`로 표시됩니다.
+컨트롤러 경로와 역할 표식 예제에는 CLI `v0.4.3-preview.8` 후보에 포함되는 기능이 필요합니다. 공개 발행 전에는 소스 조합으로 확인합니다. 해당 소스 체크아웃의 루트에서는 다음과 같이 설치합니다. 로컬 소스 설치본은 `0.4.4-dev`로 표시됩니다.
 
 ```sh
 go install ./cmd/spine
@@ -537,3 +537,7 @@ SPINE_CONTROLLER_CORE_SOURCE=/path/to/spine go test ./internal/cli -run TestCont
 ```
 
 이 검사는 로컬 소스 조합 검증이며 공개 태그 조합 검증을 대체하지 않습니다.
+
+## Spine Cloud 인증 미리보기
+
+`spine cloud auth login`으로 브라우저에서 일회용 코드를 승인하면 세션이 운영체제 자격 증명 저장소에 보관됩니다. `spine cloud auth status`로 현재 계정을 확인하고, `spine cloud auth logout`으로 현재 세션을 서버에서 폐기한 뒤 저장된 자격 증명을 삭제할 수 있습니다. 다른 기기의 세션은 유지됩니다. 인증에는 호환되는 Spine Cloud 서비스와 운영체제 자격 증명 저장소가 필요합니다.
