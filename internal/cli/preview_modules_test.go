@@ -27,7 +27,7 @@ func TestPreviewBranchMovementInvalidatesGenerationPlan(t *testing.T) {
 		return resolved, err
 	}
 	var out, errOut bytes.Buffer
-	args := []string{"sample", "--skip-install", "--json"}
+	args := []string{"sample", "--channel", "preview", "--skip-install", "--json"}
 	if code := runNew(append(args, "--dry-run"), &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
@@ -51,7 +51,7 @@ func TestPreviewResolutionFailureDoesNotPublishScaffold(t *testing.T) {
 	previewModuleResolver = resolvePreviewModules
 	t.Setenv("PATH", t.TempDir())
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"sample", "--skip-install", "--json"}, &out, &errOut); code != 3 || !strings.Contains(errOut.String(), "resolve Preview branches") {
+	if code := runNew([]string{"sample", "--channel", "preview", "--skip-install", "--json"}, &out, &errOut); code != 3 || !strings.Contains(errOut.String(), "resolve Preview branches") {
 		t.Fatalf("missing Go tool did not fail resolution: %d %s %s", code, out.String(), errOut.String())
 	}
 	if _, err := os.Stat("sample"); !os.IsNotExist(err) {

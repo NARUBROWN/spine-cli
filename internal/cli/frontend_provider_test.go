@@ -23,7 +23,7 @@ func TestNewWizardPromptsInProviderOrderAndSupportsCustomFrontendRoot(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.DependencyChannel != "preview" || options.Platform != "echo" || len(options.Events) != 0 || options.WebSocketPlatform != "none" || options.Validator != "none" || options.Frontend != "react" || options.FrontendRoot != "web" {
+	if options.DependencyChannel != "main" || options.Platform != "echo" || len(options.Events) != 0 || options.WebSocketPlatform != "none" || options.Validator != "none" || options.Frontend != "react" || options.FrontendRoot != "web" {
 		t.Fatalf("unexpected wizard selections: %#v", options)
 	}
 	positions := []int{

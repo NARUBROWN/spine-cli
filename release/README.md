@@ -16,7 +16,7 @@ RC 발행 검증은 `.github/release-policy.json`의 `rc_cohort`에 기록된 �
 
 Preview와 RC는 `vX.Y.Z-preview.N`, `vX.Y.Z-rc.N`, 정식은 `vX.Y.Z` 태그를 사용합니다. 일반 설치의 `@latest`는 정식 버전을 우선합니다. [Go 버전 선택](https://go.dev/ref/mod#version-queries)
 
-Preview 기본 생성은 `platform-contracts-preview` 레시피로 각 Spine 모듈의 `@preview`를 조회합니다. 발행 계획은 조회 조건과 해석된 고정 버전을 manifest에 함께 기록합니다. 검증 중 브랜치가 이동해 계획과 생성 결과가 달라지면 발행을 중단하고 새 계획으로 다시 검증합니다.
+새 프로젝트는 기본 `main` 채널에서 공개 정식 버전을 선택합니다. `preview` 채널을 선택하면 `platform-contracts-preview` 레시피로 각 Spine 모듈의 `@preview`를 조회합니다. 발행 계획은 조회 조건과 해석된 고정 버전을 manifest에 함께 기록합니다. 검증 중 브랜치가 이동해 계획과 생성 결과가 달라지면 발행을 중단하고 새 계획으로 다시 검증합니다.
 
 CLI Preview 발행 전에 코어 후보를 발행하고 Echo, net/http, Gorilla WebSocket, Kafka, RabbitMQ, NATS와 playground validator의 공개 태그를 확인합니다. 플랫폼을 변경할 필요가 없다면 기존에 발행된 태그를 그대로 사용합니다. CLI는 태그와 소스 커밋, 실제 `@preview` 조회로 선택한 버전을 발행 계획에 각각 기록하고, 발행 검증 기록이 남아 있으면 출처와 체크섬도 확인합니다. 오래된 플랫폼의 검증 기록이 만료됐거나 없더라도 새로운 조합 검사를 통과하면 다시 발행할 필요가 없습니다. 코어 후보는 발행 검증 기록이 필요합니다.
 

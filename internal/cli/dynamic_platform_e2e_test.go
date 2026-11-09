@@ -80,7 +80,7 @@ func TestGeneratedDynamicPlatformE2E(t *testing.T) {
 		for _, platform := range []string{"echo", "none"} {
 			t.Run(layout+"/"+platform, func(t *testing.T) {
 				workspace := t.TempDir()
-				applyAssemblyPlan(t, binary, workspace, "new", "sample", "--module", "example.com/sample", "--layout", layout, "--platform", platform, "--event-platform", "events:"+eventProvider, "--validator", validatorProvider)
+				applyAssemblyPlan(t, binary, workspace, "new", "sample", "--module", "example.com/sample", "--channel", "preview", "--layout", layout, "--platform", platform, "--event-platform", "events:"+eventProvider, "--validator", validatorProvider)
 				project := filepath.Join(workspace, "sample")
 				contract := runE2E(binary, project, nil, "contract", "check", "--warnings-as-errors", "--json")
 				assertE2ESuccess(t, contract, "unregistered event and validator static contract")

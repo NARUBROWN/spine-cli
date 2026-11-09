@@ -94,7 +94,7 @@ func currentCommandSchema() commandSchema {
 			c.Options["depends"] = d
 		}
 		if c.Name == "new" {
-			c.Options["channel"] = optionDefinition{Type: "string", Enum: []string{"preview", "rc", "main"}, Description: "Dependency channel; defaults to preview, rc selects published RC or release tags, and main selects published release tags"}
+			c.Options["channel"] = optionDefinition{Type: "string", Enum: []string{"preview", "rc", "main"}, Description: "Dependency channel; defaults to main, rc selects published RC or release tags, and main selects published release tags"}
 			c.Options["platform"] = optionDefinition{Type: "string", Description: "HTTP provider or none; provider resolves from the selected dependency channel and metadata"}
 			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "[name:]provider resolves NARUBROWN/spine-<provider>-platform from the selected channel and spine-platform.json; environment prefix SPINE_<NAME>_"}
 			c.Options["websocket-platform"] = optionDefinition{Type: "string", Description: "WebSocket provider or none; provider requires HTTP and resolves platform metadata"}

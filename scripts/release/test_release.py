@@ -166,8 +166,9 @@ class ReleasePolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "정식 모듈"):
             release.make_plan(self.github, policy, "stable", self.base, self.base+"-rc.1", now=NOW)
 
-    def test_repository_preview_recipe_cannot_ship_as_stable_default(self):
+    def test_preview_recipe_cannot_ship_as_stable_default(self):
         policy = copy.deepcopy(REPOSITORY_POLICY)
+        policy["recipe"]["modules"]["github.com/NARUBROWN/spine"] = "preview"
         self.github.policy = policy
         with patch.object(release, "resolve_module_query", return_value="v0.7.0-preview.2"), patch.object(release, "upstream_evidence", return_value={}):
             plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
@@ -181,6 +182,7 @@ class ReleasePolicyTests(unittest.TestCase):
 
     def test_preview_branch_snapshot_changes_without_mutating_policy(self):
         policy = copy.deepcopy(REPOSITORY_POLICY)
+        policy["recipe"]["modules"]["github.com/NARUBROWN/spine"] = "preview"
         original = copy.deepcopy(policy)
         with patch.object(release, "resolve_module_query", return_value="v0.7.0-preview.2"):
             before = release.components(policy)
@@ -189,6 +191,12 @@ class ReleasePolicyTests(unittest.TestCase):
         self.assertNotEqual(before["recipe_sha256"], after["recipe_sha256"])
         self.assertEqual(policy, original)
         self.assertEqual(before["recipe"]["queries"], after["recipe"]["queries"])
+
+    def test_repository_release_recipe_uses_stable_dependencies(self):
+        release.validate_policy(REPOSITORY_POLICY)
+        modules = REPOSITORY_POLICY["recipe"]["modules"]
+        self.assertEqual(modules["github.com/NARUBROWN/spine"], "v0.7.1")
+        self.assertEqual(modules["github.com/NARUBROWN/spine-echo-platform"], "v0.2.0")
 
     def test_preview_query_rejects_wrong_paths_and_noncanonical_versions(self):
         path = "github.com/NARUBROWN/spine"

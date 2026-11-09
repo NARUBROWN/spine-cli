@@ -33,7 +33,7 @@ func checkExistingRecipeUpdate(t *testing.T, recipe, coreVersion, platformVersio
 	}
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"sample", "--module", "example.com/sample", "--websocket-platform", "gorilla", "--event-platform", "kafka", "--event-platform", "rabbitmq", "--skip-install"}, &out, &errOut); code != 0 {
+	if code := runNew([]string{"sample", "--module", "example.com/sample", "--channel", "preview", "--websocket-platform", "gorilla", "--event-platform", "kafka", "--event-platform", "rabbitmq", "--skip-install"}, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
 	if err := os.Chdir("sample"); err != nil {
