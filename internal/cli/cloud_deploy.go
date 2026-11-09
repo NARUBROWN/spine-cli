@@ -30,9 +30,10 @@ type cloudDeployResult struct {
 }
 
 type cloudDeploymentStatus struct {
-	ID        string  `json:"id"`
-	Status    string  `json:"status"`
-	PublicURL *string `json:"public_url"`
+	ID             string  `json:"id"`
+	Status         string  `json:"status"`
+	PublicURL      *string `json:"public_url"`
+	FailureMessage *string `json:"failure_message"`
 }
 
 func waitCloudDeployment(ctx context.Context, client *http.Client, api, appID, deploymentID, token string, interval time.Duration) (cloudDeploymentStatus, error) {
@@ -73,6 +74,16 @@ func waitCloudDeployment(ctx context.Context, client *http.Client, api, appID, d
 				}
 				return item, nil
 			case "failed":
+				if item.FailureMessage != nil {
+					switch *item.FailureMessage {
+					case "insufficient cpu capacity":
+						return empty, errors.New("deployment rejected: host CPU usage is above 80%; try again later")
+					case "insufficient memory capacity":
+						return empty, errors.New("deployment rejected: insufficient instance memory capacity; try again later")
+					case "capacity measurement unavailable":
+						return empty, errors.New("deployment rejected: host capacity could not be measured; try again later")
+					}
+				}
 				return empty, errors.New("deployment failed; check the dashboard for details")
 			case "uploading", "queued", "starting", "healthchecking", "publishing":
 			default:
@@ -257,9 +268,7 @@ func runDeploy(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(out, "Deployment %s submitted with status %s.\n", result.ID, result.Status)
-	if result.Status == "failed" {
-		return 1
-	}
+
 	waitCtx, waitCancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer waitCancel()
 	finished, err := waitCloudDeployment(waitCtx, client, api, appID, result.ID, session.AccessToken, 2*time.Second)
