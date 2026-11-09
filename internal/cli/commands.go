@@ -267,7 +267,7 @@ func runCompletion(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "usage: spine completion <powershell|bash|zsh>")
 		return 1
 	}
-	commands := "new update generate g dev run test check inspect explain verify contract doctor capabilities schema context build licenses completion cloud help version"
+	commands := "new update generate g dev run test check inspect explain verify contract doctor capabilities schema context build licenses completion cloud deploy help version"
 	switch args[0] {
 	case "powershell":
 		fmt.Fprintf(out, "Register-ArgumentCompleter -Native -CommandName spine -ScriptBlock { param($wordToComplete) '%s'.Split(' ') | Where-Object { $_ -like \"$wordToComplete*\" } }\n", commands)

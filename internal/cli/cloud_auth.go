@@ -62,6 +62,13 @@ func lockCloudSession(ctx context.Context) (func(), error) {
 }
 
 func runCloud(args []string, out, errOut io.Writer) int {
+	if len(args) == 3 && args[0] == "runtime" && args[1] == "start" {
+		if err := startCloudRuntime(args[2]); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return 0
+	}
 	usage := "Usage: spine cloud auth login|status|logout\n\nApprove a one-time code in your browser. Your session is stored in the system credential store.\n"
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) {
 		fmt.Fprint(out, usage)
