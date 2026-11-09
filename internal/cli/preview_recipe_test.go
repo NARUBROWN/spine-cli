@@ -43,7 +43,7 @@ func checkExistingRecipeUpdate(t *testing.T, recipe, coreVersion, platformVersio
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeE2EFile(t, "spine.toml", strings.ReplaceAll(string(config), currentAssemblyRecipe, recipe))
+	writeE2EFile(t, "spine.toml", removeDependencyChannelForLegacyFixture(strings.ReplaceAll(string(config), currentAssemblyRecipe, recipe)))
 	mod, err := os.ReadFile("go.mod")
 	if err != nil {
 		t.Fatal(err)
@@ -70,4 +70,14 @@ func checkExistingRecipeUpdate(t *testing.T, recipe, coreVersion, platformVersio
 			t.Fatalf("existing recipe module was lost: %s\n%s", module, mod)
 		}
 	}
+}
+
+func removeDependencyChannelForLegacyFixture(config string) string {
+	lines := []string{}
+	for _, line := range strings.Split(config, "\n") {
+		if !strings.HasPrefix(line, "dependency_channel = ") {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }

@@ -324,7 +324,7 @@ func TestUpdateWithoutRecipeKeepsStableEchoDependencies(t *testing.T) {
 			lines = append(lines, line)
 		}
 	}
-	writeE2EFile(t, "spine.toml", strings.Join(lines, "\n"))
+	writeE2EFile(t, "spine.toml", removeDependencyChannelForLegacyFixture(strings.Join(lines, "\n")))
 	writeE2EFile(t, "go.mod", "module example.com/todo\n\ngo 1.25.5\n\nrequire github.com/NARUBROWN/spine v0.5.2\n")
 	before, _ := os.ReadFile("internal/application/application.go")
 	plan, code := updateTestResult(t, "--dry-run")

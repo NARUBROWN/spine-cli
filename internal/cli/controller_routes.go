@@ -304,7 +304,7 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 		} else if parent.path == "" {
 			parent.path = "/"
 		}
-		if !s.groupOptions(function, call.Args[1:], &parent) {
+		if !s.routeOptions(function, call.Args[1:], &parent) {
 			return staticGroup{}, true, false
 		}
 		return parent, true, true
@@ -430,26 +430,7 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 					if controllerCallConditional(call, function.declaration.Body, parents, conditions) {
 						s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_CONDITIONAL", "Controller route is conditionally registered.", source)
 					}
-					if len(call.Args) != 3 {
-						s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_ARGUMENTS_INVALID", "Group route needs path, options and handler.", source)
-						return false
-					}
-					local := group
-					local = cloneStaticGroup(local)
-					options, ok := call.Args[1].(*ast.CallExpr)
-					if !ok {
-						s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Route options must be statically resolved.", source)
-						return false
-					}
-					optsel, ok := options.Fun.(*ast.SelectorExpr)
-					if !ok || optsel.Sel.Name != "Options" || !isAPISymbol(info.ObjectOf(optsel.Sel)) {
-						s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Route options must use api.Options.", source)
-						return false
-					}
-					if !s.groupOptions(function, options.Args, &local) {
-						return false
-					}
-					s.route(function, call, owner, method, source, &local)
+					s.route(function, call, owner, method, source, &group)
 					return false
 				}
 			}
@@ -541,12 +522,25 @@ func containsControllerIndex(indices []int, value int) bool {
 }
 
 func (s *controllerRouteInspector) route(function controllerFunction, call *ast.CallExpr, owner, method, source string, group *staticGroup) {
-	handlerIndex := 1
-	if group != nil {
-		handlerIndex = 2
-	}
 	if len(call.Args) < 2 {
-		s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_ARGUMENTS_INVALID", "Registry route needs a path and handler.", source)
+		s.inspector.controllerDiagnostic("CONTROLLER_ROUTE_ARGUMENTS_INVALID", "Route needs a path and handler.", source)
+		return
+	}
+	handlerIndex := 1
+	optionExpressions := call.Args[2:]
+	if group != nil && len(call.Args) >= 3 {
+		if legacy, ok := call.Args[1].(*ast.CallExpr); ok {
+			if selector, ok := legacy.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Options" && isAPISymbol(function.pkg.TypesInfo.ObjectOf(selector.Sel)) {
+				handlerIndex = 2
+				optionExpressions = legacy.Args
+			}
+		}
+	}
+	options := staticGroup{}
+	if group != nil {
+		options = cloneStaticGroup(*group)
+	}
+	if !s.routeOptions(function, optionExpressions, &options) {
 		return
 	}
 	pathValue := function.pkg.TypesInfo.Types[call.Args[0]].Value
@@ -613,18 +607,13 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 	}
 	s.inspector.controllerHandlers[key] = staticHandlerSignature{httpSource: callbackSource, httpFields: fields, httpResults: results, schemaSource: callbackSource.Path, returns: fieldTypes(callbackSource.Fset, results), source: source}
 	fake := &ast.CallExpr{Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", method)}, &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", path)}, call.Args[handlerIndex]}}
-	if group == nil {
-		fake.Args = append(fake.Args, call.Args[2:]...)
-	}
 	s.inspector.inspectHTTPCall(fake, function.pkg.Fset, source)
-	if group != nil {
-		r := &s.inspector.contract.HTTP[len(s.inspector.contract.HTTP)-1]
-		r.Tags = group.tags
-		r.Interceptors = append([]string(nil), group.interceptors...)
-		r.InterceptorSources = append([]string(nil), group.interceptorSources...)
-		r.Summary = group.summary
-		r.Description = group.description
-	}
+	r := &s.inspector.contract.HTTP[len(s.inspector.contract.HTTP)-1]
+	r.Tags = options.tags
+	r.Interceptors = append([]string(nil), options.interceptors...)
+	r.InterceptorSources = append([]string(nil), options.interceptorSources...)
+	r.Summary = options.summary
+	r.Description = options.description
 	s.inspector.contract.HTTP[len(s.inspector.contract.HTTP)-1].Handler = key
 	s.inspector.contract.HTTP[len(s.inspector.contract.HTTP)-1].delegatedMethod = delegatedMethod
 }
@@ -647,7 +636,7 @@ type staticGroup struct {
 	summary, description string
 }
 
-func (s *controllerRouteInspector) groupOptions(f controllerFunction, exprs []ast.Expr, group *staticGroup) bool {
+func (s *controllerRouteInspector) routeOptions(f controllerFunction, exprs []ast.Expr, group *staticGroup) bool {
 	for _, expr := range exprs {
 		call, ok := expr.(*ast.CallExpr)
 		if !ok {
@@ -660,11 +649,14 @@ func (s *controllerRouteInspector) groupOptions(f controllerFunction, exprs []as
 			return false
 		}
 		name := sel.Sel.Name
-		if !isAPISymbol(f.pkg.TypesInfo.ObjectOf(sel.Sel)) {
+		object := f.pkg.TypesInfo.ObjectOf(sel.Sel)
+		apiSymbol := isAPISymbol(object)
+		routeInterceptor := name == "WithInterceptors" && isRouteSymbol(object)
+		if !apiSymbol && !routeInterceptor {
 			s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Option is not from the Spine API package.", f.source.Path)
 			return false
 		}
-		if name == "Interceptors" {
+		if name == "Interceptors" || routeInterceptor {
 			if call.Ellipsis.IsValid() {
 				s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Expanded interceptor lists are not statically resolved.", f.source.Path)
 				return false
@@ -686,7 +678,7 @@ func (s *controllerRouteInspector) groupOptions(f controllerFunction, exprs []as
 			continue
 		}
 		if name != "Tags" && name != "Summary" && name != "Description" {
-			s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Unsupported group option: "+name, f.source.Path)
+			s.inspector.controllerDiagnostic("CONTROLLER_OPTIONS_UNRESOLVED", "Unsupported route option: "+name, f.source.Path)
 			return false
 		}
 		for _, arg := range call.Args {
@@ -726,6 +718,10 @@ func hasStaticGroup(groups map[types.Object]staticGroup, obj types.Object) bool 
 
 func isAPISymbol(obj types.Object) bool {
 	return obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == spineImportPath+"/pkg/api"
+}
+
+func isRouteSymbol(obj types.Object) bool {
+	return obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == spineImportPath+"/pkg/route"
 }
 
 func cloneStaticGroup(group staticGroup) staticGroup {

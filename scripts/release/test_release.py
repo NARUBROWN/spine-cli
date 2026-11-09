@@ -194,9 +194,23 @@ class ReleasePolicyTests(unittest.TestCase):
         for value in ({"Path": "example.com/other", "Version": "v0.7.0-preview.2"},
                       {"Path": path, "Version": "preview"},
                       {"Path": path, "Version": "v0.7.0-preview.2", "Replace": {"Path": "../spine"}}):
-            with self.subTest(value=value), patch.object(release, "run", return_value=json.dumps(value)):
+            with self.subTest(value=value), patch.object(
+                    release, "run", side_effect=["https://proxy.golang.org,direct", json.dumps(value)]):
                 with self.assertRaises(release.ReleaseError):
                     release.resolve_module_query(path, "preview")
+
+    def test_preview_query_bypasses_only_the_default_proxy(self):
+        path = "github.com/NARUBROWN/spine"
+        result = json.dumps({"Path": path, "Version": "v0.7.0-preview.2"})
+        cases = [
+            ("https://proxy.golang.org,direct", "direct"),
+            ("https://proxy.example.com,direct", "https://proxy.example.com,direct"),
+        ]
+        for proxy, expected in cases:
+            with self.subTest(proxy=proxy), patch.dict(os.environ, {"GOPROXY": proxy}), patch.object(
+                    release, "run", side_effect=[proxy, result]) as command:
+                self.assertEqual(release.resolve_module_query(path, "preview"), "v0.7.0-preview.2")
+                self.assertEqual(command.call_args_list[1].kwargs["env"]["GOPROXY"], expected)
 
     def test_preview_query_cannot_be_used_for_third_party_modules(self):
         policy = copy.deepcopy(REPOSITORY_POLICY)

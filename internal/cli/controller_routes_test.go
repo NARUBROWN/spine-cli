@@ -34,10 +34,10 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
  func Tags(...string)Option{return nil}; func Summary(string)Option{return nil};func Description(string)Option{return nil};func Interceptors(...any)Option{return nil}
  func (*Registry) Group(string,...Option)*Group{return nil}
  func (*Group) Group(string,...Option)*Group{return nil}
- func (*Group) GET(string,OptionSet,any){}
- func (*Group) POST(string,OptionSet,any){}
- func (*Registry) POST(string,any,...any){}
- func (*Registry) GET(string,any,...any){}
+ func (*Group) GET(...any){}
+ func (*Group) POST(...any){}
+ func (*Registry) POST(string,any,...Option){}
+ func (*Registry) GET(string,any,...Option){}
  `)
 	write("core/pkg/input/input.go", "package input\ntype Body[T any] *T\ntype Query[T any] *T\ntype Path[T any] *T\n")
 	write("core/pkg/httpx/httpx.go", "package httpx\ntype Response[T any] struct{Body T}\n")
@@ -48,7 +48,7 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
  "github.com/NARUBROWN/spine/pkg/httpx"
  )
  type DTO struct{Name string; UserID int}
- type PathDTO struct{ID int}
+ type PathDTO struct{ID int `+"`path:\"id\"`"+`}
  type Payload = input.Body[DTO]
  type Result = httpx.Response[DTO]
  type UserController struct{}
@@ -70,7 +70,7 @@ func TestControllerRoutesResolveTypedContractAndHelpersWithoutExecution(t *testi
 	inspector := controllerFixture(t, `
  func(c *UserController)RegisterRoutes(r *api.Registry){c.users(r)}
  func(c *UserController)users(r *api.Registry){
-  r.POST(endpoint,func(a Payload,p input.Path[PathDTO],q input.Query[DTO])(Result,error){return Result{Body:DTO{Name:a.Name}},nil})
+  r.POST(endpoint,func(a Payload,p *PathDTO,q input.Query[DTO])(Result,error){return Result{Body:DTO{Name:a.Name}},nil})
  }
  `)
 	inspector.inspectControllerRoutes()
@@ -123,7 +123,7 @@ func TestControllerRoutesRejectDynamicAndRecursiveRegistration(t *testing.T) {
 func TestControllerRoutesTrackRegistryVariableAndPackageHelper(t *testing.T) {
 	inspector := controllerFixture(t, `
  func(c *UserController)RegisterRoutes(r *api.Registry){var alias=r;registerUsers(c,alias)}
- func registerUsers(c *UserController,r *api.Registry){r.POST(endpoint,func(a Payload,p input.Path[PathDTO])(Result,error){return Result{},nil})}
+ func registerUsers(c *UserController,r *api.Registry){r.POST(endpoint,func(a Payload,p *PathDTO)(Result,error){return Result{},nil})}
  `)
 	inspector.inspectControllerRoutes()
 	inspector.resolveHandlerSignatures()
@@ -172,7 +172,7 @@ func TestControllerInputNameConformance(t *testing.T) {
 }
 
 func TestStaticGroupedRoutes(t *testing.T) {
-	inspector := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){ admin:=r.Group("/admin",api.Tags("Admin")); users:=admin.Group("/users",api.Tags("Users")); users.GET("/",api.Options(api.Summary("Find")),func(q input.Query[DTO])(Result,error){return Result{},nil}) }`)
+	inspector := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){ admin:=r.Group("/admin",api.Tags("Admin")); users:=admin.Group("/users",api.Tags("Users")); users.GET("/",func(q input.Query[DTO])(Result,error){return Result{},nil},api.Summary("Find")) }`)
 	inspector.inspectControllerRoutes()
 	inspector.resolveHandlerSignatures()
 	if len(inspector.contract.HTTP) != 1 || contractHasErrors(*inspector.contract) {
@@ -184,10 +184,56 @@ func TestStaticGroupedRoutes(t *testing.T) {
 	}
 }
 
+func TestStaticLegacyGroupedRouteOrderRemainsInspectable(t *testing.T) {
+	inspector := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){ users:=r.Group("/users",api.Tags("Users")); users.GET("/",api.Options(api.Summary("Find")),func()error{return nil}) }`)
+	inspector.inspectControllerRoutes()
+	if len(inspector.contract.HTTP) != 1 || contractHasErrors(*inspector.contract) {
+		t.Fatalf("routes=%+v diagnostics=%+v", inspector.contract.HTTP, inspector.contract.Diagnostics)
+	}
+	route := inspector.contract.HTTP[0]
+	if route.Path != "/users" || strings.Join(route.Tags, ",") != "Users" || route.Summary != "Find" {
+		t.Fatalf("route=%+v", route)
+	}
+}
+
+func TestStaticRegistryAndGroupShareRouteOptionOrder(t *testing.T) {
+	inspector := controllerFixture(t, `var direct any
+func(c *UserController)RegisterRoutes(r *api.Registry){
+r.GET("/direct",func()error{return nil},api.Tags("Direct"),api.Summary("Find"),api.Interceptors(direct))
+group:=r.Group("/group")
+group.GET("/",func()error{return nil},api.Tags("Grouped"))
+}`)
+	inspector.inspectControllerRoutes()
+	if len(inspector.contract.HTTP) != 2 || contractHasErrors(*inspector.contract) {
+		t.Fatalf("routes=%+v diagnostics=%+v", inspector.contract.HTTP, inspector.contract.Diagnostics)
+	}
+	directRoute, groupedRoute := inspector.contract.HTTP[0], inspector.contract.HTTP[1]
+	if directRoute.Path != "/direct" || strings.Join(directRoute.Tags, ",") != "Direct" || directRoute.Summary != "Find" || strings.Join(directRoute.Interceptors, ",") != "direct" {
+		t.Fatalf("direct route=%+v", directRoute)
+	}
+	if groupedRoute.Path != "/group" || strings.Join(groupedRoute.Tags, ",") != "Grouped" {
+		t.Fatalf("grouped route=%+v", groupedRoute)
+	}
+}
+
+func TestStaticRouteOptionsRejectUnrelatedWithInterceptors(t *testing.T) {
+	inspector := controllerFixture(t, `type localOptions struct{}
+func(localOptions)WithInterceptors(...any)api.Option{return nil}
+var local localOptions
+func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/",func()error{return nil},local.WithInterceptors(c))}`)
+	inspector.inspectControllerRoutes()
+	for _, diagnostic := range inspector.contract.Diagnostics {
+		if diagnostic.Code == "CONTROLLER_OPTIONS_UNRESOLVED" {
+			return
+		}
+	}
+	t.Fatalf("diagnostics=%+v", inspector.contract.Diagnostics)
+}
+
 func TestStaticGroupForwardingAndInterceptors(t *testing.T) {
 	inspector := controllerFixture(t, `var outer,inner,local any
 func(c *UserController)RegisterRoutes(r *api.Registry){ var users=r.Group("/users",api.Tags("Users"),api.Interceptors(outer)); register(users) }
-func register(g *api.Group){ var alias=g; nested:=alias.Group("/admin",api.Interceptors(inner)); nested.GET("/",api.Options(api.Interceptors(local)),func()error{return nil}) }`)
+func register(g *api.Group){ var alias=g; nested:=alias.Group("/admin",api.Interceptors(inner)); nested.GET("/",func()error{return nil},api.Interceptors(local)) }`)
 	inspector.inspectControllerRoutes()
 	if len(inspector.contract.HTTP) != 1 || contractHasErrors(*inspector.contract) {
 		t.Fatalf("routes=%+v diagnostics=%+v", inspector.contract.HTTP, inspector.contract.Diagnostics)
@@ -201,7 +247,7 @@ func register(g *api.Group){ var alias=g; nested:=alias.Group("/admin",api.Inter
 	}
 }
 func TestStaticGroupDynamicInterceptorDiagnosed(t *testing.T) {
-	inspector := controllerFixture(t, `func factory()any{return nil};func(c *UserController)RegisterRoutes(r *api.Registry){ users:=r.Group("/users",api.Interceptors(factory())); users.GET("/",api.Options(),func()error{return nil}) }`)
+	inspector := controllerFixture(t, `func factory()any{return nil};func(c *UserController)RegisterRoutes(r *api.Registry){ users:=r.Group("/users",api.Interceptors(factory())); users.GET("/",func()error{return nil}) }`)
 	inspector.inspectControllerRoutes()
 	for _, d := range inspector.contract.Diagnostics {
 		if d.Code == "CONTROLLER_OPTIONS_UNRESOLVED" {
@@ -212,7 +258,7 @@ func TestStaticGroupDynamicInterceptorDiagnosed(t *testing.T) {
 }
 
 func TestStaticGroupDynamicCompositeInterceptorDiagnosed(t *testing.T) {
-	inspector := controllerFixture(t, `type Config struct{ Value any };func factory()any{panic("must not run")};func(c *UserController)RegisterRoutes(r *api.Registry){ users:=r.Group("/users",api.Interceptors(&Config{Value:factory()})); users.GET("/",api.Options(),func()error{return nil}) }`)
+	inspector := controllerFixture(t, `type Config struct{ Value any };func factory()any{panic("must not run")};func(c *UserController)RegisterRoutes(r *api.Registry){ users:=r.Group("/users",api.Interceptors(&Config{Value:factory()})); users.GET("/",func()error{return nil}) }`)
 	inspector.inspectControllerRoutes()
 	for _, d := range inspector.contract.Diagnostics {
 		if d.Code == "CONTROLLER_OPTIONS_UNRESOLVED" {
@@ -239,13 +285,13 @@ func TestStaticGroupForwardingWithCoreCandidate(t *testing.T) {
  func(*auth)AfterCompletion(core.ExecutionContext,core.HandlerMeta,error){}
  var outer,inner,local = &auth{},&auth{},&auth{}
  func(c *UserController)RegisterRoutes(r *api.Registry){ var users=r.Group("/users",api.Tags("Users"),api.Interceptors(outer)); register(users) }
- func register(g *api.Group){var alias=g;nested:=alias.Group("/admin",api.Interceptors(inner));nested.GET("/",api.Options(api.Interceptors(local)),func(q input.Query[DTO])(Result,error){return Result{},nil})}
+	func register(g *api.Group){var alias=g;nested:=alias.Group("/admin",api.Interceptors(inner));nested.GET("/",func(q input.Query[DTO])(Result,error){return Result{},nil},route.WithInterceptors(local))}
  `)
 	source, err := os.ReadFile("controller.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source = []byte(strings.Replace(string(source), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api"`+"\n"+`"github.com/NARUBROWN/spine/core"`, 1))
+	source = []byte(strings.Replace(string(source), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api"`+"\n"+`"github.com/NARUBROWN/spine/core"`+"\n"+`"github.com/NARUBROWN/spine/pkg/route"`, 1))
 	if err = os.WriteFile("controller.go", source, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +323,7 @@ func TestStaticGroupForwardingWithCoreCandidate(t *testing.T) {
 func TestStaticGroupRecursiveAndDeferredAreDiagnosed(t *testing.T) {
 	cases := []struct{ name, body, code string }{
 		{"recursive", `func(c *UserController)RegisterRoutes(r *api.Registry){register(r.Group("/users"))};func register(g *api.Group){register(g)}`, "CONTROLLER_REGISTRATION_RECURSIVE"},
-		{"deferred", `func(c *UserController)RegisterRoutes(r *api.Registry){g:=r.Group("/users");f:=func(){g.GET("/",api.Options(),func()error{return nil})};f()}`, "CONTROLLER_REGISTRATION_DEFERRED_UNRESOLVED"},
+		{"deferred", `func(c *UserController)RegisterRoutes(r *api.Registry){g:=r.Group("/users");f:=func(){g.GET("/",func()error{return nil})};f()}`, "CONTROLLER_REGISTRATION_DEFERRED_UNRESOLVED"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -296,7 +342,7 @@ func TestStaticGroupRecursiveAndDeferredAreDiagnosed(t *testing.T) {
 func TestStaticGroupInlineForwarding(t *testing.T) {
 	inspector := controllerFixture(t, `var guard any
 func(c *UserController)RegisterRoutes(r *api.Registry){register(r.Group("/v1",api.Tags("API")).Group("/users",api.Interceptors(guard)))}
-func register(g *api.Group){g.GET("/",api.Options(),func()error{return nil})}`)
+func register(g *api.Group){g.GET("/",func()error{return nil})}`)
 	inspector.inspectControllerRoutes()
 	if len(inspector.contract.HTTP) != 1 || contractHasErrors(*inspector.contract) {
 		t.Fatalf("routes=%+v diagnostics=%+v", inspector.contract.HTTP, inspector.contract.Diagnostics)
@@ -308,7 +354,7 @@ func register(g *api.Group){g.GET("/",api.Options(),func()error{return nil})}`)
 }
 
 func TestStaticGroupDynamicArgumentIsDiagnosed(t *testing.T) {
-	inspector := controllerFixture(t, `func dynamic()*api.Group{return nil};func(c *UserController)RegisterRoutes(r *api.Registry){register(dynamic())};func register(g *api.Group){g.GET("/",api.Options(),func()error{return nil})}`)
+	inspector := controllerFixture(t, `func dynamic()*api.Group{return nil};func(c *UserController)RegisterRoutes(r *api.Registry){register(dynamic())};func register(g *api.Group){g.GET("/",func()error{return nil})}`)
 	inspector.inspectControllerRoutes()
 	for _, d := range inspector.contract.Diagnostics {
 		if d.Code == "CONTROLLER_GROUP_VALUE_UNRESOLVED" {

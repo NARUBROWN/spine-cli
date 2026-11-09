@@ -142,6 +142,8 @@ func runCommand(args []string, out, errOut io.Writer) int {
 		return runContext(args[1:], out, errOut)
 	case "build":
 		return runBuild(out, errOut)
+	case "licenses":
+		return runLicenses(args[1:], out, errOut)
 	case "completion":
 		return runCompletion(args[1:], out, errOut)
 	default:
@@ -155,7 +157,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, `Spine CLI - scaffold explicit, execution-centric Spine applications.
 
 Usage:
-  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform provider|none] [--event-platform [name:]provider ...] [--websocket-platform none|provider] [--validator none|provider] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
+  spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--channel preview|rc|main] [--platform provider|none] [--event-platform [name:]provider ...] [--websocket-platform none|provider] [--validator none|provider] [--frontend none|provider] [--frontend-root <path>] [--interactive|--no-interactive] [--skip-install] [--dry-run] [--json] [--if-match <hash>]
   spine update [--dry-run] [--if-match <hash>] [--json]
   spine g domain <[group/]name> [--field name:type]
   spine g dto <[group/]name> [--field name:type]
@@ -168,6 +170,7 @@ Usage:
   spine generate websocket <name> --path </path> --field message:string
   spine schema [--json]
   spine context [--json]
+  spine licenses
 
 Layout:
   New projects use layered-v1 role roots with optional nested groups.

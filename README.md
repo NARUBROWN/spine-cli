@@ -116,10 +116,11 @@ spine new nats-worker --platform none --event-platform events:nats
 
 | 옵션 | 값과 기본 동작 |
 | --- | --- |
+| `--channel` | `preview` (기본값), `rc`, `main`; 코어와 provider의 조회 채널을 선택하고 `spine.toml`에 저장 |
 | `--platform` | HTTP provider, `echo` (기본값), `none` (이벤트 플랫폼 필요) |
-| `--event-platform` | 반복 가능한 `[name:]provider`; `spine-<provider>-platform@preview` 조회 |
+| `--event-platform` | 반복 가능한 `[name:]provider`; 선택한 채널에서 `spine-<provider>-platform` 조회 |
 | `--websocket-platform` | WebSocket provider 또는 `none` (기본값), provider 선택 시 HTTP 필요 |
-| `--validator` | `none` (기본값) 또는 provider; `spine-validator-<provider>@preview` 조회 |
+| `--validator` | `none` (기본값) 또는 provider; 선택한 채널에서 `spine-validator-<provider>` 조회 |
 
 이벤트 이름은 `[a-z][a-z0-9_]*`이며 중복을 거부합니다. 같은 provider도 서로 다른 이름으로 등록할 수 있습니다.
 선택한 플랫폼과 검증기만 직접 의존성으로 추가하고, 메타데이터에 선언한 생성자의
@@ -139,7 +140,7 @@ NATS는 JetStream을 사용합니다. `SPINE_EVENTS_URLS` (쉼표로 구분), `S
 Core NATS pub/sub와 request/reply, 자동 DLQ는 생성 범위에 포함하지 않습니다.
 
 HTTP, WebSocket, 이벤트와 validator는 `NARUBROWN`의 저장소 명명 규칙과 선택 버전의 `spine-platform.json`으로 조회합니다.
-저장소나 Preview 브랜치를 찾지 못하면 조회 경로와 원인을 표시하고 프로젝트를 만들지 않습니다.
+저장소나 선택 채널의 버전을 찾지 못하면 조회 경로와 원인을 표시하고 프로젝트를 만들지 않습니다.
 새 provider의 설정과 생성자, 최소 Go 버전은 메타데이터로 읽으므로 CLI를 패치할 필요가 없습니다.
 기존 Kafka, RabbitMQ와 playground의 메타데이터 없는 버전은 호환 경로를 유지합니다.
 [메타데이터 형식과 조회 규칙](PLATFORMS.md)을 참고하세요. `--skip-install`도 메타데이터 조회를 위해 모듈을 캐시에 내려받을 수 있습니다.
@@ -155,7 +156,7 @@ WebSocket 앱은 `spine new chat --websocket-platform gorilla --validator playgr
 
 ### 공개 버전 레시피
 
-새 앱의 `platform-contracts-preview` 레시피는 코어와 선택한 Echo, Gorilla, Kafka, RabbitMQ, playground 모듈을 `@preview`로 조회합니다. 해석된 태그 또는 pseudo-version을 `go.mod`와 JSON 결과의 `target_modules`에 기록하고, 원래 조회 조건은 `module_queries`에 제공합니다. `spine update`도 이 레시피에서는 브랜치를 다시 조회합니다.
+새 앱의 `platform-contracts-preview` 레시피는 `dependency_channel`을 함께 기록합니다. 기본 `preview`는 코어와 선택한 provider의 `@preview` 브랜치를 조회하고, `rc`는 공개 RC 또는 더 높은 정식 태그, `main`은 공개 정식 태그만 선택합니다. 해석된 태그 또는 pseudo-version을 `go.mod`와 JSON 결과의 `target_modules`에 기록하고, 원래 조회 조건은 `module_queries`에 제공합니다. `spine update`도 저장된 채널을 유지합니다.
 
 `--dry-run` 이후 브랜치가 이동해 생성 또는 업데이트 내용이 바뀌면 기존 해시를 이용한 적용은 실패합니다. 새 계획을 검토한 뒤 적용하세요. 기존 `platform-contracts-v0.7.0-preview.1`, `platform-contracts-v0.7.0-preview.2`와 정식 `platform-contracts-v0.6.5` 앱은 레시피를 직접 바꾸기 전까지 기존 버전 조합을 유지합니다.
 
@@ -359,11 +360,12 @@ AsyncAPI의 채널과 operation 식별자는 원래 이름을
 | 명령 | 동작 |
 | --- | --- |
 | `spine dev` | 변경을 감지하고, 새 빌드가 성공한 경우에만 앱을 교체 |
-| `spine run` | `ENV=production`으로 빌드하고 실행 |
+| `spine run` | 프론트를 production 빌드한 뒤 `ENV=production`으로 Go 앱을 빌드하고 실행 |
 | `spine test` | `go test ./...` 실행 |
 | `spine check` | gofmt 상태, `go vet`, `go test` 검사 |
 | `spine verify` | 정적 계약 검사 후 `spine check` 수행 |
-| `spine build` | `bin/<모듈명>`에 바이너리 생성 |
+| `spine build` | 프론트 production 산출물과 `bin/<모듈명>` 바이너리 생성 |
+| `spine licenses` | CLI에 포함된 제삼자 라이선스 고지 출력 |
 | `spine doctor` | 도구 체인, 설정, 정적 계약을 오프라인 진단 |
 | `spine completion <shell>` | bash, zsh, PowerShell completion 생성 |
 
@@ -371,10 +373,81 @@ AsyncAPI의 채널과 operation 식별자는 원래 이름을
 그 밖의 명령별 옵션은 실행 전에 오류로 처리합니다. 테스트 필터는 `go test ./... -run <이름>`으로
 직접 실행하세요.
 
-`run`은 매번 `go build`를 호출해 Go 자체의 빌드 캐시와 로컬 의존성 변경을 반영합니다.
-`dev`는 Go가 열거한 소스와 embed 파일, 모듈과 프로젝트 설정을 감시합니다. 일반 로그 기록은
-재시작 조건에서 제외하며 유효한 설정 변경 시 새 포트를 전달합니다. SIGTERM에서도 자식 앱을
-종료하고 회수합니다.
+`run`은 한 번의 명령 실행에서 production 프론트 번들과 Go 앱을 각각 한 번 빌드합니다. Go 빌드는
+Go 자체의 빌드 캐시와 로컬 의존성 변경을 반영합니다. `dev`는 Go 소스를 감시해 변경 시 앱을
+재빌드하고 재시작하며, 프론트 파일만 바뀌면 증분 번들만 교체합니다. 설정 파일 변경 시에는
+앱을 다시 빌드해 새 포트와 프론트 설정을 전달합니다. 일반 로그 기록은 재시작 조건에서 제외하며
+SIGTERM에서도 자식 앱을 종료하고 회수합니다.
+
+### React CSR 프론트엔드
+
+`spine new`를 터미널에서 실행하면 HTTP, event, WebSocket, validator, frontend 순서로 선택합니다.
+번호와 이름 검색을 지원하며 `목록에 없음`을 고른 뒤 provider 이름을 입력할 수 있습니다.
+비대화형 환경에서 `--interactive`로 질문을 켜거나 `--no-interactive`로 끌 수 있습니다.
+
+React CSR provider는 내장되어 있습니다. 기본 경로는 `frontend`이며 `spine new`에서 다른
+`--frontend-root`를 지정할 수 있습니다. 기존 프로젝트에서는 `spine.toml`의 `frontend_root`로
+경로를 정합니다. React 엔트리는 `<frontend_root>/src/main.tsx`, `.jsx`, `.ts`, `.js` 순서로
+감지합니다. `<frontend_root>/index.html`은 선택 사항이며, 없으면 `#root`가 있는 기본 HTML을
+만듭니다. 프론트 의존성은 프로젝트에서 설치해야 합니다. CLI는 npm 패키지를 설치하지 않으며
+TypeScript 타입 검사는 수행하지 않습니다.
+
+```toml
+frontend_enabled = true
+frontend_provider = "react"
+frontend_root = "frontend"
+frontend_entry = "src/main.tsx" # 선택 사항, 자동 감지 경로를 바꿀 때 사용
+frontend_output = "bin/frontend"
+frontend_api_prefix = "/api"
+```
+
+기존 프로젝트에서 frontend 설정을 생략하면 조립 코드가 Echo 또는 `net/http` provider를 직접
+사용하는 경우에만 `frontend` 경로에서 React entry를 자동 감지합니다.
+`spine new`에서 frontend를 사용하지 않으면 `frontend_enabled = false`를 기록해 이후 파일 추가가
+자동으로 연결되지 않게 합니다. 기존 자동 감지를 끄려면 같은 설정을 직접 추가하세요.
+
+설정 키는 모두 선택 사항입니다. 기본 frontend 설정은 `frontend_provider = "react"`,
+`frontend_root = "frontend"`,
+`frontend_output = "bin/frontend"`, `frontend_api_prefix = "/api"`입니다. 엔트리를 자동 감지하지
+못했으면 `frontend_entry`를 지정하세요. 빌드 결과는 같은 HTTP listener에서 제공합니다. 기존
+Echo 및 `net/http` 플랫폼 라우트가 먼저 처리되고, 정적 파일과 확장자가 없는 HTML 경로는 앱의
+404 뒤에 제공됩니다. API가 설정한 prefix 밖에 있고 HTML 요청에 404를 반환하면 SPA 경로로
+판정될 수 있습니다. 존재하지 않는 확장자 파일은 404를 유지합니다.
+
+목록에 없는 frontend provider는 이름으로 Go module 경로를 만듭니다.
+`<provider>`는 소문자로 시작하고 영문 소문자, 숫자, 하이픈, 밑줄로 구성합니다. `solid`라면
+`github.com/NARUBROWN/spine-frontend-solid@preview`에서
+`spine-frontend.json`을 읽습니다. 이 규약은 전체 registry를 검색하지 않으며, provider 이름으로
+정해지는 module 경로를 조회합니다. provider 저장소의 JSON은 다음 형식입니다.
+
+```json
+{
+  "schema_version": "spine.frontend/v1",
+  "provider": "solid",
+  "framework": "Solid",
+  "engine": "esbuild",
+  "jsx": "automatic",
+  "jsx_import_source": "solid-js",
+  "entry_candidates": ["src/main.tsx", "src/main.ts"],
+  "loaders": {".js": "jsx"},
+  "npm_dependencies": {"solid-js": "1.9.9"},
+  "starter_files": [
+    {"path": "index.html", "contents": "<!doctype html><div id=\"root\"></div>"},
+    {"path": "src/main.tsx", "contents": "// provider starter"}
+  ]
+}
+```
+
+`engine`은 `esbuild`여야 합니다. provider module은 실행하지 않습니다. CLI는 선언된 entry,
+loader, npm dependency와 시작 파일만 사용하며, 생성 프로젝트의
+`<frontend_root>/spine-frontend.json`에는 `starter_files`를 제외한 빌드 설정을 저장합니다.
+시작 파일은 상대 경로만 허용하고 총 크기는 1 MiB 이하이며 `index.html`과 entry 후보 하나를
+포함해야 합니다.
+
+`spine dev`는 esbuild 증분 context를 유지하고 프론트 변경만 재빌드하므로 Go 앱을 재시작하지
+않습니다. `spine run`과 `spine build`는 최적화된 번들을 한 번 생성합니다. 빌드 결과에는 번들
+패키지의 사용 가능한 LICENSE 파일을 모은 `THIRD-PARTY-LICENSES.txt`와 esbuild가 연결한 법적
+주석이 포함됩니다. `spine licenses`는 esbuild를 포함한 CLI Go 의존성의 라이선스 전문을 출력합니다.
 
 ## 프로젝트 설정
 
@@ -391,6 +464,7 @@ recipe = "platform-contracts-preview"
 validator = "none"
 websocket_platform = "none"
 # 이벤트 선택 시 예: event_platforms = ["events:kafka", "jobs:rabbitmq"]
+# React CSR 사용 시 선택 설정은 위 React CSR 프론트엔드 절을 참고하세요.
 ```
 
 `module`은 `go.mod`의 module path와 같아야 합니다.
@@ -450,9 +524,9 @@ CLI의 Preview, RC, Production 전환과 공개 설치 검증은 [릴리스 운�
 
 정적 검사는 실제 Go 타입으로 인터페이스 구현, DI 반환 타입, 상수 경로와 Registry를 전달하는 보조 호출을 해석합니다. 함수 리터럴의 업무 코드를 등록 코드로 실행하지 않으며 생성자와 init도 실행하지 않습니다. 동적 경로와 함수 값, 재귀 및 미확정 조건은 분석 불완전으로 진단합니다. 선택한 core의 pkg/api와 의존성이 설치돼 있어야 합니다.
 
-`input.Path[T]`, `input.Query[T]`, `input.Body[T]`의 payload와 입력 키를 정적 계약과 OpenAPI에 반영합니다. Path와 Query의 기본 lowerCamel 이름은 명시 source 태그보다 우선하지 않습니다. 수동 검증 규칙과 동적 응답 상태는 추측하지 않습니다.
+`input.Path[T]`, `input.Query[T]`, `input.Body[T]`의 payload와 입력 키를 정적 계약과 OpenAPI에 반영합니다. Query의 기본 lowerCamel 이름은 명시 source 태그보다 우선하지 않습니다. 수동 검증 규칙과 동적 응답 상태는 추측하지 않습니다.
 
-단일 경로 변수에는 `input.Path[int64]`처럼 기본 스칼라와 타입 별칭을 사용할 수 있습니다. 정적 분석은 경로 키의 수와 중복, 고정 크기 정수의 범위를 검사합니다. `int`, `uint`, `uintptr`의 플랫폼별 범위는 추측하지 않고 `x-spine-platform-range-unresolved`로 표시합니다. 코어 `v0.7.0-preview.7` 이하는 스칼라 경로 입력을 지원하지 않아 오류로 거부합니다. 교체된 코어나 지원 여부를 확인할 수 없는 버전에는 경고를 표시하므로 실제 코어 동작을 확인하세요. `--warnings-as-errors`는 이 경고도 오류로 처리합니다.
+각 경로 변수에는 `input.Path[int64]`, `input.Path[string]`처럼 기본 스칼라 또는 타입 별칭을 라우트 순서대로 하나씩 선언합니다. Context, Query와 Body 인자는 경로 순서에서 제외합니다. 정적 분석은 경로 키의 수와 중복, 고정 크기 정수의 범위를 검사합니다. `int`, `uint`, `uintptr`의 플랫폼별 범위는 추측하지 않고 `x-spine-platform-range-unresolved`로 표시합니다. 단일 스칼라 Path는 코어 `v0.7.0-preview.8` 이상, 다중 스칼라 Path는 `v0.7.0-preview.9` 이상을 요구합니다. 교체된 코어나 지원 여부를 확인할 수 없는 버전에는 경고를 표시하므로 실제 코어 동작을 확인하세요. `--warnings-as-errors`는 이 경고도 오류로 처리합니다.
 
 새 컨트롤러의 `--source runtime` 내보내기는 Prepare를 자동 실행하지 않습니다. 수집 전에는 명시적 오류와 정적 내보내기 안내를 반환합니다. 실제 준비가 필요한 앱에서는 호출자가 `spine.DescribePreparedHTTP`를 사용합니다.
 
