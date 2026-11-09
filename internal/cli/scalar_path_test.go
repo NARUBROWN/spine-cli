@@ -106,7 +106,14 @@ func TestMultipleScalarPathsRequireSupportingCore(t *testing.T) {
 		code    string
 	}{
 		{"v0.7.0-preview.8", "HTTP_PATH_SCALAR_CORE_UNSUPPORTED"},
-		{multiScalarPathMinimum, ""},
+		{"v0.7.0-preview.9", "HTTP_PATH_SCALAR_CORE_UNSUPPORTED"},
+		{"v0.7.0-preview.13", "HTTP_PATH_SCALAR_CORE_UNSUPPORTED"},
+		{"v0.7.0-rc.1", "HTTP_PATH_SCALAR_CORE_UNSUPPORTED"},
+		{"v0.7.0", "HTTP_PATH_SCALAR_CORE_UNSUPPORTED"},
+		{"v0.7.1-preview.1", "HTTP_PATH_SCALAR_CORE_UNVERIFIED"},
+		{"v0.7.1-rc.1", "HTTP_PATH_SCALAR_CORE_UNVERIFIED"},
+		{"v0.7.1", ""},
+		{"v0.7.2", ""},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
 			inspector := controllerFixture(t, body)
