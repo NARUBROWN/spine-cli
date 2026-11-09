@@ -187,6 +187,35 @@ def verify(plan, query, work, env):
             execute(["go", "build", "-o", str(binary), "."], app, env)
             if case == "http":
                 health(binary, app, env)
+    rc_cohort = plan.get("rc_cohort")
+    if rc_cohort:
+        extra = ["--validator", "playground", "--websocket-platform", "gorilla",
+                 "--event-platform", "kafka", "--event-platform", "rabbitmq", "--event-platform", "nats"]
+        for layout in ("legacy", "layered-v1"):
+            for provider in ("echo", "nethttp"):
+                name = "rc-" + layout + "-" + provider
+                args = ["new", name, "--module", "example.com/" + name, "--layout", layout,
+                        "--channel", "rc", "--platform", provider, "--skip-install", *extra]
+                generated = envelope(cli, [*args, "--dry-run"], work, env)
+                envelope(cli, [*args, "--if-match", generated["base_hash"]], work, env)
+                app = work / name
+                config = tomllib.loads((app / "spine.toml").read_text(encoding="utf-8"))
+                if config.get("dependency_channel") != "rc":
+                    raise ReleaseError("생성 프로젝트가 RC 채널을 사용하지 않습니다")
+                expected = {path: version for path, version in rc_cohort.items()
+                            if path != "github.com/NARUBROWN/spine-" + ("nethttp" if provider == "echo" else "echo") + "-platform"}
+                mod = json.loads(execute(["go", "mod", "edit", "-json"], app, env))
+                required = direct_dependencies(mod)
+                if any(required.get(path) != version for path, version in expected.items()):
+                    raise ReleaseError("생성 프로젝트가 검증된 RC 조합을 선택하지 않았습니다")
+                execute(["go", "mod", "tidy"], app, env)
+                execute(["go", "mod", "verify"], app, env)
+                assert_modules(module_graph(execute(["go", "list", "-m", "-json", "all"], app, env)), expected)
+                for command in (["context"], ["contract", "check"], ["verify"]):
+                    envelope(cli, [*command, "--root", str(app)], work, env)
+                update = envelope(cli, ["update", "--root", str(app), "--dry-run"], work, env)
+                envelope(cli, ["update", "--root", str(app), "--if-match", update["base_hash"]], work, env)
+                assert_modules(module_graph(execute(["go", "list", "-m", "-json", "all"], app, env)), expected)
     report = {"result": "passed", "source_sha": plan["source_sha"], "query": query,
             "resolved_cli_version": resolved, "components": plan["components"],
             "os": {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}[platform.system()],
@@ -194,6 +223,9 @@ def verify(plan, query, work, env):
             "checks": ["public installation and build provenance", "two layouts and default HTTP composition",
                        "default recipe and selected public modules", "dry-run/if-match and source-preserving update",
                        "static contracts and generated tests", "HTTP health and listener release"]}
+    if rc_cohort:
+        report["rc_cohort"] = rc_cohort
+        report["rc_combination_checks"] = ["echo-full", "nethttp-full"]
     if plan.get("upstream_evidence") is not None:
         report["upstream_evidence"] = plan["upstream_evidence"]
         report["combination_checks"] = ["echo-full", "nethttp-full"]
