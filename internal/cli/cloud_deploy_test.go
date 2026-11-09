@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -94,5 +95,26 @@ func TestCloudDeployNoCredentialRedirect(t *testing.T) {
 	_, err := submitCloudArtifact(context.Background(), server.Client(), server.URL, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "sample-token", artifact)
 	if err == nil || called {
 		t.Fatal("redirect forwarded the deployment")
+	}
+}
+
+func TestCloudDeploymentCapacityRejections(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	for _, tc := range []struct{ reason, expected string }{
+		{"insufficient cpu capacity", "host CPU usage is above 80%"},
+		{"insufficient memory capacity", "insufficient instance memory capacity"},
+		{"capacity measurement unavailable", "host capacity could not be measured"},
+		{"other failure", "check the dashboard"},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode([]cloudDeploymentStatus{{ID: id, Status: "failed", FailureMessage: &tc.reason}})
+			}))
+			defer server.Close()
+			_, err := waitCloudDeployment(context.Background(), server.Client(), server.URL, id, id, "token", time.Millisecond)
+			if err == nil || !strings.Contains(err.Error(), tc.expected) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
