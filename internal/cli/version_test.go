@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildVersion(t *testing.T) {
-	for _, tag := range []string{"v0.4.3-preview.1", "v0.4.3-rc.2", "v0.4.3", "v0.4.3-0.20261103042116-77419ec0a2d2"} {
+	for _, tag := range []string{"v0.4.4-preview.1", "v0.4.3-preview.1", "v0.4.3-rc.2", "v0.4.3", "v0.4.3-0.20261103042116-77419ec0a2d2"} {
 		info := &debug.BuildInfo{Main: debug.Module{Path: "github.com/NARUBROWN/spine-cli", Version: tag}}
 		if got := versionFromBuildInfo(info, true); got != tag[1:] {
 			t.Errorf("installed %s reports %s", tag, got)
