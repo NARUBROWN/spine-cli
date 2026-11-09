@@ -1,5 +1,6 @@
 import copy
 import unittest
+from unittest.mock import patch
 
 import release
 
@@ -58,6 +59,9 @@ def fixtures():
 class UpstreamEvidenceTests(unittest.TestCase):
     def setUp(self):
         Dependency.data = fixtures()
+        resolver = patch.object(release, "resolve_module_query", side_effect=lambda module, query: Dependency.data[module].get("selected_version", Dependency.data[module]["tag"]))
+        resolver.start()
+        self.addCleanup(resolver.stop)
         self.recipe = {"modules": {release.CORE_MODULE: CORE,
                                     "github.com/NARUBROWN/spine-echo-platform": "v0.2.0-preview.1"}}
 
@@ -69,6 +73,14 @@ class UpstreamEvidenceTests(unittest.TestCase):
         self.assertEqual(set(result), set(release.UPSTREAM_MODULES))
         self.assertEqual(Dependency.data[release.CORE_MODULE]["requested_prefix"], "core-candidate-")
         self.assertIn("github.com/NARUBROWN/spine-nats-platform", result)
+
+    def test_records_preview_commit_separately_from_tag_evidence(self):
+        module = "github.com/NARUBROWN/spine-kafka-platform"
+        selected = "v0.2.0-preview.1.0.20261108124442-0628cf02bee1"
+        Dependency.data[module]["selected_version"] = selected
+        result = self.check()
+        self.assertEqual(result[module]["selected_version"], selected)
+        self.assertEqual(result[module]["version"], "v0.2.0-preview.1")
 
     def test_accepts_existing_platform_built_with_old_core(self):
         proof = Dependency.data["github.com/NARUBROWN/spine-nats-platform"]["proof"]
