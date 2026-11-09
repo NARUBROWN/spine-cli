@@ -17,7 +17,7 @@ func TestNewSkipInstallIsOfflineAndGuardsMode(t *testing.T) {
 	inTempDir(t)
 	t.Setenv("PATH", t.TempDir())
 	var out, errOut bytes.Buffer
-	args := []string{"new", "inventory", "--module", "example.com/inventory", "--skip-install"}
+	args := []string{"new", "inventory", "--module", "example.com/inventory", "--channel", "preview", "--skip-install"}
 	if code := Run(append(append([]string{}, args...), "--dry-run", "--json"), &out, &errOut); code != 0 {
 		t.Fatalf("offline plan: %d %s", code, errOut.String())
 	}
@@ -62,7 +62,8 @@ func TestNewFailuresHaveSamePlainAndJSONCodes(t *testing.T) {
 		code int
 	}{
 		{[]string{"new", "--skip-install"}, 2},
-		{[]string{"new", "sample", "--platform", "unknown"}, 2},
+		{[]string{"new", "sample", "--platform", "bad/name"}, 2},
+		{[]string{"new", "sample", "--platform", "unknown"}, 3},
 		{[]string{"new", "sample", "--force"}, 2},
 		{[]string{"new", "existing", "--skip-install"}, 4},
 		{[]string{"new", "sample", "--skip-install", "--if-match", "wrong"}, 4},
@@ -108,7 +109,7 @@ func TestPlatformCompositionFormsAndAdapterDiagnostics(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			inTempDir(t)
 			var out, errOut bytes.Buffer
-			if code := runNew([]string{"todo", "--module", "example.com/todo", "--skip-install"}, &out, &errOut); code != 0 {
+			if code := runNew([]string{"todo", "--module", "example.com/todo", "--channel", "preview", "--skip-install"}, &out, &errOut); code != 0 {
 				t.Fatal(errOut.String())
 			}
 			if err := os.Chdir("todo"); err != nil {
@@ -257,7 +258,7 @@ func TestPlatformGoHonorsSavedConfigurationAndClearsSavedFlags(t *testing.T) {
 func TestDoctorAndContextExposeSelectedAdapter(t *testing.T) {
 	layeredProject(t)
 	report := inspectDoctorReport()
-	if !report.OK || report.HTTPAdapter == nil || report.HTTPAdapter.Provider != "echo" || selectedModuleVersion(report.HTTPAdapter.SelectedModules, echoPlatformPath) != echoPlatformVersion {
+	if !report.OK || report.HTTPAdapter == nil || report.HTTPAdapter.Provider != "echo" || selectedModuleVersion(report.HTTPAdapter.SelectedModules, echoPlatformPath) != previewPlatformVersion {
 		t.Fatalf("doctor lost adapter metadata: %+v", report)
 	}
 	var out, errOut bytes.Buffer

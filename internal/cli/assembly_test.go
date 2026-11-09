@@ -13,8 +13,8 @@ func TestAssemblyArgumentsAndPlanIsolation(t *testing.T) {
 	inTempDir(t)
 	t.Setenv("PATH", t.TempDir())
 	for _, options := range [][]string{
-		{"--platform", "none"}, {"--event-platform", "unknown"}, {"--event-platform", "events:kafka", "--event-platform", "events:rabbitmq"},
-		{"--event-platform", "bad-name:kafka"}, {"--validator", "unknown"}, {"--event-platform"}, {"--validator"},
+		{"--platform", "none"}, {"--event-platform", "bad/name"}, {"--event-platform", "events:kafka", "--event-platform", "events:rabbitmq"},
+		{"--event-platform", "bad-name:kafka"}, {"--validator", "bad/name"}, {"--event-platform"}, {"--validator"},
 	} {
 		var out, errOut bytes.Buffer
 		if code := Run(append([]string{"new", "sample", "--skip-install", "--json"}, options...), &out, &errOut); code != 2 {
@@ -22,12 +22,13 @@ func TestAssemblyArgumentsAndPlanIsolation(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{
-		{"new", "sample", "--skip-install", "--event-platform", "kafka", "--validator", "playground"},
-		{"new", "sample", "--skip-install", "--platform", "none", "--event-platform", "rabbitmq"},
+		{"new", "sample", "--channel", "preview", "--skip-install", "--event-platform", "kafka", "--validator", "playground"},
+		{"new", "sample", "--channel", "preview", "--skip-install", "--platform", "none", "--event-platform", "rabbitmq"},
+		{"new", "sample", "--channel", "preview", "--skip-install", "--platform", "none", "--event-platform", "events:nats"},
 	} {
 		var out, errOut bytes.Buffer
 		if code := Run(append(append([]string{}, args...), "--dry-run", "--json"), &out, &errOut); code != 0 {
-			t.Fatalf("offline plan: %d %s", code, errOut.String())
+			t.Fatalf("resolved scaffold plan: %d %s", code, errOut.String())
 		}
 		var plan struct {
 			Schema string `json:"schema_version"`
@@ -49,7 +50,7 @@ func TestAssemblyArgumentsAndPlanIsolation(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(".")
 	if len(entries) != 0 {
-		t.Fatalf("offline failed plans wrote files: %v", entries)
+		t.Fatalf("failed plans wrote destination files: %v", entries)
 	}
 }
 
@@ -76,7 +77,7 @@ func TestAssemblyStaticDiagnosticsAndSemanticDrift(t *testing.T) {
 	}
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"sample", "--module", "example.com/sample", "--skip-install", "--event-platform", "kafka", "--event-platform", "rabbitmq"}, &out, &errOut); code != 0 {
+	if code := runNew([]string{"sample", "--module", "example.com/sample", "--channel", "preview", "--skip-install", "--event-platform", "kafka", "--event-platform", "rabbitmq"}, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
 	if err := os.Chdir("sample"); err != nil {

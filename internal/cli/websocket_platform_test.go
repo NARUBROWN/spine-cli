@@ -10,7 +10,15 @@ import (
 
 func TestReleaseRecipeDoesNotChangeLegacyPins(t *testing.T) {
 	options := newProjectOptions{Platform: "echo", WebSocketPlatform: "gorilla", Events: []eventPlatformSpec{{Name: "events", Provider: "kafka"}}, Validator: "none"}
-	stable := currentAssemblyModules(options)
+	preview := previewAssemblyModules(options, currentAssemblySpineVersion)
+	if selectedModuleVersion(preview, spineImportPath) != "v0.7.0-preview.2" || selectedModuleVersion(preview, echoPlatformPath) != "v0.2.0-preview.1" || selectedModuleVersion(preview, gorillaPlatformPath) != "v0.2.0-preview.1" {
+		t.Fatalf("preview recipe: %+v", preview)
+	}
+	previousPreview := previewAssemblyModules(options, preview1AssemblySpineVersion)
+	if selectedModuleVersion(previousPreview, spineImportPath) != "v0.7.0-preview.1" || selectedModuleVersion(previousPreview, echoPlatformPath) != "v0.2.0-preview.1" {
+		t.Fatalf("Preview 1 recipe changed: %+v", previousPreview)
+	}
+	stable := stableAssemblyModules(options)
 	if selectedModuleVersion(stable, spineImportPath) != "v0.6.5" || selectedModuleVersion(stable, gorillaPlatformPath) != "v0.1.0" || selectedModuleVersion(stable, kafkaPlatformPath) != "v0.1.0" {
 		t.Fatalf("release recipe: %+v", stable)
 	}
@@ -29,14 +37,14 @@ func TestWebSocketSelectionPlanAndDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	inTempDir(t)
-	for _, args := range [][]string{{"--websocket-platform", "unknown"}, {"--websocket-platform"}, {"--platform", "none", "--event-platform", "kafka", "--websocket-platform", "gorilla"}} {
+	for _, args := range [][]string{{"--websocket-platform", "bad/name"}, {"--websocket-platform"}, {"--platform", "none", "--event-platform", "kafka", "--websocket-platform", "gorilla"}} {
 		var out, errOut bytes.Buffer
 		if code := Run(append([]string{"new", "invalid", "--skip-install", "--json"}, args...), &out, &errOut); code != 2 {
 			t.Fatalf("%v: %d %s", args, code, out.String())
 		}
 	}
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"sample", "--module", "example.com/sample", "--skip-install", "--websocket-platform", "gorilla"}, &out, &errOut); code != 0 {
+	if code := runNew([]string{"sample", "--module", "example.com/sample", "--channel", "preview", "--skip-install", "--websocket-platform", "gorilla"}, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
 	if err := os.Chdir("sample"); err != nil {
@@ -96,7 +104,7 @@ func TestWebSocketPlanCannotReuseDifferentSelection(t *testing.T) {
 	inTempDir(t)
 	t.Setenv("PATH", t.TempDir())
 	var out, errOut bytes.Buffer
-	if code := Run([]string{"new", "sample", "--skip-install", "--dry-run", "--json"}, &out, &errOut); code != 0 {
+	if code := Run([]string{"new", "sample", "--channel", "preview", "--skip-install", "--dry-run", "--json"}, &out, &errOut); code != 0 {
 		t.Fatal(code, errOut.String())
 	}
 	var plan struct {
@@ -109,7 +117,7 @@ func TestWebSocketPlanCannotReuseDifferentSelection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if code := Run([]string{"new", "sample", "--skip-install", "--websocket-platform", "gorilla", "--if-match", plan.Result.Hash, "--json"}, &out, &errOut); code != 4 {
+	if code := Run([]string{"new", "sample", "--channel", "preview", "--skip-install", "--websocket-platform", "gorilla", "--if-match", plan.Result.Hash, "--json"}, &out, &errOut); code != 4 {
 		t.Fatalf("changed selection reused reviewed plan: %d %s", code, out.String())
 	}
 	if _, err := os.Stat("sample"); !os.IsNotExist(err) {

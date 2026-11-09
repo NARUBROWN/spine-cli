@@ -54,7 +54,7 @@ func (*ProductController) Create(req *dto.CreateProductRequest) (httpx.Response[
 
 본문 DTO는 포인터로 받습니다. 성공 값은 `httpx.Response[T]`의 `Body`에 넣고, 상태 코드는 `Options.Status`로 지정합니다. 기본 상태는 200입니다. 파일과 리다이렉트에는 각각 `httpx.Binary`와 `httpx.Redirect`를 사용합니다. raw DTO, slice, string을 성공 값으로 직접 반환하면 기본 반환 핸들러가 처리하지 못합니다.
 
-실패는 `httperr.BadRequest` 같은 HTTP 오류를 `error`로 반환합니다. 예상하지 못한 일반 오류는 500으로 처리됩니다. `:id` 경로를 추가할 때는 `path.Int` 같은 값 인자를 사용합니다.
+실패는 `httperr.BadRequest` 같은 HTTP 오류를 `error`로 반환합니다. 예상하지 못한 일반 오류는 500으로 처리됩니다. Preview 코어에서 `:id` 경로를 추가할 때는 `ID int64` 필드에 `path:"id"` 태그를 붙인 별도 구조체를 정의하고 포인터 인자로 받습니다. query와 header 입력도 각각 별도 DTO로 받습니다.
 
 ## 3. 경로 등록과 검사
 

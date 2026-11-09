@@ -12,7 +12,7 @@ func TestExternalRegistrationNeverReportsACompleteContract(t *testing.T) {
 		t.Run(layout, func(t *testing.T) {
 			inTempDir(t)
 			var out, errOut bytes.Buffer
-			if code := runNew([]string{"todo", "--module", "example.com/todo", "--layout", layout, "--skip-install"}, &out, &errOut); code != 0 {
+			if code := runNew([]string{"todo", "--module", "example.com/todo", "--layout", layout, "--channel", "preview", "--skip-install"}, &out, &errOut); code != 0 {
 				t.Fatal(errOut.String())
 			}
 			if err := os.Chdir("todo"); err != nil {

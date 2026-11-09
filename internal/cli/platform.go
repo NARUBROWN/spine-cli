@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	nethttpPlatformPath  = "github.com/NARUBROWN/spine-nethttp-platform"
 	echoPlatformPath     = "github.com/NARUBROWN/spine-echo-platform"
 	echoPlatformVersion  = "v0.1.0"
 	platformSpineVersion = "v0.6.0"
@@ -24,10 +25,11 @@ const (
 )
 
 type selectedModule struct {
-	Path    string          `json:"path"`
-	Version string          `json:"version,omitempty"`
-	Dir     string          `json:"-"`
-	Replace *selectedModule `json:"replace,omitempty"`
+	Path     string          `json:"path"`
+	Version  string          `json:"version,omitempty"`
+	Dir      string          `json:"-"`
+	Indirect bool            `json:"indirect,omitempty"`
+	Replace  *selectedModule `json:"replace,omitempty"`
 }
 
 func goEnvironment(offline bool) []string {
@@ -57,10 +59,14 @@ func goEnvironment(offline bool) []string {
 }
 
 func platformGo(ctx context.Context, root string, offline bool, args ...string) ([]byte, error) {
+	return platformGoWithEnv(ctx, root, goEnvironment(offline), args...)
+}
+
+func platformGoWithEnv(ctx context.Context, root string, environment []string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", args...)
-	command.Dir, command.Env = root, goEnvironment(offline)
+	command.Dir, command.Env = root, environment
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {
@@ -163,15 +169,21 @@ func selectedModules(ctx context.Context, root string, offline bool) ([]selected
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	result := []selectedModule{}
 	for {
-		var module selectedModule
-		err := decoder.Decode(&module)
+		var listed struct {
+			Path, Version, Dir string
+			Replace            *selectedModule
+			Indirect           bool
+		}
+		err := decoder.Decode(&listed)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
-		if module.Path == spineImportPath || module.Path == echoPlatformPath || module.Path == "github.com/labstack/echo/v5" || module.Path == kafkaPlatformPath || module.Path == rabbitPlatformPath || module.Path == validatorPlatformPath || module.Path == gorillaPlatformPath {
+		module := selectedModule{Path: listed.Path, Version: listed.Version, Dir: listed.Dir, Replace: listed.Replace, Indirect: listed.Indirect}
+		kind, _ := platformModuleIdentity(module.Path)
+		if module.Path == spineImportPath || module.Path == echoPlatformPath || module.Path == "github.com/labstack/echo/v5" || kind != "" || module.Path == gorillaPlatformPath {
 			result = append(result, module)
 		}
 	}
@@ -206,7 +218,7 @@ func validateRecipeModules(modules, targets []selectedModule) error {
 		for _, target := range targets {
 			expected = expected || target.Path == module.Path
 		}
-		if !expected {
+		if !expected && !module.Indirect {
 			return fmt.Errorf("platform compatibility: unexpected platform module %s", module.Path)
 		}
 	}

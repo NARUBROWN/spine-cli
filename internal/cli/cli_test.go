@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/format"
@@ -631,7 +632,7 @@ func TestGenerateTypedVerticalSlice(t *testing.T) {
 		t.Fatalf("POST body signature missing from contract: %#v", post)
 	}
 	get := bindings["GET /order/:id"]
-	if len(get) != 1 || get[0].Binding != "path" || get[0].Key != "id" || get[0].Type != "path.Int" {
+	if len(get) != 1 || get[0].Binding != "path" || !get[0].SourceDTO || len(get[0].Keys) != 1 || get[0].Keys[0] != "id" || get[0].Type != "*OrderPath" {
 		t.Fatalf("GET path signature missing from contract: %#v", get)
 	}
 	openAPI, err := buildOpenAPIDocument(contract)
@@ -1289,6 +1290,12 @@ func TestContractSnapshotDiffAndExplain(t *testing.T) {
 	if err := os.WriteFile(modulePath, []byte(changed), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	controllerPath := filepath.Join("src", "orders", "orders_controller.go")
+	controller, err := os.ReadFile(controllerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeE2EFile(t, controllerPath, strings.Replace(string(controller), `path:"id"`, `path:"orderId"`, 1))
 	out.Reset()
 	errOut.Reset()
 	if code := runContract([]string{"diff"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "- http: GET /orders/:id") || !strings.Contains(errOut.String(), "+ http: GET /orders/:orderId") {
@@ -1505,6 +1512,30 @@ func TestLoadProjectConfig(t *testing.T) {
 	config, err := loadProjectConfig()
 	if err != nil || config.Module != "example.com/app" || config.Entrypoint != "./cmd/api" || config.Port != 3000 {
 		t.Fatalf("config = %#v, %v", config, err)
+	}
+}
+
+func TestNewDefaultChannelAndLegacyConfig(t *testing.T) {
+	options, err := parseNewOptions([]string{"example"})
+	if err != nil || options.DependencyChannel != "main" {
+		t.Fatalf("new project channel = %q, error = %v", options.DependencyChannel, err)
+	}
+	inTempDir(t)
+	contents := "module = \"example.com/app\"\nrecipe = \"platform-contracts-preview\"\n"
+	if err := os.WriteFile("spine.toml", []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := loadProjectConfig()
+	if err != nil || config.DependencyChannel != "preview" {
+		t.Fatalf("legacy project channel = %q, error = %v", config.DependencyChannel, err)
+	}
+}
+
+func TestDefaultChannelSelectsLatestRelease(t *testing.T) {
+	versions := []string{"v0.6.5", "v0.7.1", "v0.7.2-preview.1", "v0.7.2-rc.1"}
+	got, err := latestDependencyVersion(versions, defaultDependencyChannel)
+	if err != nil || got != "v0.7.1" {
+		t.Fatalf("latest release = %q, error = %v", got, err)
 	}
 }
 
@@ -1814,6 +1845,31 @@ func TestDependenciesRejectTestFilesWrongPackagesAndDuplicates(t *testing.T) {
 
 func inTempDir(t *testing.T) {
 	t.Helper()
+	previousResolver := previewModuleResolver
+	previousDescriptorResolver := platformDescriptorResolver
+	platformDescriptorResolver = func(_ context.Context, kind, provider string, _ selectedModule, _ bool) (*platformDescriptor, error) {
+		if kind == "event" && provider == "nats" {
+			return testNATSDescriptor()
+		}
+		if descriptor := legacyPlatformDescriptor(kind, provider); descriptor != nil {
+			return descriptor, nil
+		}
+		return nil, fmt.Errorf("platform metadata not found: %s", provider)
+	}
+	t.Cleanup(func() { platformDescriptorResolver = previousDescriptorResolver })
+	previewModuleResolver = func(_ context.Context, targets []selectedModule) ([]selectedModule, error) {
+		resolved := append([]selectedModule(nil), targets...)
+		for index := range resolved {
+			if resolved[index].Version == "preview" {
+				resolved[index].Version = previewPlatformVersion
+				if resolved[index].Path == spineImportPath {
+					resolved[index].Version = currentAssemblySpineVersion
+				}
+			}
+		}
+		return resolved, nil
+	}
+	t.Cleanup(func() { previewModuleResolver = previousResolver })
 	previous, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1830,5 +1886,5 @@ func runLegacyNew(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	return runNew(append(args, "--layout", "legacy", "--skip-install"), out, errOut)
+	return runNew(append(args, "--layout", "legacy", "--channel", "preview", "--skip-install"), out, errOut)
 }

@@ -13,9 +13,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
-const contractSchemaVersion = "spine.contract/v1alpha2"
+const (
+	contractSchemaVersion        = "spine.contract/v1alpha2"
+	scalarPathMinimum            = "v0.7.0-preview.8"
+	multiScalarPathMinimum       = "v0.7.1"
+	scalarPathUnsupportedMaximum = "v0.7.0-preview.7"
+	multiPathUnsupportedMaximum  = "v0.7.0"
+)
 
 type applicationContract struct {
 	SchemaVersion    string                    `json:"schema_version"`
@@ -39,6 +47,10 @@ type applicationContract struct {
 }
 
 type contractRegistration struct {
+	Role         string `json:"role,omitempty"`
+	Output       string `json:"output,omitempty"`
+	object       bool
+	typedTarget  string
 	Target       string   `json:"target"`
 	Scope        string   `json:"scope,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
@@ -46,14 +58,19 @@ type contractRegistration struct {
 }
 
 type httpRegistration struct {
-	schemaSource string
-	Method       string             `json:"method"`
-	Path         string             `json:"path"`
-	Handler      string             `json:"handler"`
-	Interceptors []string           `json:"interceptors,omitempty"`
-	Parameters   []handlerParameter `json:"parameters,omitempty"`
-	Returns      []string           `json:"returns,omitempty"`
-	Source       string             `json:"source"`
+	delegatedMethod    string
+	schemaSource       string
+	Method             string             `json:"method"`
+	Path               string             `json:"path"`
+	Handler            string             `json:"handler"`
+	Tags               []string           `json:"tags,omitempty"`
+	Summary            string             `json:"summary,omitempty"`
+	Description        string             `json:"description,omitempty"`
+	Interceptors       []string           `json:"interceptors,omitempty"`
+	InterceptorSources []string           `json:"interceptor_sources,omitempty"`
+	Parameters         []handlerParameter `json:"parameters,omitempty"`
+	Returns            []string           `json:"returns,omitempty"`
+	Source             string             `json:"source"`
 }
 
 type namedRegistration struct {
@@ -65,11 +82,28 @@ type namedRegistration struct {
 	Source       string             `json:"source"`
 }
 
+type handlerInputField struct {
+	description    string
+	example        any
+	hasExample     bool
+	invalidExample bool
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	source         string
+}
+
 type handlerParameter struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Binding string `json:"binding"`
-	Key     string `json:"key,omitempty"`
+	Payload       string              `json:"payload_type,omitempty"`
+	InputFields   []handlerInputField `json:"fields,omitempty"`
+	payloadSource string
+	scalarPath    bool
+	Name          string   `json:"name"`
+	Type          string   `json:"type"`
+	Binding       string   `json:"binding"`
+	Key           string   `json:"key,omitempty"`
+	Keys          []string `json:"keys,omitempty"`
+	SourceDTO     bool     `json:"source_dto,omitempty"`
+	Deprecated    bool     `json:"deprecated,omitempty"`
 }
 
 type resourceRegistration struct {
@@ -95,11 +129,12 @@ type contractDiagnostic struct {
 }
 
 type contractInspector struct {
-	contract  *applicationContract
-	module    string
-	seen      map[string]bool
-	qualified bool
-	sources   layoutSources
+	contract           *applicationContract
+	module             string
+	seen               map[string]bool
+	qualified          bool
+	sources            layoutSources
+	controllerHandlers map[string]staticHandlerSignature
 }
 
 func inspectApplication() (applicationContract, error) {
@@ -132,7 +167,21 @@ func inspectApplication() (applicationContract, error) {
 		inspector.inspectHTTPAdapter(config, file, fset, function, index)
 	}
 	inspector.resolveConstructorDependencies()
+	priorRoutes := len(inspector.contract.HTTP)
+	inspector.inspectControllerRoutes()
 	inspector.resolveHandlerSignatures()
+	if len(inspector.contract.HTTP) > priorRoutes {
+		diagnostics := inspector.contract.Diagnostics[:0]
+		for _, diagnostic := range inspector.contract.Diagnostics {
+			switch diagnostic.Code {
+			case "HTTP_ROUTE_DUPLICATE", "HTTP_ROUTE_AMBIGUOUS", "CONSUMER_DUPLICATE", "WEBSOCKET_DUPLICATE":
+				continue
+			}
+			diagnostics = append(diagnostics, diagnostic)
+		}
+		inspector.contract.Diagnostics = diagnostics
+		inspector.addDuplicateDiagnostics()
+	}
 	inspector.sort()
 	inspector.contract.Complete = !contractHasErrors(*inspector.contract)
 	return *inspector.contract, nil
@@ -206,7 +255,33 @@ func (i *contractInspector) inspectFile(file *ast.File, fset *token.FileSet, roo
 			case "Constructor":
 				registrationCall = true
 				for _, argument := range call.Args {
-					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: i.registrationExpression(argument, file, fset), Source: source})
+					role, value, marked := componentRoleArgument(argument, imports)
+					if marked {
+						if value == nil {
+							i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role markers require exactly one object prototype or Custom factory.", source)
+							continue
+						}
+						argument = value
+					}
+					target, object := i.objectConstructorTarget(argument, file, fset)
+					if !marked && object {
+						role = "Custom"
+					}
+					if !object {
+						target = i.registrationExpression(argument, file, fset)
+						if marked {
+							pkg := modulePackage(i.module, filepath.ToSlash(filepath.Dir(fset.Position(file.Package).Filename)))
+							target = qualifiedExpression(argument, imports, pkg, fset)
+						}
+					}
+					typedTarget := target
+					if !object && !marked && !i.qualified {
+						typedTarget = legacyFactoryTarget(argument, file, fset, i.module)
+					}
+					i.contract.Constructors = append(i.contract.Constructors, contractRegistration{Target: target, Source: source, Role: role, object: object, typedTarget: typedTarget})
+					if role != "" && role != "Custom" && !object {
+						i.controllerDiagnostic("COMPONENT_PROTOTYPE_UNRESOLVED", "Role markers require a statically known pointer-to-struct prototype; only Custom accepts factory functions.", source)
+					}
 				}
 				if packageName, importPath, ok := directResourceConstructor(call, imports, i.module); ok {
 					i.addResource(packageName, importPath, source)
@@ -446,6 +521,9 @@ func (i *contractInspector) resolveConstructorDependencies() {
 	})
 	for index := range i.contract.Constructors {
 		constructor := &i.contract.Constructors[index]
+		if constructor.object || constructor.Role != "" {
+			continue
+		}
 		matches := signatures[constructor.Target]
 		if len(matches) == 1 {
 			constructor.Dependencies = matches[0].dependencies
@@ -470,6 +548,9 @@ type staticHandlerSignature struct {
 
 func (i *contractInspector) resolveHandlerSignatures() {
 	signatures := map[string][]staticHandlerSignature{}
+	for key, signature := range i.controllerHandlers {
+		signatures[key] = []staticHandlerSignature{signature}
+	}
 	handlerSources := layoutSources{}
 	collect := func(path string, file *ast.File, fset *token.FileSet) {
 		source := &layoutSource{Path: path, File: file, Fset: fset, Package: filepath.ToSlash(filepath.Dir(path))}
@@ -536,7 +617,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		})
 	}
 
-	bindings := newHTTPBindingCatalog(i.module, handlerSources)
+	bindings := newHTTPBindingCatalog(i.module, handlerSources, selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, spineImportPath))
 	for index := range i.contract.HTTP {
 		route := &i.contract.HTTP[index]
 		matches := signatures[route.Handler]
@@ -544,18 +625,38 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			route.schemaSource = matches[0].schemaSource
 			parameters, diagnostics := bindings.parameters(matches[0].httpSource, matches[0].httpFields, route.Path, route.Handler)
 			route.Parameters = parameters
+			scalarPathCount := 0
+			for _, parameter := range parameters {
+				if parameter.scalarPath {
+					scalarPathCount++
+				}
+			}
+			if scalarPathCount > 0 {
+				var version string
+				replaced := false
+				for _, module := range i.contract.HTTPAdapter.SelectedModules {
+					if module.Path == spineImportPath {
+						version, replaced = module.Version, module.Replace != nil
+						break
+					}
+				}
+				minimum, unsupportedMaximum := scalarPathMinimum, scalarPathUnsupportedMaximum
+				feature := "scalar input.Path"
+				if scalarPathCount > 1 {
+					minimum, unsupportedMaximum = multiScalarPathMinimum, multiPathUnsupportedMaximum
+					feature = "multiple scalar input.Path arguments"
+				}
+				if !replaced && semver.IsValid(version) && semver.Compare(version, unsupportedMaximum) <= 0 {
+					diagnostics = append(diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_SCALAR_CORE_UNSUPPORTED", Message: "The selected Spine core version does not support " + feature + ".", Source: route.Source, Hint: "Use a core version at or above " + minimum + "."})
+				} else if replaced || !semver.IsValid(version) || semver.Compare(version, minimum) < 0 {
+					diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_PATH_SCALAR_CORE_UNVERIFIED", Message: "Support for " + feature + " in the selected Spine core has not been verified by static analysis.", Source: route.Source, Hint: "Confirm the selected core implements this path input contract before running the application."})
+				}
+			}
 			i.contract.Diagnostics = append(i.contract.Diagnostics, diagnostics...)
 			route.Returns = matches[0].returns
 			i.contract.Diagnostics = append(i.contract.Diagnostics, bindings.returns(matches[0].httpSource, matches[0].httpResults, route.Handler)...)
-			pathKeys := contractPathKeys(route.Path)
-			boundPathCount := 0
-			for _, parameter := range route.Parameters {
-				if parameter.Binding == "path" {
-					boundPathCount++
-				}
-			}
-			if boundPathCount != len(pathKeys) {
-				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_BINDING_MISMATCH", Message: fmt.Sprintf("route %s %s declares %d path keys but the handler binds %d", route.Method, route.Path, len(pathKeys), boundPathCount), Source: route.Source})
+			if err := validateHTTPPathBindings(route.Parameters, route.Path); err != nil {
+				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_BINDING_MISMATCH", Message: fmt.Sprintf("route %s %s: %v", route.Method, route.Path, err), Source: route.Source})
 			}
 		} else if len(matches) == 0 {
 			i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_HANDLER_SIGNATURE_UNRESOLVED", Message: "could not resolve handler signature " + route.Handler + " from project source", Source: route.Source})
@@ -1011,7 +1112,8 @@ func importPathsByAlias(file *ast.File) map[string]string {
 			continue
 		}
 		alias := filepath.Base(path)
-		if path == echoPlatformPath || path == kafkaPlatformPath || path == rabbitPlatformPath {
+		kind, _ := platformModuleIdentity(path)
+		if path == echoPlatformPath || kind == "event" {
 			alias = "platform"
 		}
 		if path == validatorPlatformPath {
@@ -1080,7 +1182,11 @@ func runInspect(args []string, out, errOut io.Writer) int {
 	for _, route := range contract.HTTP {
 		fmt.Fprintf(out, "  %s %-24s %s (%s)\n", route.Method, route.Path, route.Handler, route.Source)
 		for _, parameter := range route.Parameters {
-			fmt.Fprintf(out, "    %s %s -> %s %s\n", parameter.Name, parameter.Type, parameter.Binding, parameter.Key)
+			key := parameter.Key
+			if len(parameter.Keys) > 0 {
+				key = strings.Join(parameter.Keys, ",")
+			}
+			fmt.Fprintf(out, "    %s %s -> %s %s\n", parameter.Name, parameter.Type, parameter.Binding, key)
 		}
 		for _, interceptor := range route.Interceptors {
 			fmt.Fprintf(out, "    route interceptor: %s\n", interceptor)

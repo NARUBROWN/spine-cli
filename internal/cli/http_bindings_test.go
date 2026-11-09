@@ -14,7 +14,7 @@ func httpBindingProject(t *testing.T, layout, imports, declarations, parameters,
 	t.Helper()
 	inTempDir(t)
 	var out, errOut bytes.Buffer
-	if code := runNew([]string{"todo", "--module", "example.com/todo", "--layout", layout, "--skip-install"}, &out, &errOut); code != 0 {
+	if code := runNew([]string{"todo", "--module", "example.com/todo", "--layout", layout, "--channel", "preview", "--skip-install"}, &out, &errOut); code != 0 {
 		t.Fatal(errOut.String())
 	}
 	if err := os.Chdir("todo"); err != nil {
@@ -36,11 +36,13 @@ func TestHTTPBindingsMatchDefaultResolvers(t *testing.T) {
 	}{
 		{"value DTO", "", "type Request struct { Quantity int64 }", "req Request", "/probe", "HTTP_PARAMETER_BINDING_UNSUPPORTED"},
 		{"pointer DTO", "", "type Request struct { Quantity int64 }", "req *Request", "/probe", ""},
+		{"double pointer DTO", "", "type Request struct { Quantity int64 }", "req **Request", "/probe", "HTTP_PARAMETER_BINDING_UNRESOLVED"},
+		{"pointer context", `import ctx "context"`, "", "ctx *ctx.Context", "/probe", "HTTP_PARAMETER_BINDING_UNRESOLVED"},
 		{"alias DTO", "", "type Request struct{}; type Alias = Request", "req Alias", "/probe", "HTTP_PARAMETER_BINDING_UNSUPPORTED"},
 		{"alias pointer DTO", "", "type Request struct{}; type Alias = *Request", "req Alias", "/probe", ""},
 		{"aliased imports", `import (ctx "context"; p "github.com/NARUBROWN/spine/pkg/path"; q "github.com/NARUBROWN/spine/pkg/query"; h "github.com/NARUBROWN/spine/pkg/header"; c "github.com/NARUBROWN/spine/core")`, "type Request struct{}", "ctx ctx.Context, id p.Int, query q.Values, headers h.Values, view c.ControllerContext, req *Request", "/probe/:id", ""},
 		{"alias wrapper", `import p "github.com/NARUBROWN/spine/pkg/path"`, "type ID = p.Int", "id ID", "/probe/:id", ""},
-		{"pointer wrapper body", `import p "github.com/NARUBROWN/spine/pkg/path"`, "", "req *p.Int", "/probe", ""},
+		{"pointer wrapper body", `import p "github.com/NARUBROWN/spine/pkg/path"`, "", "req *p.Int", "/probe", "HTTP_INPUT_CONTRACT_INVALID"},
 		{"defined wrapper", `import p "github.com/NARUBROWN/spine/pkg/path"`, "type ID p.Int", "id ID", "/probe", "HTTP_PARAMETER_BINDING_UNSUPPORTED"},
 		{"scalar", "", "", "quantity int64", "/probe", "HTTP_PARAMETER_BINDING_UNSUPPORTED"},
 		{"custom unknown type", `import custom "example.net/custom"`, "", "req custom.Request", "/probe", "HTTP_PARAMETER_BINDING_UNRESOLVED"},

@@ -233,6 +233,11 @@ func signatureContractText(parameters []handlerParameter, returns []string) stri
 		if parameter.Key != "" {
 			input += "[" + parameter.Key + "]"
 		}
+		if len(parameter.Keys) > 0 {
+			keys := append([]string(nil), parameter.Keys...)
+			sort.Strings(keys)
+			input += "[" + strings.Join(keys, ",") + "]"
+		}
 		inputs = append(inputs, input)
 	}
 	return " (" + strings.Join(inputs, ",") + ") -> (" + strings.Join(returns, ",") + ")"
@@ -373,6 +378,9 @@ func printHTTPExplanation(contract applicationContract, route httpRegistration, 
 		if parameter.Key != "" {
 			key = " key=" + parameter.Key
 		}
+		if len(parameter.Keys) > 0 {
+			key = " keys=" + strings.Join(parameter.Keys, ",")
+		}
 		fmt.Fprintf(out, "  input: %s %s binding=%s%s\n", parameter.Name, parameter.Type, parameter.Binding, key)
 	}
 	if len(route.Returns) > 0 {
@@ -386,8 +394,12 @@ func printHTTPExplanation(contract applicationContract, route httpRegistration, 
 			interceptors = append(interceptors, interceptor)
 		}
 	}
-	for _, target := range route.Interceptors {
-		interceptors = append(interceptors, contractRegistration{Target: target, Scope: "route", Source: route.Source})
+	for index, target := range route.Interceptors {
+		source := route.Source
+		if index < len(route.InterceptorSources) && route.InterceptorSources[index] != "" {
+			source = route.InterceptorSources[index]
+		}
+		interceptors = append(interceptors, contractRegistration{Target: target, Scope: "route", Source: source})
 	}
 	for index, interceptor := range interceptors {
 		fmt.Fprintf(out, "    %d. PreHandle %s (%s)\n", index+2, interceptor.Target, interceptor.Source)

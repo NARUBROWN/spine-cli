@@ -2,6 +2,7 @@ package application
 
 import (
  "context"
+ "io"
  "net"
  "net/http"
  "strings"
@@ -33,14 +34,17 @@ func TestGeneratedWebSocketAssembly(t *testing.T) {
  done:=make(chan error,1);go func(){done<-app.RunContext(ctx,options)}()
  stopped:=false
  defer func(){if !stopped{cancel();select{case err:=<-done:if err!=nil{t.Error(err)};case <-time.After(5*time.Second):t.Error("WS application did not stop")}}}()
- client:=&http.Client{Timeout:time.Second}
+ transport:=http.DefaultTransport.(*http.Transport).Clone()
+ defer transport.CloseIdleConnections()
+ client:=&http.Client{Timeout:time.Second,Transport:transport}
  deadline:=time.Now().Add(10*time.Second)
  for {
   response,err:=client.Get("http://"+address+"/health")
-  if err==nil {response.Body.Close();if response.StatusCode==200{break}}
+  if err==nil {io.Copy(io.Discard,response.Body);response.Body.Close();if response.StatusCode==200{break}}
   if time.Now().After(deadline){t.Fatal("HTTP listener was not ready")}
   time.Sleep(20*time.Millisecond)
  }
+ transport.CloseIdleConnections()
  dial:=func()*websocket.Conn{
   c,_,err:=websocket.DefaultDialer.Dial("ws://"+address+"/ws/validation",nil);if err!=nil{t.Fatal(err)}
   _=c.SetReadDeadline(time.Now().Add(5*time.Second));return c
@@ -55,6 +59,10 @@ func TestGeneratedWebSocketAssembly(t *testing.T) {
   if !websocket.IsCloseError(err,websocket.ClosePolicyViolation){t.Fatalf("validation close: %v",err)}
   expectedCalls=1
   connection.Close();connection=dial();defer connection.Close()
+  // Confirm server-side activation before asserting shutdown of this connection.
+  if err:=connection.WriteJSON(socketInput{Email:"kim@example.com"});err!=nil{t.Fatal(err)}
+  _,message,err=connection.ReadMessage();if err!=nil || string(message)!="kim@example.com"{t.Fatalf("reconnected message: %q %v",message,err)}
+  expectedCalls++
  } else if err!=nil || len(message)!=0 {t.Fatalf("omitted validator changed behavior: %q %v",message,err)}
  if controller.calls.Load()!=expectedCalls{t.Fatalf("handler calls: %d",controller.calls.Load())}
  cancel()

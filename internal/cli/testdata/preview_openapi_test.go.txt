@@ -1,0 +1,99 @@
+package application
+
+import (
+ "github.com/NARUBROWN/spine"
+    "context"
+    "encoding/json"
+    "io"
+    "net/http"
+    "net/http/httptest"
+    "os"
+    "reflect"
+    "strings"
+    "testing"
+    "time"
+
+    "github.com/NARUBROWN/spine/pkg/boot"
+    "github.com/NARUBROWN/spine/pkg/openapi"
+    "github.com/NARUBROWN/spine/pkg/openapi/ui/redoc"
+    "github.com/NARUBROWN/spine/pkg/openapi/ui/swaggerui"
+)
+
+func TestPreviewHTTPAndExportedOpenAPI(t *testing.T) {
+    for _, enabled := range []bool{false, true} {
+        app, options, err := BuildApplication()
+        if err != nil { t.Fatal(err) }
+        if options.HTTP.OpenAPI.Enabled || len(options.HTTP.OpenAPI.UI) != 0 { t.Fatal("generated app enabled OpenAPI or UI implicitly") }
+        options.HTTP.OpenAPI.Enabled = enabled
+        options.HTTP.OpenAPI.UI = []boot.OpenAPIUI{swaggerui.New(swaggerui.Options{}), redoc.New(redoc.Options{})}
+        if enabled { options.HTTP.OpenAPI.Path = "/schema.json" }
+        prepared, err := app.Prepare(context.Background(), options)
+        if err != nil { t.Fatal(err) }
+        handler,err:=spine.NetHTTPHandler(prepared);if err!=nil {t.Fatal(err)}
+        srv := httptest.NewServer(handler)
+        srv.Client().Timeout = 5*time.Second
+        t.Cleanup(func() { srv.Close(); if err := prepared.Close(context.Background()); err != nil { t.Error(err) } })
+        request := func(path string) (int, []byte) {
+            t.Helper()
+            req, err := http.NewRequest("GET", srv.URL+path, nil)
+            if err != nil { t.Fatal(err) }
+            req.Host = "shop.example"
+            response, err := srv.Client().Do(req)
+            if err != nil { t.Fatal(err) }
+            defer response.Body.Close()
+            data, err := io.ReadAll(response.Body)
+            if err != nil { t.Fatal(err) }
+            return response.StatusCode, data
+        }
+        if status, body := request("/preview/7?tag=red,%20blue&tag=green&page=2"); status != 200 {
+            t.Fatalf("structured inputs: %d %s", status, body)
+        } else {
+            var result PreviewResult
+            if err := json.Unmarshal(body, &result); err != nil || result.ID != 7 || result.Host != "shop.example" || !reflect.DeepEqual(result.Tags, []string{"red"," blue","green"}) {
+                t.Fatalf("path/query/Host binding: %v %s", err, body)
+            }
+        }
+        for _, path := range []string{"/preview/invalid", "/preview/7?page=invalid"} {
+            if status, body := request(path); status != 400 { t.Fatalf("invalid typed input: %s %d %s", path, status, body) }
+        }
+        expected := 200
+        if {{VALIDATOR}} { expected = 400 }
+        if status, body := request("/preview/7?page=-1"); status != expected { t.Fatalf("validator boundary: %d %s", status, body) }
+        if status, _ := request("/openapi.json"); status != 404 { t.Fatalf("default OpenAPI route: %d", status) }
+        status, data := request("/schema.json")
+        expectedUI := 404
+        if enabled { expectedUI = 200 }
+        for _, resource := range []struct{ path, contains string }{
+            {"/docs", "swagger-ui"},
+            {"/redoc", `id="redoc"`},
+            {"/docs/_assets/init.js", `new URL("schema.json",window.location.href)`},
+            {"/redoc/_assets/init.js", "disableGoogleFont:true"},
+            {"/docs/_assets/swagger-ui-bundle.js", "SwaggerUIBundle"},
+            {"/redoc/_assets/redoc.standalone.js", "Redoc"},
+        } {
+            status, body := request(resource.path)
+            if status != expectedUI || (enabled && !strings.Contains(string(body), resource.contains)) { t.Fatalf("embedded UI %s: status=%d expected=%d", resource.path, status, expectedUI) }
+        }
+        if !enabled {
+            if status != 404 { t.Fatalf("disabled OpenAPI resource: %d", status) }
+            continue
+        }
+        if status != 200 { t.Fatalf("custom OpenAPI route: %d %s", status, data) }
+        var exported []byte
+        if {{MODERN}} {
+            description, err := spine.DescribePreparedHTTP(prepared)
+            if err != nil { t.Fatal(err) }
+            exported, err = openapi.Generate(description, options.HTTP.OpenAPI)
+            if err != nil { t.Fatal(err) }
+        } else {
+            exported, err = os.ReadFile("../../exported-openapi.json")
+            if err != nil { t.Fatal(err) }
+        }
+        var served, document map[string]any
+        if err := json.Unmarshal(data, &served); err != nil { t.Fatal(err) }
+        if err := json.Unmarshal(exported, &document); err != nil { t.Fatal(err) }
+        if !reflect.DeepEqual(served, document) { t.Fatalf("CLI export differs from HTTP OpenAPI: %s\n%s", data, exported) }
+        if document["openapi"] != "3.1.2" || document["paths"].(map[string]any)["/preview/{id}"] == nil { t.Fatalf("runtime document: %s", exported) }
+        if !{{VALIDATOR}} && (strings.Contains(string(exported), `"type":`) || !strings.Contains(string(exported), "VALIDATOR_NOT_CONFIGURED")) { t.Fatalf("validator-free field specification was inferred: %s", exported) }
+    }
+}

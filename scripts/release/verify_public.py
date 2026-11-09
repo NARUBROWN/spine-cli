@@ -57,6 +57,35 @@ def assert_modules(graph, required):
             raise ReleaseError("생성 레시피의 실제 모듈 버전이 다릅니다: " + name)
 
 
+def composition_cases(plan):
+    cases = {"http": []}
+    if plan.get("upstream_evidence") is not None:
+        extra = ["--validator", "playground", "--websocket-platform", "gorilla",
+                 "--event-platform", "kafka", "--event-platform", "rabbitmq", "--event-platform", "nats"]
+        cases.update({"echo-full": ["--platform", "echo", *extra],
+                      "nethttp-full": ["--platform", "nethttp", *extra]})
+    return cases
+
+
+def direct_dependencies(module):
+    return {item["Path"]: item["Version"] for item in module["Require"] if not item.get("Indirect", False)}
+
+
+def expected_dependencies(required, recipe, upstream, case):
+    allowed = dict(recipe["modules"])
+    allowed.update({module: value.get("selected_version", value["version"]) for module, value in upstream.items()})
+    for path, version in required.items():
+        if allowed.get(path) != version:
+            raise ReleaseError("기본 생성 의존성이 계획과 다릅니다: " + path)
+    if case in ("echo-full", "nethttp-full"):
+        selected = set(upstream)
+        selected.remove("github.com/NARUBROWN/spine-nethttp-platform" if case == "echo-full"
+                        else "github.com/NARUBROWN/spine-echo-platform")
+        if not selected.issubset(required):
+            raise ReleaseError("전체 플랫폼 조합에 필요한 모듈이 누락됐습니다")
+    return allowed
+
+
 def health(binary, app, env):
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -116,10 +145,8 @@ def verify(plan, query, work, env):
             envelope(binary, [command], work, env)
     cli = str(Path(env["GOBIN"]) / ("spine" + suffix))
     recipe = plan["components"]["recipe"]
-    cases = {"http": [], "websocket": ["--websocket-platform", "gorilla"],
-             "all": ["--websocket-platform", "gorilla", "--event-platform", "kafka",
-                     "--event-platform", "rabbitmq", "--validator", "playground"],
-             "worker": ["--platform", "none", "--event-platform", "kafka"]}
+    cases = composition_cases(plan)
+    upstream = plan.get("upstream_evidence") or {}
     for layout in ("legacy", "layered-v1"):
         for case, options in cases.items():
             name = layout + "-" + case
@@ -134,16 +161,14 @@ def verify(plan, query, work, env):
                 raise ReleaseError("기본 생성 레시피가 정책과 다릅니다")
             mod = json.loads(execute(["go", "mod", "edit", "-json"], app, env))
             required = {m["Path"]: m["Version"] for m in mod["Require"]}
-            for path, version in required.items():
-                if recipe["modules"].get(path) != version:
-                    raise ReleaseError("기본 생성 의존성이 정책과 다릅니다: " + path)
+            allowed = expected_dependencies(required, recipe, upstream, case)
             execute(["go", "mod", "tidy"], app, env)
             execute(["go", "mod", "verify"], app, env)
             graph = module_graph(execute(["go", "list", "-m", "-json", "all"], app, env))
             expected = dict(required)
             for item in graph:
-                if item["Path"] in recipe["modules"]:
-                    expected[item["Path"]] = recipe["modules"][item["Path"]]
+                if item["Path"] in allowed:
+                    expected[item["Path"]] = allowed[item["Path"]]
             assert_modules(graph, expected)
             for command in (["context"], ["contract", "check"], ["verify"]):
                 envelope(cli, [*command, "--root", str(app)], work, env)
@@ -153,17 +178,58 @@ def verify(plan, query, work, env):
             envelope(cli, ["update", "--root", str(app), "--if-match", update["base_hash"]], work, env)
             if hashlib.sha256(composition.read_bytes()).hexdigest() != original:
                 raise ReleaseError("update가 앱 소스를 변경했습니다")
+            updated = json.loads(execute(["go", "mod", "edit", "-json"], app, env))
+            updated_required = direct_dependencies(updated)
+            expected_dependencies(updated_required, recipe, upstream, case)
+            updated_graph = module_graph(execute(["go", "list", "-m", "-json", "all"], app, env))
+            assert_modules(updated_graph, expected)
+            binary = app / ("server" + suffix)
+            execute(["go", "build", "-o", str(binary), "."], app, env)
             if case == "http":
-                binary = app / ("server" + suffix)
-                execute(["go", "build", "-o", str(binary), "."], app, env)
                 health(binary, app, env)
-    return {"result": "passed", "source_sha": plan["source_sha"], "query": query,
+    rc_cohort = plan.get("rc_cohort")
+    if rc_cohort:
+        extra = ["--validator", "playground", "--websocket-platform", "gorilla",
+                 "--event-platform", "kafka", "--event-platform", "rabbitmq", "--event-platform", "nats"]
+        for layout in ("legacy", "layered-v1"):
+            for provider in ("echo", "nethttp"):
+                name = "rc-" + layout + "-" + provider
+                args = ["new", name, "--module", "example.com/" + name, "--layout", layout,
+                        "--channel", "rc", "--platform", provider, "--skip-install", *extra]
+                generated = envelope(cli, [*args, "--dry-run"], work, env)
+                envelope(cli, [*args, "--if-match", generated["base_hash"]], work, env)
+                app = work / name
+                config = tomllib.loads((app / "spine.toml").read_text(encoding="utf-8"))
+                if config.get("dependency_channel") != "rc":
+                    raise ReleaseError("생성 프로젝트가 RC 채널을 사용하지 않습니다")
+                expected = {path: version for path, version in rc_cohort.items()
+                            if path != "github.com/NARUBROWN/spine-" + ("nethttp" if provider == "echo" else "echo") + "-platform"}
+                mod = json.loads(execute(["go", "mod", "edit", "-json"], app, env))
+                required = direct_dependencies(mod)
+                if any(required.get(path) != version for path, version in expected.items()):
+                    raise ReleaseError("생성 프로젝트가 검증된 RC 조합을 선택하지 않았습니다")
+                execute(["go", "mod", "tidy"], app, env)
+                execute(["go", "mod", "verify"], app, env)
+                assert_modules(module_graph(execute(["go", "list", "-m", "-json", "all"], app, env)), expected)
+                for command in (["context"], ["contract", "check"], ["verify"]):
+                    envelope(cli, [*command, "--root", str(app)], work, env)
+                update = envelope(cli, ["update", "--root", str(app), "--dry-run"], work, env)
+                envelope(cli, ["update", "--root", str(app), "--if-match", update["base_hash"]], work, env)
+                assert_modules(module_graph(execute(["go", "list", "-m", "-json", "all"], app, env)), expected)
+    report = {"result": "passed", "source_sha": plan["source_sha"], "query": query,
             "resolved_cli_version": resolved, "components": plan["components"],
             "os": {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}[platform.system()],
             "go_version": execute(["go", "version"], work, env), "entrypoints": list(ENTRYPOINTS),
-            "checks": ["public installation and build provenance", "two layouts and four platform combinations",
+            "checks": ["public installation and build provenance", "two layouts and default HTTP composition",
                        "default recipe and selected public modules", "dry-run/if-match and source-preserving update",
                        "static contracts and generated tests", "HTTP health and listener release"]}
+    if rc_cohort:
+        report["rc_cohort"] = rc_cohort
+        report["rc_combination_checks"] = ["echo-full", "nethttp-full"]
+    if plan.get("upstream_evidence") is not None:
+        report["upstream_evidence"] = plan["upstream_evidence"]
+        report["combination_checks"] = ["echo-full", "nethttp-full"]
+    return report
 
 
 def main():

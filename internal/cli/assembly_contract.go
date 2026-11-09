@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"os"
 	"sort"
+	"strings"
 
 	"golang.org/x/mod/semver"
 )
@@ -17,6 +19,7 @@ type eventAdapterSelection struct {
 	Resolution       string `json:"resolution"`
 	Configuration    string `json:"configuration"`
 	Source           string `json:"source,omitempty"`
+	DescriptorSHA256 string `json:"descriptor_sha256,omitempty"`
 }
 
 type validatorSelection struct {
@@ -25,12 +28,33 @@ type validatorSelection struct {
 	Contract         string `json:"contract,omitempty"`
 	Resolution       string `json:"resolution"`
 	Source           string `json:"source,omitempty"`
+	DescriptorSHA256 string `json:"descriptor_sha256,omitempty"`
 }
 
 // factory의 생성식과 등록만 추적하며 설정 helper와 검증기, 브로커를 실행하지 않습니다.
 func (i *contractInspector) inspectAssembly(config projectConfig, file *ast.File, fset *token.FileSet, function *ast.FuncDecl, index int) {
 	assignment := function.Body.List[index].(*ast.AssignStmt)
 	imports := importPathsByAlias(file)
+	// 선택한 모듈의 JSON만 읽으며 플랫폼 코드와 설정 helper는 실행하지 않습니다.
+	for _, spec := range file.Imports {
+		if spec.Name != nil {
+			continue
+		}
+		path, ok := stringLiteral(spec.Path)
+		if !ok {
+			continue
+		}
+		for _, kind := range []string{"event", "validator"} {
+			provider := providerFromModule(path, kind)
+			if provider == "" {
+				continue
+			}
+			if descriptor, err := staticPlatformDescriptor(kind, provider, path, i.contract.HTTPAdapter.SelectedModules); err == nil {
+				imports[descriptor.Package] = path
+				break
+			}
+		}
+	}
 	call, ok := importedCall(assignment.Rhs[0], imports, spineImportPath, "New")
 	i.contract.EventAdapters = []eventAdapterSelection{}
 	i.contract.Validator = validatorSelection{Provider: "none", Resolution: "static-source"}
@@ -58,10 +82,12 @@ func (i *contractInspector) inspectAssembly(config projectConfig, file *ast.File
 			names[item.Name] = true
 			if valid {
 				expression := assemblyValue(option.Args[1], function.Body, option.Pos())
-				for _, candidate := range []struct{ path, provider string }{{kafkaPlatformPath, "kafka"}, {rabbitPlatformPath, "rabbitmq"}} {
-					if factory, ok := importedCall(expression, imports, candidate.path, "NewFactory"); ok && len(factory.Args) == 1 && !factory.Ellipsis.IsValid() {
-						item.Provider, item.CanonicalFactory = candidate.provider, candidate.path+".NewFactory"
-					}
+				descriptor, path, err := assemblyFactoryDescriptor(expression, imports, i.contract.HTTPAdapter.SelectedModules, "event")
+				if err != nil {
+					add("EVENT_PLATFORM_DESCRIPTOR_UNAVAILABLE", err.Error(), arg)
+				}
+				if descriptor != nil {
+					item.Provider, item.CanonicalFactory, item.DescriptorSHA256 = descriptor.Provider, path+"."+descriptor.Factory, descriptor.SHA256
 				}
 				valid = item.Provider != "" && knownEventOptions(option.Args[2:], imports)
 			}
@@ -80,19 +106,23 @@ func (i *contractInspector) inspectAssembly(config projectConfig, file *ast.File
 			item := validatorSelection{Provider: "unresolved", Contract: "github.com/NARUBROWN/spine/contract/validator", Resolution: "unresolved", Source: relativeSource(fset.Position(arg.Pos()))}
 			valid := len(option.Args) == 1 && !option.Ellipsis.IsValid() && !changed
 			if valid {
-				factory, known := importedCall(assemblyValue(option.Args[0], function.Body, option.Pos()), imports, validatorPlatformPath, "New")
-				valid = known && len(factory.Args) == 0 && !factory.Ellipsis.IsValid()
+				descriptor, path, err := assemblyFactoryDescriptor(assemblyValue(option.Args[0], function.Body, option.Pos()), imports, i.contract.HTTPAdapter.SelectedModules, "validator")
+				if err != nil {
+					add("VALIDATOR_DESCRIPTOR_UNAVAILABLE", err.Error(), arg)
+				}
+				valid = descriptor != nil
+				if valid {
+					item.Provider, item.CanonicalFactory, item.Resolution, item.DescriptorSHA256 = descriptor.Provider, path+"."+descriptor.Factory, "static-source", descriptor.SHA256
+				}
 			}
-			if valid {
-				item.Provider, item.CanonicalFactory, item.Resolution = "playground", validatorPlatformPath+".New", "static-source"
-			} else {
+			if !valid {
 				add("VALIDATOR_UNRESOLVED", "validator factory or options cannot be resolved statically", arg)
 			}
 			if registeredValidator {
 				add("VALIDATOR_DUPLICATE", "multiple validators are registered", arg)
 			}
 			registeredValidator = true
-			if valid && selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, validatorPlatformPath) == "" {
+			if valid && selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, validatorModule(item.Provider)) == "" {
 				add("MODULE_GRAPH_UNAVAILABLE", "the selected graph does not contain the validator implementation", arg)
 			}
 			i.contract.Validator = item
@@ -121,11 +151,76 @@ func (i *contractInspector) inspectAssembly(config projectConfig, file *ast.File
 	sort.Slice(i.contract.EventAdapters, func(a, b int) bool { return i.contract.EventAdapters[a].Name < i.contract.EventAdapters[b].Name })
 }
 
-func providerModule(provider string) string {
-	if provider == "kafka" {
-		return kafkaPlatformPath
+func staticPlatformDescriptor(kind, provider, path string, modules []selectedModule) (*platformDescriptor, error) {
+	for _, module := range modules {
+		if module.Path == path && module.Dir != "" {
+			descriptor, err := readPlatformDescriptor(module.Dir, kind, provider)
+			if err == nil {
+				return descriptor, nil
+			}
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+			break
+		}
 	}
-	return rabbitPlatformPath
+	if descriptor := legacyPlatformDescriptor(kind, provider); descriptor != nil {
+		return descriptor, nil
+	}
+	return nil, fmt.Errorf("%s is not available in the selected module cache: %s", platformDescriptorFile, path)
+}
+
+func assemblyFactoryDescriptor(expression ast.Expr, imports map[string]string, modules []selectedModule, expectedKind string) (*platformDescriptor, string, error) {
+	call, ok := expression.(*ast.CallExpr)
+	if !ok || call.Ellipsis.IsValid() {
+		return nil, "", nil
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil, "", nil
+	}
+	owner, ok := selector.X.(*ast.Ident)
+	if !ok {
+		return nil, "", nil
+	}
+	path := imports[owner.Name]
+	provider := providerFromModule(path, expectedKind)
+	if provider == "" {
+		return nil, "", nil
+	}
+	descriptor, err := staticPlatformDescriptor(expectedKind, provider, path, modules)
+	if err != nil {
+		return nil, path, err
+	}
+	arguments := 0
+	if descriptor.ConfigType != "" {
+		arguments = 1
+	}
+	if selector.Sel.Name != descriptor.Factory || len(call.Args) != arguments {
+		return nil, "", nil
+	}
+	return descriptor, path, nil
+}
+
+func providerFromModule(path, kind string) string {
+	if kind == "event" || kind == "http" || kind == "websocket" {
+		const prefix, suffix = "github.com/NARUBROWN/spine-", "-platform"
+		if strings.HasPrefix(path, prefix) && strings.HasSuffix(path, suffix) {
+			provider := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+			if validProviderName(provider) {
+				return provider
+			}
+		}
+	} else {
+		const prefix = "github.com/NARUBROWN/spine-validator-"
+		if strings.HasPrefix(path, prefix) {
+			provider := strings.TrimPrefix(path, prefix)
+			if validProviderName(provider) && provider != "none" {
+				return provider
+			}
+		}
+	}
+	return ""
 }
 
 // 직접 대입한 지역 변수만 추적하며 재대입과 조건 분기, 외부 함수를 평가하지 않습니다.
@@ -181,7 +276,7 @@ func assemblyValue(expression ast.Expr, body *ast.BlockStmt, before token.Pos) a
 func knownEventOptions(args []ast.Expr, imports map[string]string) bool {
 	for _, arg := range args {
 		known := false
-		for _, name := range []string{"WithEventConsumerRetry", "WithEventSettlementTimeout"} {
+		for _, name := range []string{"WithEventConsumerRetry", "WithEventSettlementTimeout", "WithEventPublisherErrorHistory", "WithEventConsumerErrorHistory"} {
 			if call, ok := importedCall(arg, imports, spineImportPath, name); ok && len(call.Args) == 1 && !call.Ellipsis.IsValid() {
 				known = true
 			}

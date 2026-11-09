@@ -12,11 +12,18 @@ import re
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 
 TAG = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(preview|rc)\.([1-9]\d*))?\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 WORKFLOWS = {"preview": "preview.yml", "rc": "rc.yml", "stable": "release.yml"}
+CORE_MODULE = "github.com/NARUBROWN/spine"
+UPSTREAM_MODULES = tuple("github.com/NARUBROWN/" + name for name in (
+    "spine", "spine-echo-platform", "spine-nethttp-platform", "spine-gorilla-platform",
+    "spine-kafka-platform", "spine-rabbitmq-platform", "spine-nats-platform",
+    "spine-validator-playground",
+))
 
 
 class ReleaseError(Exception):
@@ -42,7 +49,7 @@ def timestamp(value):
     try:
         return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(dt.timezone.utc)
     except (AttributeError, ValueError) as exc:
-        raise ReleaseError("공개 시각이 없는 릴리스는 승격할 수 없습니다") from exc
+        raise ReleaseError("공개 시각이나 검증 기록 시각이 올바르지 않습니다") from exc
 
 
 def require_age(published_at, hours, now, reason):
@@ -72,18 +79,21 @@ def validate_policy(policy):
     recipe = policy.get("recipe", {})
     if not recipe.get("id") or "github.com/NARUBROWN/spine" not in recipe.get("modules", {}):
         raise ReleaseError("기본 생성 레시피와 모듈 버전을 고정해야 합니다")
-    for version in recipe["modules"].values():
+    for path, version in recipe["modules"].items():
+        if version == "preview" and recipe["id"] == "platform-contracts-preview" and path.startswith("github.com/NARUBROWN/spine"):
+            continue
         if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version):
-            raise ReleaseError("레시피에는 변경 가능한 브랜치 대신 모듈 버전을 지정해야 합니다")
+            raise ReleaseError("Preview 레시피 외에는 고정 모듈 버전을 지정해야 합니다")
     if policy.get("notes_path") != "release/notes/" + policy["next_version"] + ".md":
         raise ReleaseError("대상 버전의 릴리스 초안 경로가 필요합니다")
 
 
 class GitHub:
-    def __init__(self, repository):
+    def __init__(self, repository, *, token=None):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
             raise ReleaseError("저장소 이름이 올바르지 않습니다")
         self.repository = repository
+        self.env = dict(os.environ, GH_TOKEN=token) if token else None
 
     def api(self, path, *, missing=False, method="GET", data=None):
         endpoint = f"repos/{self.repository}" + ("/" + path if path else "")
@@ -91,7 +101,7 @@ class GitHub:
         if data is not None:
             args += ["--input", "-"]
         result = subprocess.run(args, input=json.dumps(data) if data is not None else None,
-                                text=True, capture_output=True, encoding="utf-8")
+                                text=True, capture_output=True, encoding="utf-8", env=self.env)
         if result.returncode:
             # 인증, 통신 오류를 '태그 없음'으로 해석하지 않습니다.
             try:
@@ -126,39 +136,76 @@ class GitHub:
             obj = self.api(f"git/tags/{obj['sha']}")["object"]
         raise ReleaseError("태그가 단일 커밋을 가리키지 않습니다")
 
-    def manifest(self, tag):
+    def candidate_evidence(self, tag, prefix="release-manifest-", *, allow_absent=False):
+        parse_tag(tag)
+        name = prefix + tag
+        artifacts = []
+        for page in range(1, 101):
+            items = self.api(f"actions/artifacts?name={name}&per_page=100&page={page}")["artifacts"]
+            artifacts.extend(item for item in items if item["name"] == name)
+            if len(items) < 100:
+                break
+        else:
+            raise ReleaseError("후보 검증 기록 목록을 모두 확인하지 못했습니다")
+        if allow_absent:
+            artifacts = [item for item in artifacts if not item.get("expired", True)]
+            if not artifacts:
+                return None
+        if len(artifacts) != 1 or artifacts[0].get("expired", True):
+            raise ReleaseError("태그에 대응하는 검증 artifact가 없거나 중복, 만료됐습니다. 새 Preview가 필요합니다")
+        artifact = artifacts[0]
+        workflow_run = self.api(f"actions/runs/{int(artifact['workflow_run']['id'])}")
         with tempfile.TemporaryDirectory(prefix="spine-cli-release-manifest-") as directory:
-            run("gh", "release", "download", tag, "--repo", self.repository,
-                "--pattern", "release-manifest.json", "--dir", directory)
-            return json.loads((Path(directory) / "release-manifest.json").read_text(encoding="utf-8"))
+            archive = Path(directory) / "manifest.zip"
+            with archive.open("wb") as output:
+                result = subprocess.run(["gh", "api", f"repos/{self.repository}/actions/artifacts/{int(artifact['id'])}/zip"],
+                                        stdout=output, stderr=subprocess.PIPE, env=self.env)
+            if result.returncode:
+                raise ReleaseError("후보 검증 artifact를 다운로드하지 못했습니다: " + result.stderr.decode("utf-8", errors="replace").strip())
+            if artifact.get("digest") != "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest():
+                raise ReleaseError("후보 검증 artifact의 SHA-256이 일치하지 않습니다")
+            try:
+                with zipfile.ZipFile(archive) as package:
+                    manifest = json.loads(package.read("release-manifest.json"))
+            except (zipfile.BadZipFile, KeyError) as exc:
+                raise ReleaseError("후보 검증 artifact에 올바른 manifest가 없습니다") from exc
+        return {"artifact": artifact, "workflow_run": workflow_run, "manifest": manifest}
 
 
-def verify_source_release(github, source, expected_channel, policy):
+def verify_source_candidate(github, source, expected_channel, policy):
     _, channel, _ = parse_tag(source)
     if channel != expected_channel:
         raise ReleaseError(f"이 단계의 출처는 {expected_channel} 태그여야 합니다")
-    release = github.api(f"releases/tags/{source}")
-    if release.get("draft") or not release.get("prerelease"):
-        raise ReleaseError("공개된 사전 릴리스만 승격할 수 있습니다")
-    manifest = github.manifest(source)
+    evidence = github.candidate_evidence(source)
+    artifact, workflow_run, manifest = evidence["artifact"], evidence["workflow_run"], evidence["manifest"]
     sha = github.tag_sha(source)
     if (manifest.get("schema_version") != "spine-cli.release-manifest/v1" or
             manifest.get("version") != source or manifest.get("channel") != channel or
             manifest.get("source_sha") != sha or not SHA.fullmatch(sha or "") or
+            manifest.get("repository") != github.repository or
             manifest.get("branch") != policy["branches"][channel] or
+            manifest.get("source_tree") != github.api(f"git/commits/{sha}")["tree"]["sha"] or
             manifest.get("validation", {}).get("result") != "passed" or
             manifest["validation"].get("source_sha") != sha or
             manifest["validation"].get("version") != source or
             manifest["validation"].get("components") != manifest.get("components")):
-        raise ReleaseError("출처 태그와 릴리스 manifest가 일치하지 않습니다")
-    workflow_run = github.api(f"actions/runs/{int(manifest['workflow_run_id'])}")
+        raise ReleaseError("출처 태그와 검증 manifest가 일치하지 않습니다")
+    artifact_run = artifact.get("workflow_run", {})
     if (workflow_run.get("conclusion") != "success" or workflow_run.get("status") != "completed" or
             workflow_run.get("event") != "workflow_dispatch" or
             workflow_run.get("head_branch") != policy["branches"][channel] or
             workflow_run.get("head_sha") != sha or
+            str(workflow_run.get("id")) != manifest.get("workflow_run_id") or
+            str(workflow_run.get("run_attempt")) != manifest.get("workflow_run_attempt") or
+            artifact.get("name") != "release-manifest-" + source or artifact.get("expired", True) or
+            artifact_run.get("id") != workflow_run.get("id") or
+            artifact_run.get("head_sha") != sha or artifact_run.get("head_branch") != policy["branches"][channel] or
             workflow_run.get("path", "").split("@")[0] != f".github/workflows/{WORKFLOWS[channel]}"):
-        raise ReleaseError("출처 릴리스의 발행 workflow가 성공하지 않았습니다")
-    return release, manifest
+        raise ReleaseError("출처 태그의 검증 workflow와 artifact가 일치하지 않거나 성공하지 않았습니다")
+    if manifest.get("required_public_os") != policy["required_public_os"]:
+        raise ReleaseError("출처 후보의 공개 설치 OS가 현재 정책과 다릅니다")
+    validate_reports(manifest["validation"].get("reports", []), manifest, source)
+    return artifact, manifest
 
 
 def promotion(github, source_sha, upstream_sha, branch, upstream_branch):
@@ -195,13 +242,89 @@ def approval_environment(github, policy, channel="stable"):
         raise ReleaseError("승인 환경은 해당 채널 브랜치에서만 실행할 수 있어야 합니다")
 
 
+def latest_preview_tag(github):
+    refs = github.api("git/matching-refs/tags/v")
+    versions = []
+    for ref in refs:
+        tag = ref["ref"].removeprefix("refs/tags/")
+        if TAG.fullmatch(tag) and parse_tag(tag)[1] == "preview":
+            base, _, number = parse_tag(tag)
+            versions.append((tuple(map(int, base[1:].split("."))), number, tag))
+    if not versions:
+        raise ReleaseError("Preview 태그가 없는 선행 저장소입니다: " + github.repository)
+    return max(versions)[2]
+
+
+def upstream_evidence(recipe, github_factory=None):
+    """코어 후보와 모든 플랫폼이 같은 코어를 공개 검증했는지 확인합니다."""
+    if github_factory is None:
+        token = os.environ.get("RELEASE_EVIDENCE_TOKEN", "")
+        if not token.strip():
+            raise ReleaseError("선행 저장소의 Actions 검증 기록을 읽을 RELEASE_EVIDENCE_TOKEN이 필요합니다")
+        github_factory = lambda repository: GitHub(repository, token=token)
+    snapshots = {}
+    core_version = None
+    for module in UPSTREAM_MODULES:
+        repository = module.removeprefix("github.com/")
+        dependency = github_factory(repository)
+        tag = latest_preview_tag(dependency)
+        sha = dependency.tag_sha(tag)
+        if not SHA.fullmatch(sha or ""):
+            raise ReleaseError("선행 저장소의 Preview 태그가 올바른 커밋을 가리키지 않습니다: " + repository)
+        is_core = module == CORE_MODULE
+        proof = dependency.candidate_evidence(tag, "core-candidate-" if is_core else "release-manifest-", allow_absent=not is_core)
+        if proof is None:
+            if is_core:
+                raise ReleaseError("코어 후보의 발행 검증 기록이 없습니다")
+            snapshots[module] = {"version": tag, "source_sha": sha, "artifact_id": None, "digest": None}
+            continue
+        artifact, run_info, manifest = proof["artifact"], proof["workflow_run"], proof["manifest"]
+        validation = manifest.get("validation", {})
+        components = manifest.get("components", {})
+        scope = "core" if is_core else "platform"
+        if (manifest.get("schema_version") != "spine.release-manifest/v1" or
+                manifest.get("repository") != repository or manifest.get("module") != module or
+                manifest.get("kind") != scope or manifest.get("channel") != "preview" or
+                manifest.get("branch") != "preview" or manifest.get("version") != tag or
+                manifest.get("source_sha") != sha or
+                manifest.get("source_tree") != dependency.api("git/commits/" + sha)["tree"]["sha"] or
+                validation.get("result") != "passed" or validation.get("scope") != scope or
+                validation.get("version") != tag or validation.get("source_sha") != sha or
+                validation.get("components") != components or
+                validation.get("selected_modules", {}).get(module) != tag or
+                run_info.get("status") != "completed" or run_info.get("conclusion") != "success" or
+                run_info.get("event") != "workflow_dispatch" or run_info.get("head_branch") != "preview" or
+                run_info.get("head_sha") != sha or run_info.get("path", "").split("@")[0] != ".github/workflows/preview.yml" or
+                str(run_info.get("id")) != manifest.get("workflow_run_id") or
+                str(run_info.get("run_attempt")) != manifest.get("workflow_run_attempt") or
+                artifact.get("workflow_run", {}).get("id") != run_info.get("id") or
+                artifact.get("workflow_run", {}).get("head_sha") != sha):
+            raise ReleaseError("선행 발행의 태그와 공개 검증 기록이 다릅니다: " + repository)
+        if is_core:
+            if components.get("core_version") != tag:
+                raise ReleaseError("코어 후보의 구성 버전이 태그와 다릅니다: " + repository)
+            core_version = tag
+        elif (not validation.get("selected_modules", {}).get(CORE_MODULE) or
+              (components.get("core_version") and
+               validation.get("selected_modules", {}).get(CORE_MODULE) != components["core_version"])):
+            raise ReleaseError("선행 플랫폼의 코어 검증 기록이 일치하지 않습니다: " + repository)
+        snapshots[module] = {"version": tag, "source_sha": sha, "artifact_id": artifact["id"], "digest": artifact["digest"]}
+    for module, snapshot in snapshots.items():
+        snapshot["selected_version"] = resolve_module_query(module, "preview")
+    for module, version in recipe["modules"].items():
+        if module in snapshots and (snapshots[module]["version"] != version or
+                                    snapshots[module]["selected_version"] != version):
+            raise ReleaseError("CLI 생성 레시피와 선행 태그가 다릅니다: " + module)
+    return snapshots
+
+
 def make_plan(github, policy, channel, version, source, reason="", now=None):
     validate_policy(policy)
     now = now or dt.datetime.now(dt.timezone.utc)
     base, actual_channel, _ = parse_tag(version)
     if base != policy["next_version"] or channel != actual_channel:
         raise ReleaseError("대상 버전, 채널이 정책의 next_version과 일치하지 않습니다")
-    if channel == "stable" and any("-" in v for v in policy["recipe"]["modules"].values()):
+    if channel == "stable" and any(v == "preview" or "-" in v for v in policy["recipe"]["modules"].values()):
         raise ReleaseError("정식 CLI의 새 기본 레시피에는 정식 모듈만 사용할 수 있습니다. 레시피 변경 후 새 Preview가 필요합니다")
     reason = reason.strip()
     if reason and len(reason) < 20:
@@ -222,7 +345,7 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
         raise ReleaseError("채널 브랜치가 유효한 커밋을 가리키지 않습니다")
     if os.environ.get("GITHUB_SHA") and os.environ["GITHUB_SHA"] != source_sha:
         raise ReleaseError("workflow 실행 뒤 채널 HEAD가 바뀌었습니다")
-    source_tag, upstream_sha, promotion_pr = "", "", None
+    source_tag, upstream_sha, promotion_pr, source_evidence = "", "", None, None
     if channel == "preview":
         if not SHA.fullmatch(source) or source != source_sha:
             raise ReleaseError("Preview 출처에는 preview 브랜치 HEAD의 전체 커밋 SHA가 필요합니다")
@@ -232,13 +355,15 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
         if source_base != base:
             raise ReleaseError("다른 버전의 후보를 승격할 수 없습니다")
         expected = "preview" if channel == "rc" else "rc"
-        release, manifest = verify_source_release(github, source, expected, policy)
+        artifact, manifest = verify_source_candidate(github, source, expected, policy)
+        source_evidence = {"artifact_id": artifact["id"], "digest": artifact["digest"],
+                           "workflow_run_id": manifest["workflow_run_id"], "created_at": artifact["created_at"]}
         upstream_sha = manifest["source_sha"]
         promotion_pr = promotion(github, source_sha, upstream_sha, branch, policy["branches"][expected])
         # 코드와 호환 버전 조합은 승인된 후보에서 그대로 이어받습니다.
         if manifest.get("components") != components(policy):
             raise ReleaseError("후보 검증 뒤 호환 버전 조합이 바뀌었습니다. 새 Preview가 필요합니다")
-        require_age(release["published_at"], policy[f"{expected}_hours"], now, reason)
+        require_age(artifact["created_at"], policy[f"{expected}_hours"], now, reason)
     tree = github.api(f"git/commits/{source_sha}")["tree"]["sha"]
     source_policy = github.api(f"contents/.github/release-policy.json?ref={source_sha}")
     if json.loads(base64.b64decode(source_policy["content"])) != policy:
@@ -256,16 +381,46 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
     plan = {"schema_version": "spine-cli.release-manifest/v1", "channel": channel, "version": version,
             "source_sha": source_sha, "source_tag": source_tag, "branch": branch, "source_tree": tree,
             "upstream_source_sha": upstream_sha, "promotion_pr": promotion_pr, "components": components(policy),
+            "source_evidence": source_evidence,
             "observation_override_reason": reason, "planned_at": now.isoformat(),
             "workflow_run_id": os.environ.get("GITHUB_RUN_ID", ""),
+            "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "1"),
             "repository": github.repository}
     plan["required_public_os"] = policy["required_public_os"]
+    if channel == "rc" and policy.get("rc_cohort"):
+        cohort = policy["rc_cohort"]
+        if set(cohort) != set(UPSTREAM_MODULES) or any(not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*", v) for v in cohort.values()):
+            raise ReleaseError("RC 조합에는 코어와 일곱 플랫폼의 정확한 RC 태그가 필요합니다")
+        plan["rc_cohort"] = cohort
+    if channel == "preview" and policy["recipe"]["id"] == "platform-contracts-preview":
+        plan["upstream_evidence"] = upstream_evidence(plan["components"]["recipe"])
     plan["notes_sha256"] = hashlib.sha256(notes(plan, policy).encode()).hexdigest()
     return plan
 
 
+def resolve_module_query(path, query):
+    with tempfile.TemporaryDirectory(prefix="spine-cli-preview-recipe-") as directory:
+        env = dict(os.environ, GOWORK="off", GOFLAGS=" ", GOTOOLCHAIN="local")
+        proxy = run("go", "env", "GOPROXY", cwd=directory, env=env)
+        if proxy == "https://proxy.golang.org,direct":
+            env["GOPROXY"] = "direct"
+        try:
+            value = json.loads(run("go", "list", "-m", "-json", path + "@" + query, cwd=directory, env=env))
+        except ValueError as exc:
+            raise ReleaseError("Preview 모듈 조회 결과가 올바른 JSON이 아닙니다") from exc
+    version = value.get("Version", "")
+    if value.get("Path") != path or value.get("Replace") or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version):
+        raise ReleaseError("Preview 모듈을 고정 버전으로 해석하지 못했습니다: " + path)
+    return version
+
+
 def components(policy):
-    recipe = policy["recipe"]
+    recipe = json.loads(json.dumps(policy["recipe"]))
+    queries = {path: version for path, version in recipe["modules"].items() if version == "preview"}
+    if queries:
+        recipe["queries"] = queries
+        for path, query in queries.items():
+            recipe["modules"][path] = resolve_module_query(path, query)
     digest = hashlib.sha256(json.dumps(recipe, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return {"recipe": recipe, "recipe_sha256": digest}
 
@@ -278,7 +433,7 @@ def notes(plan, policy):
             f"소스: `{plan['source_sha']}`\n\n이전 단계: `{plan['source_tag'] or '없음'}`\n\n"
             f"레시피 SHA-256: `{plan['components']['recipe_sha256']}`\n\n"
             f"관찰 기간 단축 사유: {plan['observation_override_reason'] or '없음'}\n\n"
-            "상세 검증 결과는 첨부 release-manifest.json을 확인하세요.\n")
+            "상세 검증 결과는 release-manifest.json을 확인하세요.\n")
 
 
 def review_files(plan, policy, directory):
@@ -293,6 +448,10 @@ def review_files(plan, policy, directory):
 
 def collect_reports(directory, plan, query):
     reports = [json.loads(p.read_text(encoding="utf-8")) for p in Path(directory).glob("**/release-validation.json")]
+    return validate_reports(reports, plan, query)
+
+
+def validate_reports(reports, plan, query):
     required = plan["required_public_os"]
     if sorted(r.get("os") for r in reports) != sorted(required):
         raise ReleaseError("공개 설치 결과의 OS가 누락되거나 중복됐습니다")
@@ -301,6 +460,14 @@ def collect_reports(directory, plan, query):
                 report.get("query") != query or report.get("components") != plan["components"] or
                 set(report.get("entrypoints", [])) != {"spine", "spine-cli"}):
             raise ReleaseError("공개 설치 결과가 발행 계획과 다릅니다")
+        if plan.get("upstream_evidence") is not None and (
+                report.get("upstream_evidence") != plan["upstream_evidence"] or
+                report.get("combination_checks") != ["echo-full", "nethttp-full"]):
+            raise ReleaseError("공개 설치 결과에 코어와 플랫폼의 조합 검증이 없습니다")
+        if plan.get("rc_cohort") is not None and (
+                report.get("rc_cohort") != plan["rc_cohort"] or
+                report.get("rc_combination_checks") != ["echo-full", "nethttp-full"]):
+            raise ReleaseError("RC 공개 설치 결과에 전체 RC 조합 검증이 없습니다")
     return reports
 
 
@@ -317,26 +484,30 @@ def publish(github, policy, plan, verified_sha, reports_directory):
     # 승인 대기 중 태그, 정책, 관찰 기간이 바뀌었는지 쓰기 직전에 다시 검사합니다.
     fresh = make_plan(github, policy, plan["channel"], plan["version"],
                       plan["source_tag"] or plan["source_sha"], plan["observation_override_reason"])
-    for key in ("source_sha", "source_tree", "branch", "promotion_pr", "channel", "version", "components", "notes_sha256", "required_public_os"):
-        if fresh[key] != plan[key]:
+    for key in ("source_sha", "source_tree", "branch", "promotion_pr", "source_evidence", "channel", "version", "components", "notes_sha256", "required_public_os", "upstream_evidence", "rc_cohort"):
+        if fresh.get(key) != plan.get(key):
             raise ReleaseError("승인한 계획이 바뀌었습니다. 새 실행이 필요합니다")
     github.api("git/refs", method="POST", data={"ref": f"refs/tags/{plan['version']}", "sha": verified_sha})
 
 
-def finish(github, policy, plan, reports_directory):
+def finish(github, policy, plan, reports_directory, manifest_path="release-manifest.json"):
     reports = collect_reports(reports_directory, plan, plan["version"])
     if github.tag_sha(plan["version"]) != plan["source_sha"]:
         raise ReleaseError("공개 태그가 발행 계획과 다릅니다")
+    if "upstream_evidence" in plan and upstream_evidence(plan["components"]["recipe"]) != plan["upstream_evidence"]:
+        raise ReleaseError("태그 생성 후 선행 발행 근거가 바뀌었습니다")
     manifest = dict(plan, validation={"result": "passed", "version": plan["version"],
                                     "source_sha": plan["source_sha"], "components": plan["components"],
                                     "reports": reports})
     with tempfile.TemporaryDirectory(prefix="spine-cli-release-publish-") as directory:
-        path = Path(directory) / "release-manifest.json"
-        path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         review_files(plan, policy, directory)
+        path = Path(manifest_path).resolve()
+        path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        # 후보는 태그와 Actions artifact로 검증 기록을 남기고 정식 버전만 GitHub Release를 공개합니다.
+        if plan["channel"] != "stable":
+            return
         args = ["gh", "release", "create", plan["version"], str(path), "--repo", github.repository,
-                "--verify-tag", "--title", plan["version"], "--notes-file", str(Path(directory)/"release-notes.md")]
-        args += ["--latest"] if plan["channel"] == "stable" else ["--prerelease", "--latest=false"]
+                "--verify-tag", "--title", plan["version"], "--notes-file", str(Path(directory)/"release-notes.md"), "--latest"]
         run(*args)
 
 
@@ -346,6 +517,7 @@ def main():
     parser.add_argument("--policy", default=".github/release-policy.json")
     parser.add_argument("--plan", default="release-plan.json")
     parser.add_argument("--reports", default="public-reports")
+    parser.add_argument("--manifest", default="release-manifest.json")
     args = parser.parse_args()
     policy = json.loads(Path(args.policy).read_text(encoding="utf-8"))
     validate_policy(policy)
@@ -384,7 +556,7 @@ def main():
         if args.command == "tag":
             publish(github, policy, plan, os.environ["VERIFIED_SHA"], args.reports)
         else:
-            finish(github, policy, plan, args.reports)
+            finish(github, policy, plan, args.reports, args.manifest)
 
 
 if __name__ == "__main__":

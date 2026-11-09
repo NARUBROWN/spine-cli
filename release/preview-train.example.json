@@ -1,0 +1,11 @@
+{
+  "github.com/NARUBROWN/spine": {"version": "<preview tag>", "source_sha": "<40-character SHA>"},
+  "github.com/NARUBROWN/spine-echo-platform": {"version": "<preview tag>", "source_sha": "<40-character SHA>"},
+  "github.com/NARUBROWN/spine-nethttp-platform": {"version": "<preview tag>", "source_sha": "<40-character SHA>"},
+  "github.com/NARUBROWN/spine-gorilla-platform": {"version": "<preview tag>", "source_sha": "<40-character SHA>"},
+  "github.com/NARUBROWN/spine-kafka-platform": {"version": "<preview tag>", "source_sha": "<40-character SHA>"},
+  "github.com/NARUBROWN/spine-rabbitmq-platform": {"version": "<preview tag>", "source_sha": "<40-character SHA>"},
+  "github.com/NARUBROWN/spine-nats-platform": {"version": "<preview tag>", "source_sha": "<40-character SHA>"},
+  "github.com/NARUBROWN/spine-validator-playground": {"version": "<preview tag>", "source_sha": "<40-character SHA>"},
+  "github.com/NARUBROWN/spine-cli": {"version": "<preview tag>", "source_sha": "<40-character SHA>"}
+}

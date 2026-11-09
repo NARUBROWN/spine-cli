@@ -2,6 +2,7 @@ package cli
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type apiType struct {
@@ -191,7 +193,23 @@ func (catalog *apiSchemas) structure(structure *ast.StructType, source *layoutSo
 			if property == "" {
 				property = name.Name
 			}
-			properties[property] = catalog.expression(field.Type, source)
+			schema := catalog.expression(field.Type, source)
+			if field.Tag != nil {
+				if raw, err := strconv.Unquote(field.Tag.Value); err == nil {
+					tags := reflect.StructTag(raw)
+					if description, ok := tags.Lookup("description"); ok {
+						schema["description"] = description
+					}
+					if example, ok := tags.Lookup("example"); ok {
+						if value, valid := staticFieldExample(field.Type, example, source); valid && (!strings.Contains(tags.Get("json"), ",string") || staticTimeType(field.Type, source)) {
+							schema["examples"] = []any{value}
+						} else {
+							schema["x-spine-unresolved-example"] = true
+						}
+					}
+				}
+			}
+			properties[property] = schema
 			if !omitEmpty {
 				required = append(required, property)
 			}
@@ -265,4 +283,84 @@ func pathParameterSchema(typeName string) map[string]any {
 	default:
 		return unresolvedAPISchema(typeName)
 	}
+}
+
+func staticTimeType(expression ast.Expr, source *layoutSource) bool {
+	switch node := expression.(type) {
+	case *ast.StarExpr:
+		return staticTimeType(node.X, source)
+	case *ast.ParenExpr:
+		return staticTimeType(node.X, source)
+	case *ast.SelectorExpr:
+		alias, ok := node.X.(*ast.Ident)
+		return ok && node.Sel.Name == "Time" && source != nil && source.File != nil && importPathsByAlias(source.File)[alias.Name] == "time"
+	}
+	return false
+}
+
+func staticFieldExample(expression ast.Expr, text string, source *layoutSource) (any, bool) {
+	if staticTimeType(expression, source) {
+		_, err := time.Parse(time.RFC3339Nano, text)
+		return text, err == nil
+	}
+	if pointer, ok := expression.(*ast.StarExpr); ok {
+		return staticFieldExample(pointer.X, text, source)
+	}
+	if paren, ok := expression.(*ast.ParenExpr); ok {
+		return staticFieldExample(paren.X, text, source)
+	}
+	id, ok := expression.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	switch id.Name {
+	case "string":
+		return text, true
+	case "bool":
+		v, err := strconv.ParseBool(text)
+		return v, err == nil
+	case "int", "int8", "int16", "int32", "int64":
+		bits := 64
+		switch id.Name {
+		case "int8":
+			bits = 8
+		case "int16":
+			bits = 16
+		case "int32":
+			bits = 32
+		}
+		if _, err := strconv.ParseInt(text, 10, bits); err != nil {
+			return nil, false
+		}
+		if !json.Valid([]byte(text)) {
+			return nil, false
+		}
+		return json.Number(text), true
+	case "uint", "uint8", "uint16", "uint32", "uint64":
+		bits := 64
+		switch id.Name {
+		case "uint8":
+			bits = 8
+		case "uint16":
+			bits = 16
+		case "uint32":
+			bits = 32
+		}
+		if _, err := strconv.ParseUint(text, 10, bits); err != nil {
+			return nil, false
+		}
+		if !json.Valid([]byte(text)) {
+			return nil, false
+		}
+		return json.Number(text), true
+	case "float32", "float64":
+		if _, err := strconv.ParseFloat(text, 64); err != nil || !json.Valid([]byte(text)) {
+			return nil, false
+		}
+		if !json.Valid([]byte(text)) {
+			return nil, false
+		}
+		return json.Number(text), true
+	}
+	return nil, false
 }

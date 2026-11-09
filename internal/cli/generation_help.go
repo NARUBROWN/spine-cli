@@ -21,8 +21,8 @@ func generationHelp(command string, args []string, out, errOut io.Writer) (bool,
 			kind = args[0]
 		}
 		if command == "new" {
-			fmt.Fprintln(out, "Usage: spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--platform echo|none] [--event-platform [name:]kafka|rabbitmq ...] [--validator none|playground] [--websocket-platform none|gorilla] [--skip-install] [--dry-run] [--json] [--if-match <hash>] [--force]")
-			fmt.Fprintln(out, "\n기본값: layered-v1, HTTP echo, WebSocket none, validator none. --websocket-platform gorilla는 독립 WS 구현을 선택하며 HTTP echo가 필요합니다. 공개 pseudo-version 레시피의 의존성 설치와 정적 검사/빌드. 이벤트는 --event-platform을 반복해 선택합니다. --platform none은 이벤트 worker입니다. playground는 Go 1.26.0 이상이 필요합니다. 생성 후 cd <project>와 spine dev를 실행합니다.\n--skip-install: 파일만 생성. 이때는 go mod tidy 후 spine dev를 실행합니다.\n--force: --skip-install과 함께만 사용합니다.\n\n예:\n  spine new shop-api --module example.com/shop\n  spine new shop-api --module example.com/shop --skip-install")
+			fmt.Fprintln(out, "Usage: spine new <project> [--module <module-path>] [--layout layered-v1|legacy] [--channel preview|rc|main] [--platform provider|none] [--event-platform [name:]provider ...] [--validator none|provider] [--websocket-platform none|provider] [--frontend none|provider] [--frontend-root <path>] [--interactive|--no-interactive] [--skip-install] [--dry-run] [--json] [--if-match <hash>] [--force]")
+			fmt.Fprintln(out, "\nWhen run in a terminal, the wizard selects the dependency channel, HTTP adapter, event adapters, WebSocket provider, validator, and frontend in that order. Defaults: main channel, layered-v1, HTTP echo, no events, no WebSocket, no validator, and no frontend. Enter a choice number or search by name. Unlisted provider names follow the provider module contract.\n--channel: preview resolves moving @preview branches, rc selects the latest published RC or release tag, and main selects the latest published release tag. The selected channel is stored in spine.toml and reused by spine update.\n--interactive: start the wizard for non-terminal input. It cannot be combined with --json. --no-interactive: skip the wizard, including in a terminal.\n--frontend: React CSR is built in. Other providers resolve github.com/NARUBROWN/spine-frontend-<provider> from the selected channel and read spine-frontend.json. --frontend-root defaults to frontend.\n--websocket-platform requires an HTTP provider. --event-platform can be repeated. --platform none creates an event worker. playground requires Go 1.26.0 or later.\n--skip-install: resolve versions and metadata, then generate files without installing dependencies or verifying the build. Run go mod tidy afterward. When a frontend is selected, also run npm --prefix <frontend-root> install.\n--force: available only with --skip-install.\n\nExamples:\n  spine new shop-api --module example.com/shop\n  spine new shop-api --module example.com/shop --channel rc\n  spine new shop-api --module example.com/shop --frontend react --frontend-root web")
 			return true, 0
 		}
 		usage, ok := generatorUsage(kind)
@@ -44,7 +44,7 @@ func generationHelp(command string, args []string, out, errOut io.Writer) (bool,
 
 func generationValueOption(argument string) bool {
 	switch argument {
-	case "--module", "--layout", "--platform", "--event-platform", "--validator", "--websocket-platform", "--if-match", "--field", "--depends", "--method", "--path", "--handler", "--topic", "--storage":
+	case "--module", "--layout", "--channel", "--platform", "--event-platform", "--validator", "--websocket-platform", "--frontend", "--frontend-root", "--if-match", "--field", "--depends", "--method", "--path", "--handler", "--topic", "--storage":
 		return true
 	}
 	return false
@@ -82,53 +82,53 @@ func generatorRegisters(kind string) bool {
 
 func printGeneratorGuide(kind string, out io.Writer) {
 	if kind == "" {
-		fmt.Fprintln(out, "\nlayered-v1 기본 경로: domain=database/domain, repository=src/repository, dto=src/dto, service=src/service, controller=src/controller, route=src/route/route.go.\n그룹은 역할마다 독립적으로 선택합니다. g <kind> --help에서 예제를 확인하세요.\n\n예:\n  spine g domain account/user --field id:int64\n  spine g repository account/user\n  spine g route get-user --method GET --path /users/:id --handler src/controller/account:UserController.Get")
+		fmt.Fprintln(out, "\nlayered-v1 roots: domain=database/domain, repository=src/repository, dto=src/dto, service=src/service, controller=src/controller, route=src/route/route.go.\nEach role accepts an independent optional group. Run spine g <kind> --help for focused examples.\n\nExamples:\n  spine g domain account/user --field id:int64\n  spine g repository account/user\n  spine g route get-user --method GET --path /users/:id --handler src/controller/account:UserController.Get")
 		return
 	}
 	examples := []string{}
 	if role, ok := roleFor(kind); ok {
-		fmt.Fprintf(out, "\nlayered-v1 생성 위치: %s/[group/] 파일. 그룹은 선택 사항입니다.\n", role.Root)
+		fmt.Fprintf(out, "\nlayered-v1 output: files under %s/[group/]. The group is optional.\n", role.Root)
 		if role.Constructor {
-			fmt.Fprintf(out, "타입 이름에는 %s를 붙이고 생성자와 DI 등록을 연결합니다. --no-register는 파일만 생성합니다.\n--depends는 실제 모듈 상대 패키지 경로와 타입을 받습니다.\nlegacy의 --depends는 같은 패키지의 파일 이름을 받습니다.\n", role.Suffix)
+			fmt.Fprintf(out, "Generated type names use the %s suffix and connect constructors to DI registration. --no-register generates only the file.\n--depends accepts a module-relative package path and type.\nIn legacy layouts, --depends accepts a file name from the same package.\n", role.Suffix)
 		} else {
-			fmt.Fprintln(out, "명시한 필드만 생성하며 DI에 등록하지 않습니다. domain과 DTO 생성기는 layered-v1에서 사용합니다.")
+			fmt.Fprintln(out, "Only the specified fields are generated. The type is not registered with DI. Domain and DTO generators require layered-v1.")
 		}
 	}
 	switch kind {
 	case "domain":
 		examples = []string{"spine g domain user --field id:int64", "spine g domain account/user --field name:string"}
 	case "dto":
-		fmt.Fprintln(out, "DTO는 JSON 태그를 생성합니다. HTTP 본문 인자는 *CreateUserRequest처럼 포인터로 받습니다.")
+		fmt.Fprintln(out, "DTO fields include JSON tags. Receive HTTP body arguments as pointers such as *CreateUserRequest.")
 		examples = []string{"spine g dto create-user-request --field name:string", "spine g dto account/create-user-request --field name:string"}
 	case "repository":
 		examples = []string{"spine g repository user", "spine g repository account/user"}
 	case "service":
 		examples = []string{"spine g service user", "spine g service account/user --depends src/repository/account:UserRepository"}
 	case "controller":
-		fmt.Fprintln(out, "controller는 구조체와 생성자를 만듭니다. 메서드를 작성한 뒤 g route로 HTTP 경로를 등록합니다.\n성공 응답은 httpx.Response[T], httpx.Binary, httpx.Redirect를 사용하고 실패는 error로 반환합니다.")
+		fmt.Fprintln(out, "A controller generates a struct and constructor. Implement the method, then register its HTTP path with spine g route.\nReturn successful responses with httpx.Response[T], httpx.Binary, or httpx.Redirect. Return failures as error.")
 		examples = []string{"spine g controller user", "spine g controller admin/user --depends src/service/account:UserService"}
 	case "resource":
-		fmt.Fprintln(out, "layered-v1: 같은 그룹의 domain/repository/service/controller와 DI 등록을 생성합니다. DTO와 HTTP 경로는 별도로 추가합니다.")
+		fmt.Fprintln(out, "In layered-v1, this generates domain, repository, service, and controller types in the same group and registers them with DI. Add DTOs and HTTP paths separately.")
 		examples = []string{"spine g resource user", "spine g resource account/user --no-register"}
 	case "route":
-		fmt.Fprintln(out, "layered-v1 등록 위치: src/route/route.go. 실제 핸들러 메서드를 먼저 작성합니다.\n--handler는 모듈 상대 package/path:Type.Method입니다. path.Int 같은 인자로 :id를 받고 본문 DTO는 포인터로 받습니다.\n성공 응답: httpx.Response[T], httpx.Binary, httpx.Redirect. 실패 응답: error 또는 (httpx.Response[T], error).\nraw DTO/string은 직접 반환하지 말고 httpx.Response[T].Body로 감쌉니다.")
+		fmt.Fprintln(out, "In layered-v1, core v0.7.0-preview.5 or later registers routes in the controller's RegisterRoutes method. Older cores use src/route/route.go. Implement the handler method first.\n--handler uses module-relative package/path:Type.Method syntax. With a supporting Preview core, declare one scalar input.Path argument for each route key in route order. Use separate DTO pointers for body, query, and header inputs.\nSuccessful returns: httpx.Response[T], httpx.Binary, or httpx.Redirect. Failure returns: error or (httpx.Response[T], error).\nWrap raw DTO, slice, and string values in httpx.Response[T].Body.")
 		examples = []string{"spine g route create-user --method POST --path /users --handler src/controller:UserController.Create", "spine g route get-user --method GET --path /users/:id --handler src/controller/account:UserController.Get"}
 	case "consumer":
-		fmt.Fprintln(out, "생성 위치: src/consumer/[group/]name. 생성자와 수신 계약을 등록합니다. 미구현 오류를 업무 코드로 바꾼 뒤 검증하세요.")
+		fmt.Fprintln(out, "Output: src/consumer/[group/]name. The generator registers the constructor and receive contract. Replace the unimplemented error with application logic before verification.")
 		examples = []string{"spine g consumer order --topic order.created --field order_id:int64", "spine g consumer account/order --topic order.created --field order_id:int64"}
 	case "websocket":
-		fmt.Fprintln(out, "생성 위치: src/websocket/[group/]name. 생성자와 WS 경로를 등록합니다. 미구현 오류를 업무 코드로 바꾼 뒤 검증하세요.")
+		fmt.Fprintln(out, "Output: src/websocket/[group/]name. The generator registers the constructor and WebSocket path. Replace the unimplemented error with application logic before verification.")
 		examples = []string{"spine g websocket chat --path /ws/chat --field message:string", "spine g websocket account/chat --path /ws/chat --field message:string"}
 	case "slice":
-		fmt.Fprintln(out, "legacy 전용입니다. 새 layered-v1 앱에서는 역할별 생성기를 사용합니다.")
+		fmt.Fprintln(out, "Available only for legacy layouts. Use the role-specific generators in new layered-v1 applications.")
 		examples = []string{"spine g slice order --storage memory --field name:string"}
 	}
 	if kind != "slice" {
-		fmt.Fprintln(out, "\n다음 예제는 layered-v1 기준입니다.")
+		fmt.Fprintln(out, "\nThe following examples use layered-v1.")
 	}
-	fmt.Fprintln(out, "\n예:")
+	fmt.Fprintln(out, "\nExamples:")
 	for _, example := range examples {
 		fmt.Fprintln(out, "  "+example)
 	}
-	fmt.Fprintln(out, "\n직접 적용하거나 --dry-run으로 변경을 먼저 확인할 수 있습니다. JSON 계획과 --if-match는 자동화와 검토한 계획 적용에 사용합니다.\n새 앱은 layered-v1, 기존 layout 미지정 앱은 legacy 규칙을 사용합니다.")
+	fmt.Fprintln(out, "\nApply directly or use --dry-run to inspect changes first. Use the JSON plan and --if-match to automate application of a reviewed plan.\nNew applications use layered-v1. Existing applications without a layout keep legacy rules.")
 }

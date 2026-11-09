@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 	formatName := ""
 	outputPath := ""
 	force := false
+	source := ""
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
 		case "--format":
@@ -30,6 +33,13 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 			outputPath = args[index]
 		case "--force":
 			force = true
+		case "--source":
+			if index+1 >= len(args) {
+				fmt.Fprintln(errOut, "--source requires runtime or static")
+				return 1
+			}
+			index++
+			source = args[index]
 		default:
 			fmt.Fprintf(errOut, "unknown option: %s\n", args[index])
 			return 1
@@ -38,6 +48,26 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 	if formatName != "openapi" && formatName != "asyncapi" {
 		fmt.Fprintln(errOut, "contract export supports --format openapi or --format asyncapi")
 		return 1
+	}
+	if source == "" {
+		source = "static"
+	}
+	if source != "runtime" && source != "static" || formatName == "asyncapi" && source != "static" {
+		fmt.Fprintln(errOut, "--source supports runtime or static for OpenAPI; AsyncAPI uses static")
+		return 1
+	}
+	if source == "runtime" {
+		contents, err := executeRuntimeOpenAPI()
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		var formatted bytes.Buffer
+		if err := json.Indent(&formatted, contents, "", "  "); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return writeAPIExport(formatted.Bytes(), formatName, outputPath, force, out, errOut)
 	}
 	contract, err := inspectApplication()
 	if err != nil {
@@ -63,6 +93,10 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
+	return writeAPIExport(contents, formatName, outputPath, force, out, errOut)
+}
+
+func writeAPIExport(contents []byte, formatName, outputPath string, force bool, out, errOut io.Writer) int {
 	contents = append(contents, '\n')
 	if outputPath == "" {
 		_, _ = out.Write(contents)
@@ -99,18 +133,71 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 				"default": map[string]any{"description": "Response status is determined by the Spine handler contract."},
 			},
 		}
+		if len(route.Tags) > 0 {
+			operation["tags"] = route.Tags
+		}
+		if route.Summary != "" {
+			operation["summary"] = route.Summary
+		}
+		if route.Description != "" {
+			operation["description"] = route.Description
+		}
 		var parameters []any
 		var unresolved []string
 		for _, parameter := range route.Parameters {
+			if parameter.SourceDTO && len(parameter.InputFields) > 0 {
+				for _, field := range parameter.InputFields {
+					schema := nullableInputSchema(catalog.schema(field.Type, field.source), field.Type, parameter.Binding)
+					if parameter.scalarPath {
+						schema = scalarPathSchema(field.Type)
+					}
+					if field.description != "" {
+						schema["description"] = field.description
+					}
+					if field.hasExample {
+						schema["examples"] = []any{field.example}
+					}
+					if field.invalidExample {
+						schema["x-spine-unresolved-example"] = true
+					}
+					item := map[string]any{"name": field.Name, "in": parameter.Binding, "required": parameter.Binding == "path", "schema": schema}
+					if !parameter.scalarPath {
+						item["x-spine-validation-unresolved"] = true
+					}
+					parameters = append(parameters, item)
+				}
+				continue
+			}
 			switch parameter.Binding {
 			case "path":
+				if parameter.SourceDTO {
+					for _, key := range parameter.Keys {
+						parameters = append(parameters, map[string]any{"name": key, "in": "path", "required": true, "schema": unresolvedAPISchema(parameter.Type + "." + key)})
+					}
+					continue
+				}
 				parameters = append(parameters, map[string]any{
 					"name": parameter.Key, "in": "path", "required": true, "schema": pathParameterSchema(parameter.Type),
 				})
 			case "body":
-				operation["requestBody"] = map[string]any{
-					"content": map[string]any{"application/json": map[string]any{"schema": catalog.schema(parameter.Type, route.schemaSource)}},
+				payload, source := parameter.Type, route.schemaSource
+				if parameter.Payload != "" {
+					payload, source = parameter.Payload, parameter.payloadSource
 				}
+				content := map[string]any{"application/json": map[string]any{"schema": catalog.schema(payload, source)}}
+				requestBody := map[string]any{"content": content}
+				if parameter.Payload == "" {
+					form, ok, unresolved := catalog.staticFormContent(payload, source)
+					if ok {
+						requestBody["content"] = form
+					}
+					if unresolved {
+						requestBody["content"] = map[string]any{}
+						requestBody["x-spine-unresolved-content"] = true
+					}
+				}
+				operation["requestBody"] = requestBody
+
 			case "query", "header", "value":
 				unresolved = append(unresolved, parameter.Name+":"+parameter.Type+"@"+parameter.Binding)
 			}
@@ -154,6 +241,10 @@ func openAPIPath(path string) string {
 }
 
 func operationID(route httpRegistration) string {
+	if strings.Contains(route.Handler, ".RegisterRoutes[") {
+		digest := sha256.Sum256([]byte(route.Method + " " + route.Path))
+		return fmt.Sprintf("%s_%x", strings.ToLower(route.Method), digest[:8])
+	}
 	var result strings.Builder
 	for _, character := range route.Handler {
 		if unicode.IsLetter(character) || unicode.IsDigit(character) {
