@@ -81,7 +81,8 @@ func init() { if path := os.Getenv("SPINE_UPDATE_EXEC_MARKER"); path != "" { _ =
 	assertUpdateUnpublished(t, project, before)
 	var envelope struct {
 		Result struct {
-			Hash string `json:"base_hash"`
+			Hash    string           `json:"base_hash"`
+			Targets []selectedModule `json:"target_modules"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal([]byte(plan.stdout), &envelope); err != nil || envelope.Result.Hash == "" {
@@ -89,7 +90,7 @@ func init() { if path := os.Getenv("SPINE_UPDATE_EXEC_MARKER"); path != "" { _ =
 	}
 	apply := runE2E(binary, filepath.Join(project, "src/controller"), env, "update", "--if-match", envelope.Result.Hash)
 	assertE2ESuccess(t, apply, "apply update from nested package")
-	for _, text := range []string{"v0.5.2 -> " + currentAssemblySpineVersion, "go.mod", "go.sum", "static contract and build verified"} {
+	for _, text := range []string{"v0.5.2 -> " + selectedModuleVersion(envelope.Result.Targets, spineImportPath), "go.mod", "go.sum", "static contract and build verified"} {
 		if !strings.Contains(apply.stdout, text) {
 			t.Fatalf("completion lost %q: %s", text, apply.stdout)
 		}
@@ -100,6 +101,7 @@ func init() { if path := os.Getenv("SPINE_UPDATE_EXEC_MARKER"); path != "" { _ =
 	// 갱신한 공개 모듈 조합으로 TCP 요청까지 별도로 확인합니다.
 	writeE2EFile(t, filepath.Join(project, "internal/application/updated_http_test.go"), `package application
 import (
+ "github.com/NARUBROWN/spine"
  "context"
  "io"
  "net/http"
@@ -110,7 +112,8 @@ func TestUpdatedRecipeHTTP(t *testing.T) {
  app, options, err := BuildApplication(); if err != nil { t.Fatal(err) }
  prepared, err := app.Prepare(context.Background(), options); if err != nil { t.Fatal(err) }
  defer prepared.Close(context.Background())
- server := httptest.NewServer(prepared.Handler()); defer server.Close()
+ handler,err:=spine.NetHTTPHandler(prepared);if err!=nil {t.Fatal(err)}
+ server := httptest.NewServer(handler); defer server.Close()
  response, err := http.Get(server.URL+"/health"); if err != nil { t.Fatal(err) }
  defer response.Body.Close(); body, _ := io.ReadAll(response.Body)
  if response.StatusCode != 200 || string(body) != "{\"status\":\"ok\"}\n" { t.Fatalf("HTTP %d %s", response.StatusCode, body) }

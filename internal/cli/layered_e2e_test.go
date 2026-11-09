@@ -55,7 +55,9 @@ func TestLayeredGeneratedProjectEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	compositionText := strings.Replace(string(composition), "import (", "import (\n_ \"example.com/todo/src/repository/account\"", 1)
-	compositionText = strings.Replace(compositionText, "return app, boot.Options{", "if \"disabled\" == \"enabled\" { app.Route(\"GET\", \"/health\", (*controller.HealthController).Get) }\nreturn app, boot.Options{", 1)
+	if !strings.Contains(compositionText, "constructor.Controller(") {
+		compositionText = strings.Replace(compositionText, "return app, boot.Options{", "if \"disabled\" == \"enabled\" { app.Route(\"GET\", \"/health\", (*controller.HealthController).Get) }\nreturn app, boot.Options{", 1)
+	}
 	writeE2EFile(t, compositionPath, compositionText)
 	for _, group := range []string{"account/user", "admin/user"} {
 		apply(project, "g", "resource", group)

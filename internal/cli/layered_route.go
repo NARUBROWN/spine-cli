@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -13,7 +14,7 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 		return fmt.Errorf("handler requires package/path:Type.Method")
 	}
 	typ, method, ok := strings.Cut(handler, ".")
-	if !ok || !token.IsIdentifier(method) || !ast.IsExported(method) {
+	if !ok || !token.IsIdentifier(method) || !ast.IsExported(method) && !controllerRoutesProject() {
 		return fmt.Errorf("handler requires package/path:Type.Method")
 	}
 	dir, name, err := parseTypeReference(pkg + ":" + typ)
@@ -21,6 +22,8 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 		return err
 	}
 	found := 0
+	var handlerSource *layoutSource
+	var handlerFunction *ast.FuncDecl
 	for _, s := range p.Sources {
 		if s.Package != dir {
 			continue
@@ -34,26 +37,29 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 				continue
 			}
 			found++
+			handlerSource, handlerFunction = s, f
 			if f.Type.TypeParams != nil {
 				return fmt.Errorf("generic handlers are unsupported")
 			}
-			catalog := newHTTPBindingCatalog(p.Module, p.Sources)
+			modules, err := selectedModules(context.Background(), ".", true)
+			if err != nil {
+				return fmt.Errorf("HTTP binding module selection: %w", err)
+			}
+			catalog := newHTTPBindingCatalog(p.Module, p.Sources, selectedModuleVersion(modules, spineImportPath))
 			params, diagnostics := catalog.parameters(s, f.Type.Params, r.Path, r.Handler)
 			diagnostics = append(diagnostics, catalog.returns(s, f.Type.Results, r.Handler)...)
-			if len(diagnostics) > 0 {
-				return fmt.Errorf("%s: %s (%s). %s", diagnostics[0].Code, diagnostics[0].Message, diagnostics[0].Source, diagnostics[0].Hint)
-			}
-			bound := 0
-			for _, param := range params {
-				if param.Binding == "path" {
-					bound++
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Severity == "error" {
+					return fmt.Errorf("%s: %s (%s). %s", diagnostic.Code, diagnostic.Message, diagnostic.Source, diagnostic.Hint)
 				}
+			}
+			for _, param := range params {
 				if strings.HasPrefix(param.Type, "...") {
 					return fmt.Errorf("variadic handlers are unsupported")
 				}
 			}
-			if bound != len(contractPathKeys(r.Path)) {
-				return fmt.Errorf("HTTP path binding mismatch for %s", r.Handler)
+			if err := validateHTTPPathBindings(params, r.Path); err != nil {
+				return fmt.Errorf("HTTP path binding mismatch for %s: %w", r.Handler, err)
 			}
 		}
 	}
@@ -66,6 +72,15 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 	}
 	if dependency.Pointer != "*" {
 		return fmt.Errorf("route receiver requires a constructor returning *%s", name)
+	}
+	if controllerRoutesProject() {
+		if dependency.Factory != name+".Constructor" {
+			return fmt.Errorf("controller %s requires a Constructor method for route collection; keep legacy factory routes registered with app.Route or migrate to a controller prototype", name)
+		}
+		if err = p.addControllerRoute(r, dir, name, method, handlerSource, handlerFunction); err != nil {
+			return err
+		}
+		return p.registerConstructorRole(dir, dependency.Factory, "Controller")
 	}
 	if err = p.registerConstructor(dir, dependency.Factory); err != nil {
 		return err

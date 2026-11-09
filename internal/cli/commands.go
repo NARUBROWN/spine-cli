@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 )
@@ -41,10 +42,20 @@ func runProject(development bool, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
+	projectRoot, err := filepath.Abs(".")
+	if err != nil {
+		fmt.Fprintf(errOut, "could not resolve project directory: %v\n", err)
+		return 1
+	}
+	frontend, err := buildFrontend(projectRoot, config, true, errOut)
+	if err != nil {
+		fmt.Fprintf(errOut, "frontend build failed: %v\n", err)
+		return 1
+	}
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	// Go의 빌드 캐시는 로컬 replace와 워크스페이스 입력도 검증합니다.
-	binary, directory, err := buildDevBinaryContext(ctx, config, errOut)
+	binary, directory, err := buildDevBinaryContext(ctx, config, errOut, frontend)
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0
@@ -57,7 +68,7 @@ func runProject(development bool, out, errOut io.Writer) int {
 	if development {
 		environment = "development"
 	}
-	process, err := startApplicationProcess(binary, directory, config, environment, out, errOut)
+	process, err := startApplicationProcess(binary, directory, config, environment, out, errOut, frontend)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 1
@@ -74,7 +85,7 @@ func runProject(development bool, out, errOut io.Writer) int {
 		return 0
 	case <-ctx.Done():
 		if stopDevProcess(process, false) {
-			fmt.Fprintln(errOut, "Application exceeded the shutdown timeout and was killed.")
+			fmt.Fprintln(errOut, forcedTerminationMessage("Application", runtime.GOOS))
 			return 1
 		}
 		return 0
@@ -215,7 +226,25 @@ func runBuild(out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "could not create build output directory: %v\n", err)
 		return 1
 	}
-	return runGo([]string{"build", "-o", filepath.Join("bin", name), config.Entrypoint}, false, out, errOut)
+	projectRoot, err := filepath.Abs(".")
+	if err != nil {
+		fmt.Fprintf(errOut, "could not resolve project directory: %v\n", err)
+		return 1
+	}
+	frontend, err := buildFrontend(projectRoot, config, true, errOut)
+	if err != nil {
+		fmt.Fprintf(errOut, "frontend build failed: %v\n", err)
+		return 1
+	}
+	overlay, err := createFrontendOverlay(projectRoot, config, frontend)
+	if err != nil {
+		fmt.Fprintf(errOut, "frontend serving integration failed: %v\n", err)
+		return 1
+	}
+	if overlay != nil {
+		defer overlay.cleanup()
+	}
+	return runGo(applicationBuildArgs(config, filepath.Join("bin", name), overlay), false, out, errOut)
 }
 
 func projectName() (string, error) {
@@ -238,7 +267,7 @@ func runCompletion(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "usage: spine completion <powershell|bash|zsh>")
 		return 1
 	}
-	commands := "new update generate g dev run test check inspect explain verify contract doctor capabilities schema context build completion help version"
+	commands := "new update generate g dev run test check inspect explain verify contract doctor capabilities schema context build licenses completion help version"
 	switch args[0] {
 	case "powershell":
 		fmt.Fprintf(out, "Register-ArgumentCompleter -Native -CommandName spine -ScriptBlock { param($wordToComplete) '%s'.Split(' ') | Where-Object { $_ -like \"$wordToComplete*\" } }\n", commands)

@@ -14,6 +14,15 @@ on:
       observation_override_reason:
         type: string
         default: ''
+    secrets:
+      RELEASE_EVIDENCE_TOKEN:
+        required: false
+      DISCORD_WEBHOOK_PREVIEW:
+        required: false
+      DISCORD_WEBHOOK_RC:
+        required: false
+      DISCORD_WEBHOOK_RELEASE:
+        required: false
 permissions:
   contents: read
   actions: read
@@ -28,10 +37,15 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+          cache: false
       - name: Validate release policy and source
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_EVIDENCE_TOKEN: ${{ secrets.RELEASE_EVIDENCE_TOKEN }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_SOURCE: ${{ inputs.source }}
@@ -50,6 +64,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.plan.outputs.sha }}
+      channel: ${{ inputs.channel }}
   public-before-tag:
     needs: plan
     uses: ./.github/workflows/release-public-check.yml
@@ -69,6 +84,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+          cache: false
       - uses: actions/download-artifact@v4
         with:
           name: release-plan
@@ -79,8 +98,18 @@ jobs:
       - name: Create immutable tag after verification and approval
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_EVIDENCE_TOKEN: ${{ secrets.RELEASE_EVIDENCE_TOKEN }}
           VERIFIED_SHA: ${{ needs.ci.outputs.verified_sha }}
         run: python3 scripts/release/release.py tag
+      - name: Notify Discord of the new tag
+        uses: NARUBROWN/spine/.github/actions/discord-tag@b55c182f4d0722fca5aaf3b963bca20cf0dcc4d4
+        continue-on-error: true
+        timeout-minutes: 1
+        with:
+          plan: release-plan.json
+          webhook_preview: ${{ secrets.DISCORD_WEBHOOK_PREVIEW }}
+          webhook_rc: ${{ secrets.DISCORD_WEBHOOK_RC }}
+          webhook_release: ${{ secrets.DISCORD_WEBHOOK_RELEASE }}
   public-after-tag:
     needs: [plan, tag]
     uses: ./.github/workflows/release-public-check.yml
@@ -106,7 +135,14 @@ jobs:
         with:
           pattern: public-after-tag-*
           path: public-reports
-      - name: Publish release with verified manifest
+      - name: Record verified tag and publish Production release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_EVIDENCE_TOKEN: ${{ secrets.RELEASE_EVIDENCE_TOKEN }}
         run: python3 scripts/release/release.py finish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ needs.plan.outputs.version }}
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 90

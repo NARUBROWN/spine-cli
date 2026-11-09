@@ -8,33 +8,69 @@ import (
 )
 
 const (
-	currentAssemblyRecipe       = "platform-contracts-v0.6.5"
-	legacyWebSocketRecipe       = "platform-contracts-20261103"
-	currentAssemblySpineVersion = "v0.6.5"
-	releasedPlatformVersion     = "v0.1.0"
-	webSocketSpineVersion       = "v0.6.1-0.20261103040400-9b1321410211"
-	gorillaPlatformPath         = "github.com/NARUBROWN/spine-gorilla-platform"
-	gorillaPlatformVersion      = "v0.0.0-20261103040512-36ad41dff88f"
+	currentAssemblyRecipe        = "platform-contracts-preview"
+	preview2AssemblyRecipe       = "platform-contracts-v0.7.0-preview.2"
+	preview1AssemblyRecipe       = "platform-contracts-v0.7.0-preview.1"
+	stableAssemblyRecipe         = "platform-contracts-v0.6.5"
+	legacyWebSocketRecipe        = "platform-contracts-20261103"
+	currentAssemblySpineVersion  = "v0.7.0-preview.2"
+	preview1AssemblySpineVersion = "v0.7.0-preview.1"
+	previewPlatformVersion       = "v0.2.0-preview.1"
+	releasedPlatformVersion      = "v0.1.0"
+	webSocketSpineVersion        = "v0.6.1-0.20261103040400-9b1321410211"
+	gorillaPlatformPath          = "github.com/NARUBROWN/spine-gorilla-platform"
+	gorillaPlatformVersion       = "v0.0.0-20261103040512-36ad41dff88f"
 )
 
 // 이전 WS 개발 레시피의 공개 버전을 그대로 보존합니다.
 func legacyWebSocketModules(options newProjectOptions) []selectedModule {
 	modules := assemblyModules(options.Platform, options.Events, options.Validator)
 	modules[0].Version = webSocketSpineVersion
-	if options.WebSocketPlatform == "gorilla" {
-		modules = append(modules, selectedModule{Path: gorillaPlatformPath, Version: gorillaPlatformVersion})
+	if options.WebSocketPlatform != "" && options.WebSocketPlatform != "none" {
+		version := "preview"
+		if options.WebSocketPlatform == "gorilla" {
+			version = gorillaPlatformVersion
+		}
+		modules = append(modules, selectedModule{Path: providerModule(options.WebSocketPlatform), Version: version})
+	}
+	return modules
+}
+
+func stableAssemblyModules(options newProjectOptions) []selectedModule {
+	modules := legacyWebSocketModules(options)
+	for index := range modules {
+		switch modules[index].Path {
+		case spineImportPath:
+			modules[index].Version = "v0.6.5"
+		case kafkaPlatformPath, rabbitPlatformPath, validatorPlatformPath, gorillaPlatformPath:
+			modules[index].Version = releasedPlatformVersion
+		}
 	}
 	return modules
 }
 
 func currentAssemblyModules(options newProjectOptions) []selectedModule {
-	modules := legacyWebSocketModules(options)
+	modules := previewAssemblyModules(options, currentAssemblySpineVersion)
+	for index := range modules {
+		if modules[index].Path != "github.com/labstack/echo/v5" {
+			modules[index].Version = "preview"
+		}
+	}
+	return modules
+}
+
+func isPreviewAssemblyRecipe(recipe string) bool {
+	return recipe == currentAssemblyRecipe || recipe == preview1AssemblyRecipe || recipe == preview2AssemblyRecipe
+}
+
+func previewAssemblyModules(options newProjectOptions, coreVersion string) []selectedModule {
+	modules := stableAssemblyModules(options)
 	for index := range modules {
 		switch modules[index].Path {
 		case spineImportPath:
-			modules[index].Version = currentAssemblySpineVersion
-		case kafkaPlatformPath, rabbitPlatformPath, validatorPlatformPath, gorillaPlatformPath:
-			modules[index].Version = releasedPlatformVersion
+			modules[index].Version = coreVersion
+		case echoPlatformPath, kafkaPlatformPath, rabbitPlatformPath, validatorPlatformPath, gorillaPlatformPath:
+			modules[index].Version = previewPlatformVersion
 		}
 	}
 	return modules
@@ -60,9 +96,13 @@ func (i *contractInspector) inspectWebSocketAdapter(config projectConfig, import
 	for _, arg := range call.Args {
 		direct, directOK := importedCall(arg, imports, spineImportPath, "WithWebSocketAdapter")
 		option, optionOK := importedCall(arg, imports, gorillaPlatformPath, "Option")
-		if !directOK && !optionOK {
+		dynamic, dynamicPath := dynamicPlatformOption(arg, imports, i.contract.HTTPAdapter.SelectedModules, "websocket")
+		if !directOK && !optionOK && dynamic == nil {
 			known := false
-			for _, owner := range [][2]string{{spineImportPath, "WithHTTPAdapter"}, {spineImportPath, "WithEventAdapter"}, {spineImportPath, "WithValidator"}, {echoPlatformPath, "Option"}} {
+			if d, _ := dynamicPlatformOption(arg, imports, i.contract.HTTPAdapter.SelectedModules, "http"); d != nil {
+				known = true
+			}
+			for _, owner := range [][2]string{{spineImportPath, "WithHTTPAdapter"}, {spineImportPath, "WithEventAdapter"}, {spineImportPath, "WithValidator"}, {echoPlatformPath, "Option"}, {nethttpPlatformPath, "Option"}} {
 				if _, ok := importedCall(arg, imports, owner[0], owner[1]); ok {
 					known = true
 				}
@@ -82,7 +122,9 @@ func (i *contractInspector) inspectWebSocketAdapter(config projectConfig, import
 			factory, ok := importedCall(assemblyValue(direct.Args[0], function.Body, direct.Pos()), imports, gorillaPlatformPath, "NewFactory")
 			valid = ok && len(factory.Args) == 0 && !factory.Ellipsis.IsValid()
 		}
-		if valid {
+		if dynamic != nil && dynamic.Provider != "gorilla" {
+			selection.Provider, selection.CanonicalFactory = dynamic.Provider, dynamicPath+"."+dynamic.Factory
+		} else if valid {
 			selection.Provider = "gorilla"
 			selection.CanonicalFactory = gorillaPlatformPath + ".NewFactory"
 		} else {
@@ -99,8 +141,8 @@ func (i *contractInspector) inspectWebSocketAdapter(config projectConfig, import
 		if !separated {
 			add("WEBSOCKET_CORE_INCOMPATIBLE", "selected Spine version does not provide the standalone WebSocket adapter API", assignment)
 		}
-		if selection.Provider == "gorilla" && selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, gorillaPlatformPath) == "" {
-			add("MODULE_GRAPH_UNAVAILABLE", "the selected graph does not contain the Gorilla platform", assignment)
+		if selection.Provider != "unresolved" && selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, providerModule(selection.Provider)) == "" {
+			add("MODULE_GRAPH_UNAVAILABLE", "the selected graph does not contain the WebSocket platform", assignment)
 		}
 	} else if len(i.contract.WebSockets) > 0 && !unsafeOptions {
 		if separated {

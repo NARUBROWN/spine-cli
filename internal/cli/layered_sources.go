@@ -52,7 +52,7 @@ func (sources layoutSources) constructorSignatures(module string) map[string][]l
 	for _, source := range sources.sortedFiles() {
 		for _, declaration := range source.File.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Recv != nil {
+			if !ok || function.Recv != nil && function.Name.Name != "Constructor" {
 				continue
 			}
 			signature := layoutConstructor{Dependencies: []string{}}
@@ -71,6 +71,18 @@ func (sources layoutSources) constructorSignatures(module string) map[string][]l
 				}
 			}
 			key := modulePackage(module, source.Package) + "." + function.Name.Name
+			if function.Recv != nil {
+				owner := strings.TrimPrefix(expressionText(source.Fset, function.Recv.List[0].Type), "*")
+				key = modulePackage(module, source.Package) + "." + owner + ".Constructor"
+				if signature.Output != "*"+modulePackage(module, source.Package)+":"+owner {
+					signature.Output = ""
+				}
+				for _, field := range function.Type.Params.List {
+					if _, variadic := field.Type.(*ast.Ellipsis); variadic {
+						signature.Output = ""
+					}
+				}
+			}
 			result[key] = append(result[key], signature)
 		}
 	}

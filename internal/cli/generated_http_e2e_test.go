@@ -38,13 +38,19 @@ func TestGeneratedProjectsHandleHTTPInputErrors(t *testing.T) {
 			apply(workspace, "new", "todo", "--module", "example.com/todo", "--layout", layout, "--websocket-platform", "gorilla")
 			project := filepath.Join(workspace, "todo")
 			mod, _ := os.ReadFile(filepath.Join(project, "go.mod"))
-			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+currentAssemblySpineVersion) {
+			selected := strings.TrimSpace(generatedGo(t, project, "list", "-m", "-f", "{{.Version}}", spineImportPath))
+			if !strings.Contains(string(mod), "github.com/NARUBROWN/spine "+selected) || selected == "" {
 				t.Fatalf("generated project uses an unfixed runtime: %s", mod)
 			}
 			if err := os.MkdirAll(filepath.Join(project, "handlers"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			writeE2EFile(t, filepath.Join(project, "handlers", "controller.go"), `package handlers
+			_, legacyRouteErr := os.Stat(filepath.Join(project, "src/route/route.go"))
+			if legacyRouteErr != nil && !os.IsNotExist(legacyRouteErr) {
+				t.Fatal(legacyRouteErr)
+			}
+			modern := layout == layeredLayout && os.IsNotExist(legacyRouteErr)
+			handlerSource := `package handlers
 import (
  "errors"
  "github.com/NARUBROWN/spine/pkg/httpx"
@@ -59,7 +65,8 @@ func (*Controller) Create(req *Request) httpx.Response[map[string]int64] {
 func (*Controller) Detail(id path.Int) httpx.Response[map[string]int64] {
  return httpx.Response[map[string]int64]{Body: map[string]int64{"id":id.Value}}
 }
-func (*Controller) Wrapped(req *path.Int) httpx.Response[map[string]int64] {
+type WrapperBody struct { Value int64 }
+func (*Controller) Wrapped(req *WrapperBody) httpx.Response[map[string]int64] {
  return httpx.Response[map[string]int64]{Body: map[string]int64{"value":req.Value}}
 }
 func (*Controller) Fail() error { return errors.New("internal fixture failure") }
@@ -68,7 +75,17 @@ func (*Controller) Text() TextResponse { return TextResponse{Body:"alias text"} 
 func (*Controller) Download() *httpx.Binary { return &httpx.Binary{ContentType:"application/octet-stream",Data:[]byte("binary data")} }
 func (*Controller) Redirect() httpx.Redirect { return httpx.Redirect{Location:"/health"} }
 
-`)
+`
+			handlerPath := filepath.Join(project, "handlers", "controller.go")
+			writeE2EFile(t, handlerPath, handlerSource)
+			if modern {
+				rejected := runE2E(binary, project, nil, "g", "route", "create", "--method", "POST", "--path", "/products", "--handler", "handlers:Controller.Create", "--dry-run", "--json")
+				if rejected.code == 0 || !strings.Contains(rejected.stdout, "requires a Constructor method") {
+					t.Fatalf("factory controller must fail safely: %+v", rejected)
+				}
+				handlerSource = strings.Replace(handlerSource, "func NewController() *Controller", "func (*Controller) Constructor() *Controller", 1)
+				writeE2EFile(t, handlerPath, handlerSource)
+			}
 			if layout == layeredLayout {
 				for _, route := range []struct{ name, method, path, handler string }{
 					{"create", "POST", "/products", "Create"}, {"detail", "GET", "/products/:id", "Detail"}, {"wrapper", "POST", "/wrapper", "Wrapped"}, {"fail", "GET", "/failure", "Fail"}, {"text", "GET", "/text", "Text"}, {"download", "GET", "/download", "Download"}, {"redirect", "GET", "/redirect", "Redirect"},

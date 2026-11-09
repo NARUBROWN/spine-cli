@@ -14,13 +14,14 @@ const commandSchemaVersion = "spine.command-schema/v1alpha1"
 const contextSchemaVersion = "spine.project-context/v1alpha1"
 
 type commandSchema struct {
-	SchemaVersion   string                      `json:"schema_version"`
-	CLIVersion      string                      `json:"cli_version"`
-	Protocol        string                      `json:"protocol_schema"`
-	GlobalOptions   map[string]optionDefinition `json:"global_options"`
-	Commands        []commandDefinition         `json:"commands"`
-	GenerationRoles []generationRole            `json:"generation_roles"`
-	Layouts         []string                    `json:"layouts"`
+	ControllerRoutes map[string]any              `json:"controller_routes"`
+	SchemaVersion    string                      `json:"schema_version"`
+	CLIVersion       string                      `json:"cli_version"`
+	Protocol         string                      `json:"protocol_schema"`
+	GlobalOptions    map[string]optionDefinition `json:"global_options"`
+	Commands         []commandDefinition         `json:"commands"`
+	GenerationRoles  []generationRole            `json:"generation_roles"`
+	Layouts          []string                    `json:"layouts"`
 }
 
 type commandDefinition struct {
@@ -57,20 +58,21 @@ func currentCommandSchema() commandSchema {
 	jsonOption := optionDefinition{Type: "boolean", Description: "Emit the versioned machine-readable result protocol"}
 	commands := []commandDefinition{
 		{Name: "build", Summary: "Build the configured application binary", Effects: commandEffects{WritesFiles: true, Network: true}},
+		{Name: "licenses", Summary: "Print third party license notices embedded in the CLI binary", Effects: commandEffects{}},
 		{Name: "capabilities", Summary: "Discover implemented features and explicit limits", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "check", Summary: "Run formatting, vet, and test checks", Effects: commandEffects{Network: true}},
 		{Name: "completion", Summary: "Generate shell completion", Arguments: []argumentDefinition{{Name: "shell", Required: true, Enum: []string{"powershell", "bash", "zsh"}}}, Effects: commandEffects{}},
 		{Name: "context", Summary: "Read a bounded project, doctor, and execution-contract context", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "contract check", Summary: "Validate the static execution contract", Options: map[string]optionDefinition{"json": jsonOption, "warnings-as-errors": {Type: "boolean"}}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "contract diff", Summary: "Compare the current contract with a semantic snapshot", Options: map[string]optionDefinition{"json": jsonOption, "against": {Type: "string"}}, Effects: commandEffects{}, SupportsJSON: true},
-		{Name: "contract export", Summary: "Export an OpenAPI or AsyncAPI document", Options: map[string]optionDefinition{"format": {Type: "string", Required: true, Enum: []string{"openapi", "asyncapi"}}, "output": {Type: "string", Required: true}, "force": {Type: "boolean"}}, Effects: commandEffects{WritesFiles: true}},
+		{Name: "contract export", Summary: "Export an API document from static source or runtime HTTP descriptions", Options: map[string]optionDefinition{"format": {Type: "string", Required: true, Enum: []string{"openapi", "asyncapi"}}, "source": {Type: "string", Enum: []string{"runtime", "static"}, Description: "Defaults to static; runtime OpenAPI executes BuildApplication and Go tooling without a listener; AsyncAPI uses static"}, "output": {Type: "string"}, "force": {Type: "boolean"}}, Effects: commandEffects{WritesFiles: true, Network: true}},
 		{Name: "contract probe", Summary: "Run isolated partial runtime reconciliation", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{WritesFiles: true, Network: true}, SupportsJSON: true},
 		{Name: "contract snapshot", Summary: "Persist the canonical semantic contract", Options: map[string]optionDefinition{"output": {Type: "string"}, "force": {Type: "boolean"}}, Effects: commandEffects{WritesFiles: true}},
 		{Name: "doctor", Summary: "Check local project prerequisites without external connections", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "explain", Summary: "Explain one HTTP, consumer, or WebSocket execution path", Arguments: []argumentDefinition{{Name: "kind", Required: true, Enum: []string{"http", "consumer", "websocket"}}, {Name: "selector", Required: true}}, Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "generate", Summary: "Generate and optionally register an application component", Arguments: []argumentDefinition{{Name: "kind", Required: true, Enum: []string{"resource", "slice", "consumer", "websocket", "controller", "service", "repository"}}, {Name: "name", Required: true}}, Options: map[string]optionDefinition{"json": jsonOption, "dry-run": {Type: "boolean"}, "if-match": {Type: "string", Description: "Require the target files to match a dry-run base hash"}, "force": {Type: "boolean"}, "register": {Type: "boolean"}, "no-register": {Type: "boolean"}, "storage": {Type: "string", Enum: []string{"memory"}}, "field": {Type: "string", Repeatable: true}, "depends": {Type: "string", Repeatable: true}, "topic": {Type: "string"}, "path": {Type: "string"}}, Effects: commandEffects{WritesFiles: true}, SupportsJSON: true, SupportsDryRun: true},
 		{Name: "inspect", Summary: "Inspect the canonical static execution contract", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
-		{Name: "new", Summary: "Create a Spine project with selected HTTP, event and validator implementations", Arguments: []argumentDefinition{{Name: "project", Required: true}}, Options: map[string]optionDefinition{"json": jsonOption, "module": {Type: "string"}, "dry-run": {Type: "boolean"}, "if-match": {Type: "string"}, "force": {Type: "boolean"}}, Effects: commandEffects{WritesFiles: true}, SupportsJSON: true, SupportsDryRun: true},
+		{Name: "new", Summary: "Create a Spine project with selected HTTP, event, validator and frontend implementations", Arguments: []argumentDefinition{{Name: "project", Required: true}}, Options: map[string]optionDefinition{"json": jsonOption, "module": {Type: "string"}, "dry-run": {Type: "boolean"}, "if-match": {Type: "string"}, "force": {Type: "boolean"}}, Effects: commandEffects{WritesFiles: true}, SupportsJSON: true, SupportsDryRun: true},
 		{Name: "schema", Summary: "Discover commands, arguments, options, and side effects", Options: map[string]optionDefinition{"json": jsonOption}, Effects: commandEffects{}, SupportsJSON: true},
 		{Name: "test", Summary: "Run all Go tests", Effects: commandEffects{Network: true}},
 		{Name: "update", Summary: "Update project dependencies to the selected bundled recipe without rewriting application source", Options: map[string]optionDefinition{"json": jsonOption, "dry-run": {Type: "boolean", Description: "Resolve and validate in a temporary copy without publishing project changes; may use network and Go caches"}, "if-match": {Type: "string", Description: "Require reviewed project inputs, recipe and dependency diff"}, "help": {Type: "boolean", Description: "Show help before reading project files"}}, Effects: commandEffects{WritesFiles: true, Network: true}, SupportsJSON: true, SupportsDryRun: true},
@@ -92,11 +94,16 @@ func currentCommandSchema() commandSchema {
 			c.Options["depends"] = d
 		}
 		if c.Name == "new" {
-			c.Options["platform"] = optionDefinition{Type: "string", Enum: []string{"echo", "none"}}
-			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "kafka|rabbitmq or unique name:kafka|rabbitmq; environment prefix SPINE_<NAME>_"}
-			c.Options["websocket-platform"] = optionDefinition{Type: "string", Enum: []string{"none", "gorilla"}, Description: "Default none; Gorilla requires HTTP echo"}
-			c.Options["validator"] = optionDefinition{Type: "string", Enum: []string{"none", "playground"}, Description: "Default none; playground requires Go 1.26.0+"}
-			c.Options["skip-install"] = optionDefinition{Type: "boolean", Description: "Generate files without dependency installation or build verification; offline dry-run"}
+			c.Options["channel"] = optionDefinition{Type: "string", Enum: []string{"preview", "rc", "main"}, Description: "Dependency channel; defaults to preview, rc selects published RC or release tags, and main selects published release tags"}
+			c.Options["platform"] = optionDefinition{Type: "string", Description: "HTTP provider or none; provider resolves from the selected dependency channel and metadata"}
+			c.Options["event-platform"] = optionDefinition{Type: "string", Repeatable: true, Description: "[name:]provider resolves NARUBROWN/spine-<provider>-platform from the selected channel and spine-platform.json; environment prefix SPINE_<NAME>_"}
+			c.Options["websocket-platform"] = optionDefinition{Type: "string", Description: "WebSocket provider or none; provider requires HTTP and resolves platform metadata"}
+			c.Options["validator"] = optionDefinition{Type: "string", Description: "Default none; provider resolves NARUBROWN/spine-validator-<provider> from the selected channel and spine-platform.json; minimum Go comes from metadata"}
+			c.Options["frontend"] = optionDefinition{Type: "string", Description: "Default none; react is built in; other providers resolve github.com/NARUBROWN/spine-frontend-<provider> from the selected channel and spine-frontend.json"}
+			c.Options["frontend-root"] = optionDefinition{Type: "string", Description: "Project-relative frontend directory; defaults to frontend; alone it selects the built-in React CSR provider"}
+			c.Options["interactive"] = optionDefinition{Type: "boolean", Description: "Prompt for providers in non-terminal input; cannot be combined with --json"}
+			c.Options["no-interactive"] = optionDefinition{Type: "boolean", Description: "Skip provider prompts, including when input is a terminal"}
+			c.Options["skip-install"] = optionDefinition{Type: "boolean", Description: "Resolve the selected dependency channel and generate files without dependency installation or build verification; requires Go and may use network"}
 			c.Effects.Network = true
 			c.Options["layout"] = optionDefinition{Type: "string", Enum: []string{layeredLayout, "legacy"}, Description: "New projects default to layered-v1; legacy preserves the previous generation rules"}
 		}
@@ -107,7 +114,7 @@ func currentCommandSchema() commandSchema {
 			c.Options = map[string]optionDefinition{"help": {Type: "boolean", Description: "Show command help without executing; other command-specific options are rejected"}}
 		}
 	}
-	return commandSchema{SchemaVersion: commandSchemaVersion, CLIVersion: version, Protocol: protocolSchemaVersion, GlobalOptions: map[string]optionDefinition{"root": {Type: "string", Description: "Run the command from an explicit project directory"}}, Commands: commands, GenerationRoles: generationRoles(), Layouts: []string{layeredLayout, "legacy"}}
+	return commandSchema{ControllerRoutes: controllerRouteSchema(), SchemaVersion: commandSchemaVersion, CLIVersion: version, Protocol: protocolSchemaVersion, GlobalOptions: map[string]optionDefinition{"root": {Type: "string", Description: "Run the command from an explicit project directory"}}, Commands: commands, GenerationRoles: generationRoles(), Layouts: []string{layeredLayout, "legacy"}}
 }
 
 func runSchema(args []string, out, errOut io.Writer) int {
@@ -149,9 +156,16 @@ type projectContextConfig struct {
 	Layout            string              `json:"layout"`
 	Platform          string              `json:"platform,omitempty"`
 	Recipe            string              `json:"recipe,omitempty"`
+	DependencyChannel string              `json:"dependency_channel,omitempty"`
 	Events            []eventPlatformSpec `json:"event_platforms,omitempty"`
 	Validator         string              `json:"validator,omitempty"`
 	WebSocketPlatform string              `json:"websocket_platform,omitempty"`
+	FrontendRoot      string              `json:"frontend_root,omitempty"`
+	FrontendEntry     string              `json:"frontend_entry,omitempty"`
+	FrontendOutput    string              `json:"frontend_output,omitempty"`
+	FrontendAPIPrefix string              `json:"frontend_api_prefix,omitempty"`
+	FrontendProvider  string              `json:"frontend_provider,omitempty"`
+	FrontendDisabled  bool                `json:"frontend_disabled,omitempty"`
 }
 
 type nextAction struct {
@@ -188,11 +202,15 @@ func runContext(args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	doctor := inspectDoctorReport()
+	frontendProvider := ""
+	if config.FrontendConfigured {
+		frontendProvider = config.FrontendProvider
+	}
 	context := projectContext{
 		SchemaVersion: contextSchemaVersion,
 		CLIVersion:    version,
 		ProjectRoot:   filepath.Clean(absoluteRoot),
-		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform},
+		Config:        projectContextConfig{Module: config.Module, Entrypoint: config.Entrypoint, Composition: config.Composition, Port: config.Port, Layout: config.Layout, Platform: config.Platform, Recipe: config.Recipe, DependencyChannel: config.DependencyChannel, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform, FrontendRoot: config.FrontendRoot, FrontendEntry: config.FrontendEntry, FrontendOutput: config.FrontendOutput, FrontendAPIPrefix: config.FrontendAPIPrefix, FrontendProvider: frontendProvider, FrontendDisabled: config.FrontendDisabled},
 		Capabilities:  currentCapabilities(),
 		Doctor:        doctor,
 		NextActions: []nextAction{
@@ -203,7 +221,7 @@ func runContext(args []string, out, errOut io.Writer) int {
 	}
 	var inventoryErr error
 	if config.Layout == layeredLayout {
-		context.GenerationRoles = generationRoles()
+		context.GenerationRoles = projectGenerationRoles()
 		context.Components, inventoryErr = layoutInventory(config.Module)
 	} else if context.Config.Layout == "" {
 		context.Config.Layout = "legacy"

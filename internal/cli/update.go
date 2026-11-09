@@ -25,7 +25,7 @@ func updateHelp(args []string, out io.Writer) bool {
 	for i, arg := range args {
 		if (arg == "--help" || arg == "-h") && (i == 0 || args[i-1] != "--if-match") {
 			fmt.Fprintln(out, "Usage: spine update [--dry-run] [--if-match <hash>] [--json] [--root <directory>]")
-			fmt.Fprintln(out, "\n기존 프로젝트의 Spine과 선택한 플랫폼 의존성을 이 CLI의 검증된 레시피로 갱신합니다.\n임시 복사본에서 의존성 해석, 정적 계약 검사와 빌드를 완료한 뒤 go.mod와 go.sum을 반영합니다.\n--dry-run도 네트워크와 Go 캐시를 사용할 수 있지만 프로젝트 파일은 바꾸지 않습니다.\n현재 레시피보다 새로운 버전은 낮추지 않습니다. CLI 실행 파일과 업무 소스는 갱신하지 않습니다.\n\n예:\n  spine update\n  spine update --dry-run\n  spine update --root ./shop-api --dry-run --json")
+			fmt.Fprintln(out, "\nUpdate Spine and selected platform dependencies in an existing project with the CLI's verified recipe.\nThe command resolves dependencies, validates the static contract, and builds a temporary copy before publishing go.mod and go.sum.\n--dry-run may use the network and Go caches but does not change project files.\nThe command does not downgrade versions newer than the selected recipe. It does not update the CLI executable or application source.\n\nExamples:\n  spine update\n  spine update --dry-run\n  spine update --root ./shop-api --dry-run --json")
 			return true
 		}
 	}
@@ -166,8 +166,19 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if err != nil {
 		return finish(3, "snapshot", err)
 	}
-	if config.Platform != "" && config.Platform != "echo" && config.Platform != "none" {
+	for _, spec := range config.Events {
+		if legacyPlatformDescriptor("event", spec.Provider) == nil && config.Recipe != currentAssemblyRecipe {
+			return finish(3, "snapshot", fmt.Errorf("event platform %s requires the %s recipe; older recipes are not migrated automatically", spec.Provider, currentAssemblyRecipe))
+		}
+	}
+	if config.Validator != "" && config.Validator != "none" && legacyPlatformDescriptor("validator", config.Validator) == nil && config.Recipe != currentAssemblyRecipe {
+		return finish(3, "snapshot", fmt.Errorf("validator %s requires the %s recipe; older recipes are not migrated automatically", config.Validator, currentAssemblyRecipe))
+	}
+	if config.Platform != "" && config.Platform != "none" && !validProviderName(config.Platform) {
 		return finish(3, "snapshot", fmt.Errorf("unsupported platform: %s", config.Platform))
+	}
+	if config.Recipe != currentAssemblyRecipe && ((config.Platform != "" && config.Platform != "none" && config.Platform != "echo" && config.Platform != "nethttp") || (config.WebSocketPlatform != "" && config.WebSocketPlatform != "none" && config.WebSocketPlatform != "gorilla")) {
+		return finish(3, "snapshot", fmt.Errorf("dynamic HTTP and WebSocket providers require the %s recipe; older recipes are not migrated automatically", currentAssemblyRecipe))
 	}
 	recipe, targets := echoRecipe, echoRecipeModules()
 	if config.Recipe == assemblyRecipe {
@@ -179,11 +190,24 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if config.Recipe == currentAssemblyRecipe {
 		recipe, targets = currentAssemblyRecipe, currentAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
 	}
+	if config.Recipe == preview2AssemblyRecipe {
+		recipe, targets = preview2AssemblyRecipe, previewAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform}, currentAssemblySpineVersion)
+	}
+	if config.Recipe == preview1AssemblyRecipe {
+		recipe, targets = preview1AssemblyRecipe, previewAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform}, preview1AssemblySpineVersion)
+	}
+	if config.Recipe == stableAssemblyRecipe {
+		recipe, targets = stableAssemblyRecipe, stableAssemblyModules(newProjectOptions{Platform: config.Platform, Events: config.Events, Validator: config.Validator, WebSocketPlatform: config.WebSocketPlatform})
+	}
 	result["recipe"], result["target_modules"], result["platform"] = recipe, targets, config.Platform
-	if recipe == assemblyRecipe || recipe == legacyWebSocketRecipe {
+	if recipe == assemblyRecipe || recipe == legacyWebSocketRecipe || isPreviewAssemblyRecipe(recipe) {
 		result["stability"] = "prerelease"
 	}
 	if recipe == currentAssemblyRecipe {
+		result["dependency_channel"] = config.DependencyChannel
+		result["stability"] = dependencyStability(config.DependencyChannel)
+	}
+	if recipe == stableAssemblyRecipe {
 		result["stability"] = "released"
 	}
 	if !filepath.IsLocal(config.Entrypoint) {
@@ -223,6 +247,22 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if err != nil {
 		return finish(3, "snapshot", err)
 	}
+	if recipe == currentAssemblyRecipe {
+		result["module_queries"] = targets
+		targets, err = resolveDependencyModules(ctx, targets, config.DependencyChannel)
+		if err != nil {
+			return finish(3, "dependencies", err)
+		}
+		selection := newProjectOptions{Platform: config.Platform, WebSocketPlatform: config.WebSocketPlatform, Events: config.Events, Validator: config.Validator, Modules: targets}
+		if selection.Validator == "" {
+			selection.Validator = "none"
+		}
+		if err := resolveProjectDescriptors(ctx, &selection); err != nil {
+			return finish(3, "dependencies", err)
+		}
+		result["platform_descriptors"] = descriptorFingerprints(selection)
+		result["target_modules"] = targets
+	}
 	updated, requirements, err := updateRequirementsForRecipe(contents, config.Module, targets, recipe)
 	if err != nil {
 		return finish(3, "snapshot", err)
@@ -255,7 +295,12 @@ func runUpdate(args []string, out, errOut io.Writer) int {
 	if currentHash != inputHash {
 		return finish(4, "publish", fmt.Errorf("project inputs changed during update; create a new dry-run"))
 	}
-	baseHash, err := updatePlanHash(changes, inputHash)
+	planInputs := inputHash
+	if descriptors, ok := result["platform_descriptors"]; ok {
+		metadata, _ := json.Marshal(descriptors)
+		planInputs += "\n" + string(metadata)
+	}
+	baseHash, err := updatePlanHash(changes, planInputs)
 	if err != nil {
 		return finish(3, "publish", err)
 	}

@@ -1,6 +1,6 @@
 # Spine CLI
 
-> Spine CLI는 Spine 애플리케이션을 생성하고, 소스 기반 실행 계약을 검사·설명·검증하며,
+> Spine CLI는 Spine 애플리케이션을 생성하고, 소스 기반 실행 계약을 검사, 설명, 검증하며,
 > 에이전트가 안전하게 변경 계획을 세우고 적용하도록 기계 판독 프로토콜을 제공하는 Go CLI이다.
 
 이 문서는 AI agent와 자동화 도구를 위한 상세 작업 계약이다. 사람이 빠르게 설치하고 사용하는
@@ -9,7 +9,7 @@
 
 기존 앱이나 초기 CLI 생성 프로젝트를 현재 버전에 맞출 때는
 [버전별 마이그레이션 가이드](./migration/)에서 대상 버전에 맞는 문서를 먼저 읽는다.
-`spine update`는 의존성만 갱신하므로 설정·소스·레이아웃 변경은 가이드에 따라 별도로 수행한다.
+`spine update`는 의존성만 갱신하므로 설정, 소스, 레이아웃 변경은 가이드에 따라 별도로 수행한다.
 
 ## 1. 식별 정보와 기준 버전
 
@@ -21,14 +21,15 @@
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
-- 새 프로젝트의 레시피: `platform-contracts-v0.6.5` (Spine v0.6.5와 플랫폼 정식 태그)
+- 새 프로젝트의 레시피: `platform-contracts-preview`; `dependency_channel`은 `preview` (기본값), `rc`, `main` 중 하나이며 update에서도 유지한다.
 - recipe 미지정 기존 Echo 앱의 update 레시피: `echo-v0.1.0-spine-v0.6.0`
-- Gorilla WS: `v0.1.0`
-- 새 앱 Spine: `github.com/NARUBROWN/spine v0.6.5`
-- Kafka: `v0.1.0`; RabbitMQ: `v0.1.0`
-- playground: `v0.1.0`
-- Spine PR #16은 병합됐고 정식 코어 버전은 v0.6.5이다. 위 기능을 과거 v0.6.0에 있다고 가정하지 않는다.
-- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform v0.1.0`
+- Gorilla WS 기본 채널: `@preview`
+- 새 앱 Spine 기본 채널: `github.com/NARUBROWN/spine@preview`; `rc`는 공개 RC 또는 더 높은 정식 태그, `main`은 공개 정식 태그만 선택한다.
+- 기존 `platform-contracts-v0.7.0-preview.1` 앱의 `update`는 코어 `v0.7.0-preview.1`을 유지한다. `.2` 전환은 recipe를 명시적으로 바꾸고 dry-run/base_hash를 검토해 적용한다.
+- Kafka와 RabbitMQ 기본 채널: `@preview`
+- playground 기본 채널: `@preview`
+- 기존 platform-contracts-v0.6.5 앱은 정식 조합을 유지한다. 이 Preview 소스의 기능을 정식 CLI @latest나 과거 코어에 있다고 가정하지 않는다.
+- Echo 플랫폼: `github.com/NARUBROWN/spine-echo-platform@preview`
 - Echo 플랫폼 설치, 프로젝트 의존성 갱신과 HTTP 반환형 진단은 CLI v0.3.0에서 제공한다.
 - CLI v0.4.0은 위 v0.6.0/v0.1.0 공개 조합과 adapter v2 계약을 지원한다. v0.3.0 태그는 이전 v1 레시피를 사용한다.
 - 라이선스: MIT
@@ -190,7 +191,7 @@ Agent는 다음 순서로 해석한다.
 | Code | 의미 | 일반적인 다음 행동 |
 | --- | --- | --- |
 | `0` | 성공 | `result` 처리 |
-| `2` | 사용법 오류 | `spine schema --json`으로 인자·옵션 재확인 |
+| `2` | 사용법 오류 | `spine schema --json`으로 인자, 옵션 재확인 |
 | `3` | 사전조건 또는 일반 실행 실패 | config, cwd, 파일, toolchain 확인 |
 | `4` | 기존 파일, generation lock, stale plan 충돌 | 새 dry-run을 만들고 diff 재검토 |
 | `5` | 계약 또는 검증 실패 | `context`, contract diagnostics, stage 결과 확인 |
@@ -245,9 +246,9 @@ layout = "layered-v1"
 
 | 명령 | 핵심 동작 | Side effect/주의 |
 | --- | --- | --- |
-| `new <project>` | 새 Spine 프로젝트 계획·생성 | 파일 작성 |
+| `new <project>` | 새 Spine 프로젝트 계획, 생성 | 파일 작성 |
 | `generate|g <kind> <name>` | 구성 요소 생성과 기본 자동 등록 | 파일 작성, project lock |
-| `schema` | 명령·인자·옵션·효과 발견 | 조회 |
+| `schema` | 명령, 인자, 옵션, 효과 발견 | 조회 |
 | `capabilities` | 구현/미구현 기능과 한계 발견 | 조회 |
 | `context` | project/config/doctor/contract 묶음 조회 | 조회, 결과가 invalid면 실패 |
 | `inspect` | 정적 실행 계약 상세 조회 | 조회이며 gate가 아님 |
@@ -271,10 +272,9 @@ layout = "layered-v1"
 `supports_dry_run`을 계획 시 우선 읽는다. `network:true`는 Go module 해석 가능성을 포함한
 보수적인 표시다.
 
-현재 구현상 알려진 schema 차이가 하나 있다. `contract export`의 schema는 `output`을 required로
-표시하지만 실제 구현은 `--output`을 생략하면 JSON document를 stdout으로 출력한다. 이 경우
-현재 checkout의 구현과 테스트 가능한 동작을 기준으로 하고, agent automation에서는 모호함을
-피하기 위해 명시적인 `--output`을 권장한다. 또한 schema에는 `g`, `--format json`, `-h`, `-v`
+`contract export`의 `output`은 선택 항목이며 생략하면 JSON document를 stdout으로 출력한다.
+`--source runtime`은 composition 코드와 Go 도구를 실행하므로 schema에 network 효과를 표시한다.
+schema에는 `g`, `--format json`, `-h`, `-v`
 같은 alias가 모두 열거되지 않으므로 canonical command를 사용한다.
 
 ## 7. 새 프로젝트 생성
@@ -284,8 +284,8 @@ spine new <project>
   [--module <module-path>]
   [--layout <layered-v1|legacy>]
   [--platform echo|none]
-  [--event-platform [name:]kafka|rabbitmq ...]
-  [--validator none|playground]
+  [--event-platform [name:]provider ...]
+  [--validator none|provider]
   [--websocket-platform none|gorilla]
   [--skip-install]
   [--dry-run]
@@ -296,9 +296,11 @@ spine new <project>
 
 `--module` 생략 시 `github.com/your-org/<project>`를 사용한다. 기본 layout은 layered-v1이다.
 `new`는 `spine.New(echoplatform.Option(), spine.WithEventAdapter(name, factory), spine.WithValidator(validator))`로 선택한 구현을 조립한다.
-기본값은 HTTP echo, WebSocket none, 이벤트 없음, validator none이다. --websocket-platform gorilla는 gorillaplatform.Option()을 추가하며 HTTP echo가 필요하다. --platform none은 이벤트 플랫폼이 필요하며 Echo 의존성·HTTP 옵션·health를 생략한다.
---event-platform은 반복할 수 있고 [name:]kafka 또는 [name:]rabbitmq를 받는다. 이름 생략 시 provider 이름을 사용하며 이름은 [a-z][a-z0-9_]*, 중복 이름은 오류다.
-NewFactory(Config)와 playground.New()의 오류를 반환한다. 두 layout에 생성자·Route·Consumers().Register 연결 방식을 유지한다.
+기본값은 HTTP echo, WebSocket none, 이벤트 없음, validator none이다. --websocket-platform gorilla는 gorillaplatform.Option()을 추가하며 HTTP echo가 필요하다. --platform none은 이벤트 플랫폼이 필요하며 Echo 의존성, HTTP 옵션, health를 생략한다.
+--event-platform은 반복 가능한 [name:]provider이며 NARUBROWN/spine-<provider>-platform@preview를 조회한다. --validator provider는 NARUBROWN/spine-validator-<provider>@preview를 조회하며 none은 검증기를 생략한다. provider는 소문자로 시작하고 소문자, 숫자와 연속하지 않는 -/_를 사용한다. 이벤트 등록 이름은 [a-z][a-z0-9_]*이며 기본 이름에서는 -를 _로 바꾼다. 중복 이름은 오류다.
+NATS는 JetStream이며 <PREFIX>URLS, <PREFIX>STREAM, <PREFIX>CONSUMER_PREFIX가 필요하다. stream은 실행 전에 생성한다. <PREFIX>TOPIC_PREFIX와 USER, PASSWORD, TOKEN, CREDENTIALS_FILE 인증 설정은 선택이다. 기본 실패 정책은 reject이며 NATS 앱은 Go 1.26.0 이상이 필요하다. Core NATS pub/sub, request/reply, 자동 DLQ는 포함하지 않는다.
+이벤트와 validator는 선택한 모듈 버전의 spine-platform.json 메타데이터로 생성자, 설정 필드와 최소 Go를 읽는다. 새 provider 등록에 CLI 패치가 필요하지 않다. 저장소/Preview 조회 실패와 메타데이터 누락을 구분해 원인과 모듈 경로를 표시하고 프로젝트를 만들지 않는다. Kafka, RabbitMQ와 playground의 메타데이터 없는 버전에는 호환 설명을 사용한다. 형식은 PLATFORMS.md를 참고한다.
+메타데이터에 선언한 생성자의 오류를 반환한다. 두 layout에 생성자, Route, Consumers().Register 연결 방식을 유지한다.
 선택한 플랫폼과 검증기만 직접 require하며 core와 모든 선택 모듈의 실제 선택 버전 및 replace를 검사한다.
 playground.New()를 사용하면 Go 1.26.0 이상이 필요하며 도구 체인을 자동 설치하지 않는다. 낮은 로컬 Go에서는 설치 단계를 실패시키고 목적지를 게시하지 않는다.
 공개 계약 경로는 contract/http, contract/event, contract/websocket, contract/validator이다. adapter, adapter/http, adapter/event는 같은 타입의 호환 별칭이다.
@@ -308,7 +310,7 @@ playground.New()를 사용하면 Go 1.26.0 이상이 필요하며 도구 체인�
 `--skip-install`은 플랫폼 코드, go.mod, spine.toml과 기존 프로젝트 파일만 생성한다.
 go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go mod tidy`와 `spine dev`다.
 기본 dry-run은 임시 프로젝트에서 네트워크와 Go 캐시를 사용할 수 있다.
-`--skip-install --dry-run`은 Go 명령 없이 오프라인으로 계획한다. 목적지 파일은 둘 다 변경하지 않는다.
+`--skip-install --dry-run`도 Preview 버전 해석을 위해 Go와 네트워크 또는 모듈 프록시 캐시를 사용하지만 설치와 빌드를 생략한다. 목적지 파일은 둘 다 변경하지 않는다.
 
 기본 설치는 기존 목적지를 덮어쓰지 않는다. `--force`는 `--skip-install`에만 허용한다.
 활성 workspace는 `GOWORK=off` 또는 설치 생략을 안내한다. go.work와 외부 모듈은 변경하지 않는다.
@@ -320,19 +322,19 @@ go.sum과 의존성 및 빌드를 확정하지 않으며, 다음 단계는 `go m
 `BuildApplication → Validate → Run`, SPINE_PORT는 유지한다. legacy는 health를 composition에 선언한다.
 생성 README는 기본 실행을 spine dev부터 안내하고, skip-install에만 수동 tidy를 안내한다. layered-v1 README에는 DTO부터 핸들러, 오류 응답과 route/curl까지 이어지는 첫 API 예제가 포함된다.
 JSON `result`의 project, module, layout, directory, files, dry_run, base_hash, changes와 diff를 유지하며
-platform, event_platforms, validator, minimum_go, target_modules, recipe, stability, install_skipped, selected_modules, stages와 execution_boundary를 추가한다.
+platform, event_platforms, validator, minimum_go, target_modules, module_queries, dependency_channel, recipe, stability, install_skipped, selected_modules, stages와 execution_boundary를 추가한다.
 실패 시 failed_stage와 cause를 반환한다. new의 일반/JSON 종료코드는 2 사용법, 3 전제조건 및 다운로드,
 4 충돌, 5 계약 및 호환성 및 빌드, 10 내부 오류다.
 
 이벤트 설정은 internal/application/platform_config.go에서 이름을 대문자로 바꾼 SPINE_<NAME>_ 접두사의 환경 변수로 읽는다.
 Kafka: BROKERS와 GROUP_ID 필수, TOPIC_PREFIX 선택. RabbitMQ: URL과 EXCHANGE 필수, QUEUE_PREFIX와 TOPIC_PREFIX 선택.
-ALLOW_INSECURE는 boolean이며 생략하면 TLS를 사용한다. 로컬 평문 브로커에만 true를 명시한다. 설정값·인증 정보는 spine.toml에 기록하지 않는다.
+ALLOW_INSECURE는 boolean이며 생략하면 TLS를 사용한다. 로컬 평문 브로커에만 true를 명시한다. 설정값, 인증 정보는 spine.toml에 기록하지 않는다.
 factories는 consume/publish를 모두 활성화하고 RabbitMQ 실패 정책은 reject이다. consumer와 topic/queue 준비는 자동 생성하지 않는다.
 복수 플랫폼은 같은 consumer registry를 공유하므로 prefix와 중복 처리 정책을 별도로 설계한다. DTO validate 태그는 playground를 선택했을 때만 자동 검사한다.
 inspect/context/contract check의 websocket_adapter, event_adapters와 validator는 정적 factory 선택이다. factory의 직접 지역 변수 대입만 추적한다.
-중복 이벤트 이름·검증기, config와 등록 불일치, 호환되지 않는 core와 동적 factory/옵션을 오류로 진단한다.
+중복 이벤트 이름, 검증기, config와 등록 불일치, 호환되지 않는 core와 동적 factory/옵션을 오류로 진단한다.
 알려진 factory의 설정 인자는 runtime-values-not-evaluated로 표시하며 helper, factory, capability와 검증 규칙을 실행하지 않는다.
-이 선택은 semantic snapshot/diff에도 포함된다. 실제 HTTP·WS·브로커 검증은 test/assembly-e2e/README.md의 CLI 생성 결과 E2E로 분리한다.
+이 선택은 semantic snapshot/diff에도 포함된다. 실제 HTTP, WS, 브로커 검증은 test/assembly-e2e/README.md의 CLI 생성 결과 E2E로 분리한다.
 
 `new --help`, `g --help`, `g <kind> --help`와 `-h`는 프로젝트를 읽거나 파일을 쓰기 전에 출력한다.
 
@@ -379,10 +381,13 @@ spine generate|g <domain|dto|repository|service|controller|resource|route|consum
 | route | `src/route/route.go` | HTTP 등록 |
 | application | `internal/application/` | 생성자와 Register 호출 연결 |
 
-`spine schema --json`의 `generation_roles`와 `spine context --json`의 `generation_roles`는
-같은 정의를 사용한다. context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
+`spine schema --json`의 `generation_roles`는 프로젝트와 무관한 기본값이다.
+`spine context --json`의 `generation_roles`는 선택한 코어와 레이아웃을 반영한다.
+컨트롤러 등록 API를 지원하는 layered 프로젝트의 route 경로는 `src/controller`이며,
+기존 버전의 기본 경로는 `src/route/route.go`다. 프로젝트 변경에는 context의 값을 우선한다.
+context의 `config.layout`으로 적용 규칙을 확인하고, `components`의
 `role`, `group`, `package`, `type`으로 현재 구성 요소를 찾는다. `package`는 모듈 경로까지 포함한다.
-route와 application은 고정 연결 위치이며 composition은 설정의 `composition`을 따른다.
+composition은 설정의 `composition`을 따른다.
 
 ```sh
 spine g domain user
@@ -418,7 +423,13 @@ spine g controller admin/user --depends src/service:UserService
 세 역할 모두 구조체와 생성자 골격만 만든다. repository에 DB 연결, 메모리 저장소, ID 할당이나
 CRUD를 추가하지 않는다. controller에 임의의 HTTP 메서드나 경로를 만들지 않는다.
 
-### 8.3 명시적인 HTTP 경로
+### 8.3 HTTP 경로 등록
+
+컨트롤러 등록 API를 지원하는 코어에서는 `constructor.Controller`로 컨트롤러를 등록하고
+`RegisterRoutes(*api.Registry)`에 경로를 선언한다. 별도 `route.go`에서 `app.Route`로
+메서드 표현식을 연결하는 기존 방식은 Deprecated다.
+
+아래는 기존 라우트 파일을 사용하는 프로젝트의 호환 절차다.
 
 핸들러를 먼저 구현한 뒤 메서드와 경로와 실제 메서드 참조를 지정한다.
 
@@ -553,7 +564,7 @@ func BuildApplication() (spine.App, boot.Options, error) {
 - 자동 module/route 등록을 위해 함수는 `(spine.App, boot.Options, error)`를 반환해야 한다.
 - `Register(app)`의 error를 검사하고 그대로 반환한다.
 - registration은 직접적이고 무조건적인 형태로 유지한다.
-- 예제의 토픽 접두사와 테스트 라우트를 위해, 문자열·연결·직접적인 `os.Getenv("이름")` 등록 이름과 이 문자열의 `==`/`!=` 분기는 검사 프로세스의 환경변수로 해석한다. `if` 초기화문이 있거나 임의 함수·지역 변수·미해석 외부 분기에 의존하면 추측하지 않는다. 검사와 실행에는 같은 환경변수를 전달해야 한다.
+- 예제의 토픽 접두사와 테스트 라우트를 위해, 문자열, 연결, 직접적인 `os.Getenv("이름")` 등록 이름과 이 문자열의 `==`/`!=` 분기는 검사 프로세스의 환경변수로 해석한다. `if` 초기화문이 있거나 임의 함수, 지역 변수, 미해석 외부 분기에 의존하면 추측하지 않는다. 검사와 실행에는 같은 환경변수를 전달해야 한다.
 - helper에 `app`을 넘기거나, 조건문/loop/defer/goroutine/function literal에 registration을 숨기지
   않는다.
 - legacy composition이 요구 형태가 아니면 `--no-register`로 생성한 뒤 사용자가 명시적으로
@@ -672,11 +683,14 @@ HTTP 정적 binding:
 
 - `context.Context`, `core.ControllerContext`, `pkg/spine.Ctx`와 확인 가능한 Get 전용 context interface: context
 - 실제 Spine `path.Int`, `path.String`, `path.Boolean` 타입: route path parameter에 순서대로 binding
-- 실제 Spine `query.Values`, `query.Pagination`: query
-- 실제 Spine `header.Values`: header
+- 실제 Spine `query.Values`, `query.Pagination`: query. Preview 코어에서는 Deprecated 경고를 표시한다.
+- 실제 Spine `header.Values`: header. Preview 코어에서는 Deprecated 경고를 표시한다.
+- Preview 코어의 출처 DTO: path, query 또는 header 태그가 있는 일반 구조체 포인터. 키는 이름으로 검사한다.
+- 같은 DTO 타입의 반복, 같은 출처의 키 충돌, 여러 body 인자와 Deprecated API 혼용은 오류다.
+- 필드 decoder와 validator 규칙은 정적으로 실행하지 않으며 외부 임베딩 출처는 미해결로 남긴다.
 - 실제 Spine `multipart.UploadedFiles`: multipart
 - 현재 모듈 소스 또는 기본 wrapper 지원 규칙에서 구조체임을 확인한 포인터: request body
-  예를 들어 `path.Int`는 경로 인자지만 `*path.Int`는 DTO resolver가 처리하는 본문이다.
+  기존 정식 코어에서 `*path.Int`는 DTO resolver의 본문이다. Preview 코어는 Deprecated 래퍼 포인터를 거부한다.
 - import 별칭과 타입 별칭은 선언 파일을 기준으로 해석한다. 별도 정의한 동명 wrapper를 기본 타입으로 간주하지 않는다.
 - 값 DTO와 지원되지 않는 기본 타입은 오류, 지원 여부를 확인할 수 없는 타입과 resolver는 분석 불완전 오류다.
 
@@ -760,13 +774,20 @@ spine contract diff --against contracts/api.json --json
 
 ```sh
 spine contract export --format openapi --output openapi.json
+spine contract export --format openapi --source runtime --output runtime-openapi.json
 spine contract export --format asyncapi --output asyncapi.json
 ```
 
 `--output`을 생략하면 document를 stdout으로 직접 출력할 수 있다. 기존 output file을 교체하려면
 `--force`가 필요하다. error diagnostic이 있는 contract는 export하지 않는다.
 
-OpenAPI 3.1 export:
+source 기본값은 static이다. --source runtime은 import 가능한 composition의 BuildApplication을 실행하고
+공개 코어의 DescribeHTTP와 openapi.Generate를 호출한다. 리스너, DI 생성자와 요청 핸들러는 시작하지
+않지만 composition 사용자 코드와 Go 도구는 실행한다. 실패하면 static으로 자동 전환하지 않는다.
+검증기를 등록하지 않은 앱의 런타임 명세는 경로 중심 정보만 제공한다. OpenAPI HTTP 리소스는
+기본 비활성화이며 boot.HTTPOptions.OpenAPI.Enabled로 켠다. AsyncAPI는 static만 지원한다.
+
+기존 static OpenAPI 3.1 export:
 
 - 확인 가능한 HTTP path와 path parameter
 - pointer request DTO와 source에서 찾은 struct schema
@@ -775,6 +796,9 @@ OpenAPI 3.1 export:
 - JSON 태그가 없으면 Go 필드 이름을 유지하고 `json:"-"`와 선택적 필드 태그를 반영
 - `time.Time`은 JSON 날짜와 시간 문자열로 표현
 - 해석할 수 없는 타입은 존재하지 않는 `$ref` 대신 `x-spine-unresolved-type`으로 표시
+- path, query, header DTO와 폼 필드를 정적으로 해석하며 validator 규칙은 `x-spine-validation-unresolved`로 표시
+- query와 header의 필수 여부를 확정하지 못하므로 생성 문서에서 선택 입력으로 취급될 수 있음. 정확한 검증 규칙은 runtime 출력 사용
+- 본문 media type을 확인할 수 없으면 `x-spine-unresolved-content`로 표시
 - runtime이 정하는 response status는 `default` response와 `x-spine-*` evidence로 표현
 - 해결하지 못한 query/header/value는 별도 extension에 보존
 - dynamic registration을 추정하지 않음
@@ -809,7 +833,7 @@ probe는 다음을 실제 실행한다.
 - composition은 module root 아래의 import 가능한 directory여야 한다.
 - composition이 file 또는 module root `.`이면 probe가 실패한다.
 - HTTP routes, DI constructors, interceptors는 현재 `spine.App` public API로 관찰할 수 없다.
-- database/broker connectivity, listener readiness, deployed behavior를 실행·증명하지 않는다.
+- database/broker connectivity, listener readiness, deployed behavior를 실행, 증명하지 않는다.
 - `BuildApplication`에 side effect가 있으면 프로젝트 코드 실행으로 그 side effect가 발생할 수 있다.
 - `go run`은 module download/cache/network를 사용할 수 있다.
 
@@ -823,7 +847,7 @@ external E2E로 표현하지 않는다.
 | 정적 소스 | `inspect`, `explain`, `contract check` | 직접 해석 가능한 등록, signature, config, completeness | 실제 Go program 전체 실행, runtime registry, 외부 인프라 |
 | 로컬 Go 검증 | `verify` | 정적 계약, gofmt 상태, vet, unit/integration tests | DB/broker/listener/deploy가 실제 준비됐다는 사실 |
 | 부분 runtime | `contract probe` | `BuildApplication`, `app.Validate`, consumer/WebSocket registry parity | HTTP/DI/interceptor runtime parity, 외부 연결, listener readiness |
-| 외부 E2E | CLI 외 별도 환경 | 명시적으로 구성·관찰한 DB/broker/listener/deployed behavior | 수행하지 않은 다른 환경이나 장애 조건 |
+| 외부 E2E | CLI 외 별도 환경 | 명시적으로 구성, 관찰한 DB/broker/listener/deployed behavior | 수행하지 않은 다른 환경이나 장애 조건 |
 
 보고할 때 각 결과를 분리한다. 예:
 
@@ -924,8 +948,8 @@ Source와 test가 문서보다 우선한다. 주요 파일:
 - `internal/cli/protocol.go`: JSON envelope, exit/error classification, `--root`
 - `internal/cli/new.go`: main/health/test 템플릿
 - `internal/cli/assembly.go`: 공개 모듈 레시피, HTTP/event/validator 조립과 환경 설정 생성
-- `internal/cli/assembly_contract.go`: 이벤트·검증기 선택의 정적 분석
-- `internal/cli/assembly_e2e_test.go`: 실제 CLI 생성 프로젝트의 공개 모듈·HTTP/WS/validator·실제 브로커 E2E
+- `internal/cli/assembly_contract.go`: 이벤트, 검증기 선택의 정적 분석
+- `internal/cli/assembly_e2e_test.go`: 실제 CLI 생성 프로젝트의 공개 모듈, HTTP/WS/validator, 실제 브로커 E2E
 - `internal/cli/layout.go`: 역할별 경로와 이름, 대상 패키지와 경로 검증
 - `internal/cli/layered_sources.go`: 소스 스냅샷과 해시, 패키지와 생성자 목록
 - `internal/cli/layered_generate.go`, `layered_plan.go`: 명령 처리와 구성 요소 템플릿, 적용 전 생성 계획
@@ -1078,16 +1102,37 @@ Spine application의 실행 계약을 명시적으로 생성하고 검사하며,
 
 ## 독립 WebSocket 플랫폼
 
-새 프로젝트의 platform-contracts-v0.6.5 레시피는 WS가 분리된 코어 v0.6.5를 사용한다. 기존 public-contracts-20261103과 recipe 없는 Echo 앱의 update 버전은 보존한다. --websocket-platform none|gorilla로 선택하며 gorilla는 HTTP echo가 필요하다. 설정은 spine.toml의 websocket_platform에 기록한다. HTTP 없는 worker는 WS 구현을 선택할 수 없다. HTTP와 event/validator의 확정 API는 바꾸지 않는다.
+새 프로젝트의 platform-contracts-preview 레시피는 코어와 선택한 플랫폼을 @preview로 조회하고 해석된 버전을 go.mod에 기록한다. 기존 버전별 Preview 레시피의 고정 버전은 유지한다. 기존 platform-contracts-v0.6.5 앱의 정식 핀도 보존한다. 기존 public-contracts-20261103과 recipe 없는 Echo 앱의 update 버전은 보존한다. --websocket-platform none|gorilla로 선택하며 gorilla는 HTTP echo가 필요하다. 설정은 spine.toml의 websocket_platform에 기록한다. HTTP 없는 worker는 WS 구현을 선택할 수 없다. HTTP와 event/validator의 확정 API는 바꾸지 않는다.
 
 websocket_adapter는 gorillaplatform.Option() 또는 spine.WithWebSocketAdapter(gorillaplatform.NewFactory())와 직접 지역 변수 factory를 정적으로 추적한다. custom/재대입/동적 옵션은 실행하지 않고 WEBSOCKET_ADAPTER_UNRESOLVED, 중복 선택은 WEBSOCKET_ADAPTER_DUPLICATE로 진단한다. 새 코어에서 WS 경로가 있고 구현이 없으면 WEBSOCKET_ADAPTER_MISSING이다. 기존 내장 WS 코어는 legacy-implicit로 구분한다. WS backend 선택은 semantic snapshot/diff에도 포함된다.
 
 생성 앱의 두 layout × validator none/playground WS E2E 4개, 두 layout × Kafka/RabbitMQ × HTTP/worker/WebSocket 브로커 E2E 12개를 별도로 실행한다. 공개 모듈만 사용하며 원래 BuildApplication 소스는 변경하지 않는다. playground 없는 WS 조합은 실제 Go 1.25.5 설치를 검사하고 playground는 낮은 toolchain에서 목적지를 게시하지 않는다.
 
+동적 이벤트와 validator는 TestGeneratedDynamicPlatformE2E에서 CLI에 등록하지 않은 모듈 이름과 생성자, 설정 구조체, 간접 validator 의존성을 검사한다. NATS는 TestGeneratedNATSAssemblyE2E에서 두 layout × HTTP/worker 네 조합의 생성, 정적 계약, 부분 probe, 실제 JetStream 전달과 ACK/reject, 정상 종료와 소스를 보존하는 update를 검사한다. SPINE_TEST_NATS_URL이 필요하다. 플랫폼 공개 전 검증과 플랫폼 자체 CI는 SPINE_TEST_NATS_MODULE_DIR의 소스를 별도 프록시와 캐시에 넣을 수 있으며 이를 공개 설치 증거로 해석하지 않는다. 생성 앱에 replace는 추가하지 않는다. CI는 네 조합과 최소 Go 검사의 누락이나 skip을 거부한다.
+
 ## v0.4.2 정식 버전 고정
 
-새 platform-contracts-v0.6.5 레시피는 Spine v0.6.5와 각 독립 구현 v0.1.0을 사용한다. 이전 platform-contracts-20261103 및 public-contracts-20261103 레시피는 각각 당시 공개 버전으로 보존하며 update는 소스를 재작성하지 않는다. Echo는 기존 호환 v0.1.0을 사용한다.
+CLI v0.4.2의 platform-contracts-v0.6.5 레시피는 Spine v0.6.5와 각 독립 구현 v0.1.0을 사용했다. 이전 platform-contracts-20261103 및 public-contracts-20261103 레시피는 각각 당시 공개 버전으로 보존하며 update는 소스를 재작성하지 않는다. Echo는 기존 호환 v0.1.0을 사용한다.
 
 ## CLI 릴리스 채널
 
-운영 절차와 초기 전환은 `release/README.md`를 따른다. 공개 발행 전 최종 제목과 본문을 검토하고 승인한다. 소스 트리나 생성 레시피가 바뀌면 새 Preview에서 검증한다. `SPINE_CLI_SHUTDOWN_TIMEOUT`은 run과 dev의 종료 대기 시간이며 기본값은 15초다.
+운영 절차와 초기 전환은 `release/README.md`를 따른다. 모든 단계에서 태그를 발행하고 GitHub Release는 Production에서만 만든다. Preview와 RC의 승격은 성공한 Actions 실행과 태그별 manifest artifact로 검증한다. 공개 발행 전 태그, 계획과 릴리스 노트 초안을 검토하고 승인한다. 소스 트리나 생성 레시피가 바뀌면 새 Preview에서 검증한다. `SPINE_CLI_SHUTDOWN_TIMEOUT`은 run과 dev의 종료 대기 시간이며 기본값은 15초다.
+
+Preview CLI 설치: `go install github.com/NARUBROWN/spine-cli/cmd/spine@preview`. `@preview`는 브랜치 HEAD를 선택하며 실제 버전은 `spine version`으로 확인한다.
+
+## Controller route source candidate
+
+Core >=v0.7.0-preview.5 selects controller-owned RegisterRoutes scaffolds; earlier cores retain route.go generation.
+The schema exposes controller_routes and capabilities list contract.controller-routes/generation.controller-routes.
+Static analysis uses installed Go type information, aliases, constant paths and Registry forwarding helpers without running init or constructors.
+Dynamic paths/targets, recursive or asynchronous registration and unknown conditions fail completeness.
+Path/Query/Body struct payloads and wire names are shared by route validation and static OpenAPI.
+Use dry-run/diff/base_hash and if-match for controller and route AST changes. No user route.go is deleted automatically.
+Runtime OpenAPI for uncollected controllers fails explicitly and never invokes Prepare; use static export or explicit DescribePreparedHTTP.
+Candidate source E2E is TestControllerCandidateEndToEnd with SPINE_CONTROLLER_CORE_SOURCE. Public installation still needs matching published tags.
+
+## 역할별 생성자 표식 후보
+
+코어 v0.7.0-preview.5 후보는 `app.Constructor(...)` 안에 `constructor.Custom`, `Repository`, `Service`, `Controller`, `Interceptor` 표식을 받는다. 공식 import 경로는 `github.com/NARUBROWN/spine/pkg/constructor`이며 별칭을 지원한다. Custom은 객체 표식과 기존 이름 있는 생성자 함수를 받고 나머지 역할은 객체 표식을 받는다. 역할이 명시된 등록 중 Controller만 HTTP 경로를 수집한다. CLI는 생성자를 실행하지 않고 공통 생성 계약과 추가 역할 계약, 의존성을 검사한다. 동적 표식 변수나 사용자 wrapper는 분석 불완전이다. 신규 코어용 생성기는 기존 Constructor 호출에 표식을 추가하고 dry-run/hash 적용과 재실행 불변을 유지한다. 미공개 소스 검증을 공개 설치 증거로 해석하지 않는다.
+
+스칼라 input.Path[T]는 경로 키가 하나인 경우에 정적 분석한다. 코어 v0.7.0-preview.7 이하는 거부하며 교체된 코어 또는 미확인 버전은 경고한다. int, uint, uintptr 범위는 x-spine-platform-range-unresolved로 표시한다.

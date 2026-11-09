@@ -117,6 +117,15 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 			fmt.Fprintln(errOut, message)
 		}
 	}
+	frontendFailures := map[string]string{}
+	reportFrontendFailure := func(category, event, message string) {
+		if previous, exists := frontendFailures[category]; exists && previous == message {
+			return
+		}
+		frontendFailures[category] = message
+		fail(event, message)
+	}
+	clearFrontendFailure := func(category string) { delete(frontendFailures, category) }
 	if _, err := applicationShutdownTimeout(); err != nil {
 		fail("configuration_failed", err.Error())
 		return 1
@@ -128,6 +137,38 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 		fail("configuration_failed", err.Error())
 		return 1
 	}
+	projectRoot, err := filepath.Abs(".")
+	if err != nil {
+		fail("configuration_failed", fmt.Sprintf("could not resolve project directory: %v", err))
+		return 1
+	}
+	lastFrontendAttemptState, frontendEnabled, err := frontendSourceState(projectRoot, config)
+	if err != nil {
+		fail("frontend_scan_failed", err.Error())
+		return 1
+	}
+	lastFrontendAttemptEnabled := frontendEnabled
+	var frontend *frontendBuilder
+	if frontendEnabled {
+		var builderEnabled bool
+		frontend, builderEnabled, err = newFrontendBuilder(projectRoot, config, false, processErr)
+		if err == nil && (!builderEnabled || frontend == nil) {
+			err = fmt.Errorf("frontend settings changed during startup")
+		}
+		if err != nil {
+			fail("frontend_build_failed", fmt.Sprintf("could not initialize frontend builder: %v", err))
+			return 1
+		}
+		if err := frontend.rebuild(processErr); err != nil {
+			frontend.close()
+			fail("frontend_build_failed", err.Error())
+			return 1
+		}
+		emit("frontend_build_succeeded", "Frontend build succeeded.", map[string]any{"initial": true})
+	}
+	defer func() { frontend.close() }()
+	lastFrontendAppSettings := frontendSettingsOf(frontend)
+	lastFrontendAppAttemptSettings := frontendSettingsOf(frontend)
 	last, err := applicationSourceState(ctx, ".", config)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -137,7 +178,7 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 		return 1
 	}
 	emit("build_started", "Building application...", map[string]any{"initial": true})
-	binary, binaryDir, cached, err := cachedDevBinaryContext(ctx, config, last, processErr)
+	binary, binaryDir, cached, err := cachedDevBinaryContext(ctx, config, last, processErr, frontendSettingsOf(frontend))
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0
@@ -149,7 +190,7 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 		fmt.Fprintln(out, "Using cached development build.")
 	}
 	emit("build_succeeded", "Application build succeeded.", map[string]any{"initial": true, "cached": cached})
-	process, err := startDevProcess(binary, binaryDir, config, processOut, processErr)
+	process, err := startDevProcess(binary, binaryDir, config, processOut, processErr, frontendSettingsOf(frontend))
 	if err != nil {
 		_ = os.RemoveAll(binaryDir)
 		fail("process_start_failed", fmt.Sprintf("could not start app: %v", err))
@@ -159,7 +200,7 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 	processDone := process.done
 	defer func() {
 		if stopDevProcess(process, false) {
-			fail("process_killed", "Application exceeded the shutdown timeout and was killed.")
+			fail("process_killed", forcedTerminationMessage("Application", runtime.GOOS))
 			code = 1
 		}
 	}()
@@ -194,6 +235,13 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 				continue
 			}
 			lastConfigError = ""
+			nextFrontendState, nextFrontendEnabled, frontendStateErr := frontendSourceState(projectRoot, updatedConfig)
+			if frontendStateErr != nil {
+				reportFrontendFailure("scan", "frontend_scan_failed", frontendStateErr.Error())
+				nextFrontendState, nextFrontendEnabled = lastFrontendAttemptState, lastFrontendAttemptEnabled
+			} else {
+				clearFrontendFailure("scan")
+			}
 			next, stateErr := applicationSourceState(ctx, ".", updatedConfig)
 			if stateErr != nil {
 				if ctx.Err() != nil {
@@ -202,29 +250,91 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 				fail("source_scan_failed", stateErr.Error())
 				continue
 			}
-			if next == last {
+			frontendChanged := nextFrontendState != lastFrontendAttemptState || nextFrontendEnabled != lastFrontendAttemptEnabled
+			currentFrontendSettings := frontendSettingsOf(frontend)
+			frontendActivationChanged := !sameFrontendSettings(currentFrontendSettings, lastFrontendAppSettings)
+			frontendActivationPending := frontendActivationChanged && !sameFrontendSettings(currentFrontendSettings, lastFrontendAppAttemptSettings)
+			if next == last && !frontendChanged && !frontendActivationPending {
+				continue
+			}
+			if frontendChanged || next != last {
+				frontendUpdated := true
+				settings, settingsErr := resolveFrontendSettings(projectRoot, updatedConfig)
+				if settingsErr != nil {
+					reportFrontendFailure("settings", "frontend_scan_failed", settingsErr.Error())
+					frontendUpdated = false
+				} else {
+					clearFrontendFailure("settings")
+					if !sameFrontendSettings(frontendSettingsOf(frontend), settings) {
+						var replacement *frontendBuilder
+						if settings != nil {
+							var builderEnabled bool
+							replacement, builderEnabled, settingsErr = newFrontendBuilder(projectRoot, updatedConfig, false, processErr)
+							if settingsErr == nil && (!builderEnabled || replacement == nil) {
+								settingsErr = fmt.Errorf("frontend settings changed during rebuild")
+							}
+							if settingsErr == nil {
+								settingsErr = replacement.rebuild(processErr)
+							}
+						}
+						if settingsErr != nil {
+							if replacement != nil {
+								replacement.close()
+							}
+							reportFrontendFailure("build", "frontend_build_failed", settingsErr.Error())
+							frontendUpdated = false
+						} else {
+							frontend.close()
+							frontend = replacement
+							if replacement != nil {
+								emit("frontend_build_succeeded", "Frontend build succeeded.", map[string]any{"initial": false})
+							} else {
+								emit("frontend_disabled", "Frontend is disabled.", map[string]any{})
+							}
+						}
+					} else if frontendChanged && frontend != nil {
+						if buildErr := frontend.rebuild(processErr); buildErr != nil {
+							reportFrontendFailure("build", "frontend_build_failed", buildErr.Error())
+							frontendUpdated = false
+						} else {
+							emit("frontend_build_succeeded", "Frontend build succeeded.", map[string]any{"initial": false})
+						}
+					}
+				}
+				lastFrontendAttemptState = nextFrontendState
+				lastFrontendAttemptEnabled = nextFrontendEnabled
+				if frontendUpdated {
+					clearFrontendFailure("build")
+				}
+			}
+			frontendSettings := frontendSettingsOf(frontend)
+			frontendActivationChanged = !sameFrontendSettings(frontendSettings, lastFrontendAppSettings)
+			frontendActivationPending = frontendActivationChanged && !sameFrontendSettings(frontendSettings, lastFrontendAppAttemptSettings)
+			if next == last && !frontendActivationPending {
 				continue
 			}
 			last = next
 			emit("change_detected", "Application source change detected.", map[string]any{"source_hash": next})
 			emit("build_started", "Building changed application...", map[string]any{"initial": false})
-			newBinary, newBinaryDir, rebuiltCached, buildErr := cachedDevBinaryContext(ctx, updatedConfig, next, processErr)
+			newBinary, newBinaryDir, rebuiltCached, buildErr := cachedDevBinaryContext(ctx, updatedConfig, next, processErr, frontendSettingsOf(frontend))
 			if buildErr != nil {
 				if ctx.Err() != nil {
 					return 0
 				}
-				fail("build_failed", "Build failed; the previous application process is unchanged.")
+				lastFrontendAppAttemptSettings = frontendSettings
+				fail("build_failed", fmt.Sprintf("Build failed; the previous application process is unchanged: %v", buildErr))
 				continue
 			}
+			lastFrontendAppAttemptSettings = frontendSettings
 			emit("build_succeeded", "Changed application build succeeded.", map[string]any{"initial": false, "cached": rebuiltCached})
 			if ctx.Err() != nil {
 				return 0
 			}
 			config = updatedConfig
 			if stopDevProcess(process, false) {
-				fail("process_killed", "Previous application exceeded the shutdown timeout and was killed.")
+				fail("process_killed", forcedTerminationMessage("Previous application", runtime.GOOS))
 			}
-			process, err = startDevProcess(newBinary, newBinaryDir, config, processOut, processErr)
+			process, err = startDevProcess(newBinary, newBinaryDir, config, processOut, processErr, frontendSettingsOf(frontend))
 			if err != nil {
 				_ = os.RemoveAll(newBinaryDir)
 				fail("process_start_failed", fmt.Sprintf("could not start rebuilt app: %v", err))
@@ -233,22 +343,36 @@ func runDev(args []string, out, errOut io.Writer) (code int) {
 				continue
 			}
 			processDone = process.done
+			lastFrontendAppSettings = frontendSettings
 			emit("process_started", "Rebuilt application process started.", map[string]any{"pid": process.cmd.Process.Pid, "address": fmt.Sprintf("http://127.0.0.1:%d", config.Port), "readiness_observed": false})
 		}
 	}
 }
 
-func buildDevBinary(config projectConfig, errOut io.Writer) (string, string, error) {
-	return buildDevBinaryContext(context.Background(), config, errOut)
+func buildDevBinary(config projectConfig, errOut io.Writer, frontend ...*frontendSettings) (string, string, error) {
+	return buildDevBinaryContext(context.Background(), config, errOut, frontend...)
 }
 
-func buildDevBinaryContext(ctx context.Context, config projectConfig, errOut io.Writer) (string, string, error) {
+func buildDevBinaryContext(ctx context.Context, config projectConfig, errOut io.Writer, frontend ...*frontendSettings) (string, string, error) {
 	directory, err := os.MkdirTemp("", "spine-dev-build-*")
 	if err != nil {
 		return "", "", err
 	}
+	projectRoot, err := filepath.Abs(".")
+	if err != nil {
+		_ = os.RemoveAll(directory)
+		return "", "", err
+	}
+	overlay, err := createFrontendOverlay(projectRoot, config, frontendSettingsArgument(frontend))
+	if err != nil {
+		_ = os.RemoveAll(directory)
+		return "", "", err
+	}
+	if overlay != nil {
+		defer overlay.cleanup()
+	}
 	binary := devBinaryPath(directory, runtime.GOOS)
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", binary, config.Entrypoint)
+	cmd := exec.CommandContext(ctx, "go", applicationBuildArgs(config, binary, overlay)...)
 	cmd.Stdout, cmd.Stderr = errOut, errOut
 	if err := cmd.Run(); err != nil {
 		_ = os.RemoveAll(directory)
@@ -257,7 +381,7 @@ func buildDevBinaryContext(ctx context.Context, config projectConfig, errOut io.
 	return binary, directory, nil
 }
 
-func cachedDevBinaryContext(ctx context.Context, config projectConfig, sourceDigest string, errOut io.Writer) (string, string, bool, error) {
+func cachedDevBinaryContext(ctx context.Context, config projectConfig, sourceDigest string, errOut io.Writer, frontend ...*frontendSettings) (string, string, bool, error) {
 	userCache, err := os.UserCacheDir()
 	if err != nil {
 		return "", "", false, fmt.Errorf("could not locate user cache directory: %w", err)
@@ -267,15 +391,20 @@ func cachedDevBinaryContext(ctx context.Context, config projectConfig, sourceDig
 		return "", "", false, err
 	}
 	cacheRoot := filepath.Join(userCache, "spine", "dev")
-	return cachedDevBinaryAtContext(ctx, cacheRoot, projectRoot, config, sourceDigest, errOut)
+	return cachedDevBinaryAtContext(ctx, cacheRoot, projectRoot, config, sourceDigest, errOut, frontend...)
 }
 
-func cachedDevBinaryAt(cacheRoot, projectRoot string, config projectConfig, sourceDigest string, errOut io.Writer) (string, string, bool, error) {
-	return cachedDevBinaryAtContext(context.Background(), cacheRoot, projectRoot, config, sourceDigest, errOut)
+func cachedDevBinaryAt(cacheRoot, projectRoot string, config projectConfig, sourceDigest string, errOut io.Writer, frontend ...*frontendSettings) (string, string, bool, error) {
+	return cachedDevBinaryAtContext(context.Background(), cacheRoot, projectRoot, config, sourceDigest, errOut, frontend...)
 }
 
-func cachedDevBinaryAtContext(ctx context.Context, cacheRoot, projectRoot string, config projectConfig, sourceDigest string, errOut io.Writer) (string, string, bool, error) {
-	key := devCacheKey(config, sourceDigest, projectRoot)
+func cachedDevBinaryAtContext(ctx context.Context, cacheRoot, projectRoot string, config projectConfig, sourceDigest string, errOut io.Writer, frontend ...*frontendSettings) (string, string, bool, error) {
+	settings := frontendSettingsArgument(frontend)
+	cacheDigest := sourceDigest
+	if settings != nil {
+		cacheDigest += "\n" + frontendOverlayFingerprint(projectRoot, config, settings)
+	}
+	key := devCacheKey(config, cacheDigest, projectRoot)
 	directory := filepath.Join(cacheRoot, key)
 	binary := devBinaryPath(directory, runtime.GOOS)
 	if info, err := os.Lstat(binary); err == nil {
@@ -293,8 +422,16 @@ func cachedDevBinaryAtContext(ctx context.Context, cacheRoot, projectRoot string
 	if err != nil {
 		return "", "", false, err
 	}
+	overlay, err := createFrontendOverlay(projectRoot, config, settings)
+	if err != nil {
+		_ = os.RemoveAll(staging)
+		return "", "", false, err
+	}
+	if overlay != nil {
+		defer overlay.cleanup()
+	}
 	stagingBinary := devBinaryPath(staging, runtime.GOOS)
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", stagingBinary, config.Entrypoint)
+	cmd := exec.CommandContext(ctx, "go", applicationBuildArgs(config, stagingBinary, overlay)...)
 	cmd.Stdout, cmd.Stderr = errOut, errOut
 	if err := cmd.Run(); err != nil {
 		_ = os.RemoveAll(staging)
@@ -342,14 +479,18 @@ func devBinaryPath(directory, goos string) string {
 	return filepath.Join(directory, name)
 }
 
-func startDevProcess(binary, binaryDir string, config projectConfig, out, errOut io.Writer) (*devProcess, error) {
-	return startApplicationProcess(binary, binaryDir, config, "development", out, errOut)
+func startDevProcess(binary, binaryDir string, config projectConfig, out, errOut io.Writer, frontend ...*frontendSettings) (*devProcess, error) {
+	return startApplicationProcess(binary, binaryDir, config, "development", out, errOut, frontend...)
 }
 
-func startApplicationProcess(binary, binaryDir string, config projectConfig, environment string, out, errOut io.Writer) (*devProcess, error) {
+func startApplicationProcess(binary, binaryDir string, config projectConfig, environment string, out, errOut io.Writer, frontend ...*frontendSettings) (*devProcess, error) {
 	cmd := exec.Command(binary)
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = out, errOut, os.Stdin
-	cmd.Env = append(os.Environ(), fmt.Sprintf("SPINE_PORT=%d", config.Port), "ENV="+environment)
+	environmentValues := []string{fmt.Sprintf("SPINE_PORT=%d", config.Port), "ENV=" + environment}
+	if len(frontend) > 0 && frontend[0] != nil {
+		environmentValues = append(environmentValues, "SPINE_STATIC_DIR="+frontend[0].output, "SPINE_FRONTEND_API_PREFIX="+frontend[0].apiPrefix)
+	}
+	cmd.Env = replaceEnvironmentValues(os.Environ(), environmentValues...)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -361,6 +502,24 @@ func startApplicationProcess(binary, binaryDir string, config projectConfig, env
 		process.done <- err
 	}()
 	return process, nil
+}
+
+func replaceEnvironmentValues(environment []string, values ...string) []string {
+	replaced := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if key, _, ok := strings.Cut(value, "="); ok {
+			replaced[key] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(environment)+len(values))
+	for _, value := range environment {
+		key, _, ok := strings.Cut(value, "=")
+		if _, exists := replaced[key]; ok && exists {
+			continue
+		}
+		result = append(result, value)
+	}
+	return append(result, values...)
 }
 
 func flushDevEventWriter(writer io.Writer) {
@@ -382,8 +541,19 @@ func applicationShutdownTimeout() (time.Duration, error) {
 	return timeout, nil
 }
 
-// stopDevProcess는 제한 시간을 넘겨 강제 종료했는지 반환합니다.
+func forcedTerminationMessage(subject, goos string) string {
+	if devTerminationUsesKill(goos) {
+		return subject + " was forcibly terminated using the Windows fallback."
+	}
+	return subject + " exceeded the shutdown timeout and was killed."
+}
+
+// stopDevProcess는 자식을 강제 종료했는지 반환합니다.
 func stopDevProcess(process *devProcess, removeBinary bool) bool {
+	return stopDevProcessForOS(process, removeBinary, runtime.GOOS)
+}
+
+func stopDevProcessForOS(process *devProcess, removeBinary bool, goos string) bool {
 	if process == nil {
 		return false
 	}
@@ -393,12 +563,16 @@ func stopDevProcess(process *devProcess, removeBinary bool) bool {
 	if process.cmd == nil || process.cmd.Process == nil {
 		return false
 	}
-	if err := terminateDevProcess(process.cmd.Process, runtime.GOOS); err != nil {
+	if err := terminateDevProcess(process.cmd.Process, goos); err != nil {
 		select {
 		case <-process.done:
 			return false
 		default:
 		}
+	} else if devTerminationUsesKill(goos) {
+		// Windows의 즉시 강제 종료도 정상 종료와 구분해 보고합니다.
+		<-process.done
+		return true
 	}
 	timeout, err := applicationShutdownTimeout()
 	if err != nil {

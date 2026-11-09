@@ -3,8 +3,11 @@ package cli
 import (
 	"context"
 	"go/ast"
+	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -44,6 +47,10 @@ func (i *contractInspector) inspectHTTPAdapter(config projectConfig, file *ast.F
 	} else if selectedModuleVersion(a.SelectedModules, spineImportPath) == "" {
 		add("MODULE_GRAPH_UNAVAILABLE", "the selected module graph does not contain Spine")
 	}
+	if selection == "unresolved" && !applicationVariableReassigned(function.Body, assignment) && !returnsDifferentApplication(function.Body, assignment.Lhs[0].(*ast.Ident)) {
+		selection = dynamicAdapterSelection(assignment.Rhs[0], importPathsByAlias(file), a.SelectedModules)
+		a.Selection = selection
+	}
 	legacy := false
 	for _, module := range a.SelectedModules {
 		if module.Path == spineImportPath && module.Replace != nil && selection == "missing" && (a.Enabled == nil || *a.Enabled) {
@@ -63,13 +70,27 @@ func (i *contractInspector) inspectHTTPAdapter(config projectConfig, file *ast.F
 		if semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.6.0") < 0 {
 			a.ExpectedContract = "spine.http-adapter/v1"
 		}
-		if _, removed := importedCall(assignment.Rhs[0], importPathsByAlias(file), spineImportPath, "NewWithHTTPAdapter"); removed && a.ExpectedContract == "spine.http-adapter/v2" {
+		a.ExpectedContract = selectedHTTPContract(a.SelectedModules, a.ExpectedContract)
+		if _, removed := importedCall(assignment.Rhs[0], importPathsByAlias(file), spineImportPath, "NewWithHTTPAdapter"); removed && (a.ExpectedContract == "spine.http-adapter/v2" || a.ExpectedContract == "spine.http-adapter/v3") {
 			add("HTTP_ADAPTER_API_REMOVED", "Spine v0.6.0 removed NewWithHTTPAdapter; use spine.New(spine.WithHTTPAdapter(platform.NewFactory()))")
 		}
-		if selection == "echo" {
+		if selection == "nethttp" {
+			a.Provider, a.Selection, a.CanonicalFactory = "nethttp", "explicit", nethttpPlatformPath+".NewFactory"
+			if selectedModuleVersion(a.SelectedModules, nethttpPlatformPath) == "" && err == nil {
+				add("MODULE_GRAPH_UNAVAILABLE", "the selected module graph does not contain the net/http platform")
+			}
+		} else if selection == "echo" {
 			a.Provider, a.Selection, a.CanonicalFactory = "echo", "explicit", echoPlatformPath+".NewFactory"
 			if selectedModuleVersion(a.SelectedModules, echoPlatformPath) == "" && err == nil {
 				add("MODULE_GRAPH_UNAVAILABLE", "the selected module graph does not contain the Echo platform")
+			}
+		} else if selection != "missing" && selection != "unresolved" {
+			path := providerModule(selection)
+			d, descriptorErr := staticPlatformDescriptor("http", selection, path, a.SelectedModules)
+			if descriptorErr != nil || d.ContractVersion != a.ExpectedContract {
+				add("HTTP_ADAPTER_UNRESOLVED", "HTTP platform metadata or contract is unavailable or incompatible")
+			} else {
+				a.Provider, a.Selection, a.CanonicalFactory = selection, "explicit", path+"."+d.Factory
 			}
 		} else if selection == "unresolved" {
 			add("HTTP_ADAPTER_UNRESOLVED", "the HTTP adapter option or factory cannot be resolved statically")
@@ -88,7 +109,7 @@ func (i *contractInspector) inspectHTTPAdapter(config projectConfig, file *ast.F
 	}
 	for _, item := range i.contract.Configuration {
 		if strings.HasPrefix(item.Path, "http_adapter.native_hooks") && (a.Enabled == nil || *a.Enabled) {
-			if a.ExpectedContract == "spine.http-adapter/v2" {
+			if a.ExpectedContract == "spine.http-adapter/v2" || a.ExpectedContract == "spine.http-adapter/v3" {
 				add("HTTP_NATIVE_HOOK_API_REMOVED", "Spine v0.6.0 removed App.Transport; configure Echo through platform.WithEcho(func(*echo.Echo))")
 			} else {
 				a.RequiredCapabilities = append(a.RequiredCapabilities, "native-hooks")
@@ -242,4 +263,47 @@ func returnsDifferentApplication(root ast.Node, app *ast.Ident) bool {
 		return true
 	})
 	return different
+}
+
+// Read the selected core source, including branch pseudo-versions, without executing it.
+func selectedHTTPContract(modules []selectedModule, fallback string) string {
+	for _, module := range modules {
+		if module.Path != spineImportPath {
+			continue
+		}
+		root := module.Dir
+		if module.Replace != nil && module.Replace.Dir != "" {
+			root = module.Replace.Dir
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, "contract", "http", "contract.go"), nil, 0)
+		if err != nil {
+			continue
+		}
+		for _, declaration := range file.Decls {
+			group, ok := declaration.(*ast.GenDecl)
+			if !ok || group.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range group.Specs {
+				value, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for index, name := range value.Names {
+					if name.Name != "ContractVersion" || index >= len(value.Values) {
+						continue
+					}
+					literal, ok := value.Values[index].(*ast.BasicLit)
+					if !ok || literal.Kind != token.STRING {
+						continue
+					}
+					contract, err := strconv.Unquote(literal.Value)
+					if err == nil {
+						return contract
+					}
+				}
+			}
+		}
+	}
+	return fallback
 }
