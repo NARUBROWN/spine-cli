@@ -43,6 +43,8 @@ curl http://localhost:8080/health
 
 `spine cloud auth login`으로 로그인하고, `spine.toml`이 있는 프로젝트에서 `spine deploy`를 실행합니다. 지원 옵션은 `spine cloud auth --help`와 `spine deploy --help`에서 확인하세요.
 
+Echo 또는 net/http 앱에 프런트엔드가 설정되어 있으면 `spine deploy`가 프런트엔드를 빌드하고 정적 파일을 Linux ARM64 실행 파일에 내장합니다. 배포 전에 프런트엔드의 npm 의존성을 설치하세요. 정적 파일을 포함한 실행 파일은 32 MiB 이하여야 합니다.
+
 ## 더 보기
 
 - [플랫폼 연결](PLATFORMS.md)

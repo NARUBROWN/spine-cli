@@ -177,7 +177,7 @@ func submitCloudArtifact(ctx context.Context, client *http.Client, api, appID, r
 }
 
 func runDeploy(args []string, out, errOut io.Writer) int {
-	usage := "Usage: spine deploy [--app <app-id>] [--api <https-origin>] [--request-id <uuid>]\n\nSign in, prepare the current project's app, and submit a Linux ARM64 artifact.\n"
+	usage := "Usage: spine deploy [--app <app-id>] [--api <https-origin>] [--request-id <uuid>]\n\nBuild and submit a Linux ARM64 app, embedding the configured frontend when enabled.\n"
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(out, usage)
 		return 0

@@ -178,6 +178,11 @@ func newFrontendBuilder(projectRoot string, config projectConfig, production boo
 	if err != nil || settings == nil {
 		return nil, settings != nil, err
 	}
+	builder, err := newFrontendBuilderForSettings(*settings, production)
+	return builder, true, err
+}
+
+func newFrontendBuilderForSettings(settings frontendSettings, production bool) (*frontendBuilder, error) {
 	options := api.BuildOptions{
 		AbsWorkingDir:     settings.root,
 		EntryPoints:       []string{settings.entry},
@@ -219,9 +224,9 @@ func newFrontendBuilder(projectRoot string, config projectConfig, production boo
 	}
 	ctx, contextErr := api.Context(options)
 	if contextErr != nil {
-		return nil, true, formatEsbuildMessages(contextErr.Errors)
+		return nil, formatEsbuildMessages(contextErr.Errors)
 	}
-	return &frontendBuilder{settings: *settings, context: ctx}, true, nil
+	return &frontendBuilder{settings: settings, context: ctx}, nil
 }
 
 func frontendEsbuildLoader(name string) api.Loader {

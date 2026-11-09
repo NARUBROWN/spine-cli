@@ -42,13 +42,32 @@ func buildCloudArtifact(ctx context.Context, out, errOut io.Writer) (cloudArtifa
 	if err != nil {
 		return empty, err
 	}
+	var overlay *frontendOverlay
 	if frontend != nil {
-		return empty, errors.New("Spine Cloud deployment does not yet support frontend assets")
+		dir, err := os.MkdirTemp("", "spine-cloud-frontend-")
+		if err != nil {
+			return empty, fmt.Errorf("could not create temporary frontend build directory: %w", err)
+		}
+		defer os.RemoveAll(dir)
+		frontend.output = filepath.Join(dir, "frontend")
+		builder, err := newFrontendBuilderForSettings(*frontend, true)
+		if err != nil {
+			return empty, fmt.Errorf("could not initialize frontend build: %w", err)
+		}
+		defer builder.close()
+		if err := builder.rebuild(errOut); err != nil {
+			return empty, fmt.Errorf("frontend build failed: %w", err)
+		}
+		overlay, err = createFrontendServingOverlay(root, config, frontend, true)
+		if err != nil {
+			return empty, fmt.Errorf("could not prepare embedded frontend: %w", err)
+		}
+		defer overlay.cleanup()
 	}
-	return compileCloudArtifact(ctx, config.Entrypoint, maxCloudArtifactBytes, errOut)
+	return compileCloudArtifact(ctx, config.Entrypoint, maxCloudArtifactBytes, errOut, overlay)
 }
 
-func compileCloudArtifact(ctx context.Context, entrypoint string, limit int64, errOut io.Writer) (cloudArtifact, error) {
+func compileCloudArtifact(ctx context.Context, entrypoint string, limit int64, errOut io.Writer, overlay *frontendOverlay) (cloudArtifact, error) {
 	var empty cloudArtifact
 	if entrypoint == "" || limit <= 0 {
 		return empty, errors.New("invalid artifact build configuration")
@@ -59,7 +78,11 @@ func compileCloudArtifact(ctx context.Context, entrypoint string, limit int64, e
 	}
 	defer os.RemoveAll(dir)
 	output := filepath.Join(dir, "app")
-	cmd := exec.CommandContext(ctx, "go", "build", "-trimpath", "-o", output, entrypoint)
+	args := []string{"build", "-trimpath"}
+	if overlay != nil {
+		args = append(args, "-overlay", overlay.path)
+	}
+	cmd := exec.CommandContext(ctx, "go", append(args, "-o", output, entrypoint)...)
 	for _, value := range os.Environ() {
 		if !strings.HasPrefix(value, "GOOS=") && !strings.HasPrefix(value, "GOARCH=") && !strings.HasPrefix(value, "CGO_ENABLED=") {
 			cmd.Env = append(cmd.Env, value)
