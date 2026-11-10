@@ -1,9 +1,10 @@
 package cli
 
 import (
+	"os"
+
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
-	"os"
 )
 
 const controllerRoutesMinimum = "v0.7.0-preview.5"
@@ -12,20 +13,24 @@ func controllerRoutesVersion(version string) bool {
 	return semver.IsValid(version) && semver.Compare(version, controllerRoutesMinimum) >= 0
 }
 func controllerRoutesProject() bool {
+	return controllerRoutesVersion(declaredSpineVersion())
+}
+
+func declaredSpineVersion() string {
 	data, err := os.ReadFile("go.mod")
 	if err != nil {
-		return false
+		return ""
 	}
 	file, err := modfile.Parse("go.mod", data, nil)
 	if err != nil {
-		return false
+		return ""
 	}
 	for _, require := range file.Require {
 		if require.Mod.Path == spineImportPath {
-			return controllerRoutesVersion(require.Mod.Version)
+			return require.Mod.Version
 		}
 	}
-	return false
+	return ""
 }
 func controllerRoutesScaffold(options newProjectOptions) bool {
 	return options.Layout == layeredLayout && controllerRoutesVersion(selectedModuleVersion(options.Modules, spineImportPath))
