@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,7 @@ func TestHeaderMarkerRejectsInvalidContract(t *testing.T) {
 	for _, fields := range []string{
 		"A string `header:\"X-ID\"`; B string `header:\"x-id\"`",
 		"A string `header:\"bad name\"`",
+		"A map[string]string",
 		"A string `query:\"q\"`",
 	} {
 		t.Run(fields, func(t *testing.T) {
@@ -32,5 +34,31 @@ func TestHeaderMarkerRejectsInvalidContract(t *testing.T) {
 				t.Fatalf("accepted invalid header: %+v", inspector.contract.HTTP)
 			}
 		})
+	}
+}
+
+func TestWrappedPathAndMultipartBodyContract(t *testing.T) {
+	inspector := controllerFixture(t, "type Upload struct { Name string `json:\"name\" form:\"name\"`; File *FixtureFileHeader `json:\"-\" form:\"file\"` }; func(c *UserController)RegisterRoutes(r *api.Registry){r.POST(\"/users/:id\",func(input.Path[PathDTO],input.Body[Upload])error{return nil})}")
+	inspector.inspectControllerRoutes()
+	inspector.resolveHandlerSignatures()
+	if contractHasErrors(*inspector.contract) {
+		t.Fatalf("diagnostics=%+v", inspector.contract.Diagnostics)
+	}
+	parameters := inspector.contract.HTTP[0].Parameters
+	if parameters[0].Binding != "path" || strings.Join(parameters[0].Keys, ",") != "id" || parameters[1].Binding != "body" {
+		t.Fatalf("parameters=%+v", parameters)
+	}
+	doc, err := buildOpenAPIDocument(*inspector.contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{`"multipart/form-data"`, `"format":"binary"`, `"name"`} {
+		if !strings.Contains(string(data), fragment) {
+			t.Fatalf("missing %s: %s", fragment, data)
+		}
 	}
 }
