@@ -17,7 +17,7 @@ func checkControllerInputs(signature *types.Signature) error {
 			continue
 		}
 		source := named.Obj().Name()
-		if source != "Path" && source != "Query" && source != "Body" {
+		if source != "Path" && source != "Query" && source != "Header" && source != "Body" {
 			continue
 		}
 		pointer, ok := named.Underlying().(*types.Pointer)
@@ -50,6 +50,9 @@ func checkControllerFields(structure *types.Struct, source string, visiting map[
 	tag := "query"
 	if source == "Path" {
 		tag = "path"
+	}
+	if source == "Header" {
+		tag = "header"
 	}
 	for index := 0; index < structure.NumFields(); index++ {
 		field := structure.Field(index)
@@ -91,7 +94,7 @@ func checkControllerFields(structure *types.Struct, source string, visiting map[
 			base = value.Elem()
 		}
 		if !controllerScalarType(base) {
-			return fmt.Errorf("unsupported query field %s", field.Name())
+			return fmt.Errorf("unsupported %s field %s", tag, field.Name())
 		}
 	}
 	return nil

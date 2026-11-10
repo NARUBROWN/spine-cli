@@ -186,15 +186,13 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 				}
 				content := map[string]any{"application/json": map[string]any{"schema": catalog.schema(payload, source)}}
 				requestBody := map[string]any{"content": content}
-				if parameter.Payload == "" {
-					form, ok, unresolved := catalog.staticFormContent(payload, source)
-					if ok {
-						requestBody["content"] = form
-					}
-					if unresolved {
-						requestBody["content"] = map[string]any{}
-						requestBody["x-spine-unresolved-content"] = true
-					}
+				form, ok, unresolved := catalog.staticFormContent(payload, source)
+				if ok {
+					requestBody["content"] = form
+				}
+				if unresolved {
+					requestBody["content"] = map[string]any{}
+					requestBody["x-spine-unresolved-content"] = true
 				}
 				operation["requestBody"] = requestBody
 
