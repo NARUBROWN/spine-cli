@@ -25,6 +25,7 @@ REPOSITORY_POLICY = json.loads((Path(__file__).resolve().parents[2] / ".github/r
 # 채널 승격 자체의 검사는 저장소가 현재 선택한 Preview 레시피와 분리합니다.
 POLICY = copy.deepcopy(REPOSITORY_POLICY)
 POLICY.pop("rc_cohort", None)
+POLICY.pop("hotfix_preview_branch", None)
 POLICY["recipe"] = {"id": "platform-contracts-v0.6.5", "modules": {
     "github.com/NARUBROWN/spine": "v0.6.5",
     **{f"github.com/NARUBROWN/spine-{name}": "v0.1.0" for name in (
@@ -91,7 +92,8 @@ class FakeGitHub:
             return {"id": 1, "run_attempt": self.run_attempt, "conclusion": self.run_conclusion, "status": "completed", "event": "workflow_dispatch", "path": self.run_path, "head_branch": self.run_branch, "head_sha": self.run_sha}
         if path.endswith("deployment-branch-policies"):
             channel = path.split("/")[1].removeprefix("release-")
-            return {"branch_policies": [{"name": POLICY["branches"][channel], "type": "branch"}]}
+            branch = self.policy["hotfix_preview_branch"] if channel == "hotfix-preview" else POLICY["branches"][channel]
+            return {"branch_policies": [{"name": branch, "type": "branch"}]}
         if path.startswith("environments/"):
             return {"can_admins_bypass": self.bypass, "deployment_branch_policy": {"custom_branch_policies": True},
                     "protection_rules": [{"type": "required_reviewers", "reviewers": [
@@ -158,6 +160,39 @@ class ReleasePolicyTests(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_SHA": "f" * 40}), self.assertRaisesRegex(release.ReleaseError, "HEAD"):
             self.plan()
 
+    def test_hotfix_preview_promotes_only_with_its_own_branch_and_rc_cohort(self):
+        policy = copy.deepcopy(POLICY)
+        branch = f"release/{self.base}-hotfix-preview"
+        cohort = dict.fromkeys(release.UPSTREAM_MODULES, "v0.1.0")
+        cohort[release.CORE_MODULE] = "v0.1.0-rc.1"
+        policy.update(hotfix_preview_branch=branch, rc_cohort=cohort)
+        self.github.policy = policy
+        self.github.heads[branch] = SOURCE
+        plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
+        self.assertEqual(plan["branch"], branch)
+        self.assertEqual(plan["approval_environment"], "release-hotfix-preview")
+        self.assertEqual(plan["rc_cohort"], cohort)
+
+        source = self.github.candidate()
+        self.github.run_branch = branch
+        self.github.artifacts[source]["workflow_run"]["head_branch"] = branch
+        self.github.pull_direction = (branch, "rc")
+        manifest = self.github.manifests[source]
+        manifest.update(branch=branch, rc_cohort=cohort)
+        for report in manifest["validation"]["reports"]:
+            report.update(rc_cohort=cohort, rc_combination_checks=["echo-full", "nethttp-full"])
+        promoted = release.make_plan(self.github, policy, "rc", self.base+"-rc.1", source, now=NOW)
+        self.assertEqual(promoted["promotion_pr"]["head"], branch)
+        self.assertEqual(promoted["approval_environment"], "release-rc")
+
+        self.github.run_branch = "preview"
+        with self.assertRaisesRegex(release.ReleaseError, "artifact"):
+            release.make_plan(self.github, policy, "rc", self.base+"-rc.1", source, now=NOW)
+        self.github.run_branch = branch
+        manifest["rc_cohort"] = {}
+        with self.assertRaisesRegex(release.ReleaseError, "RC 조합"):
+            release.make_plan(self.github, policy, "rc", self.base+"-rc.1", source, now=NOW)
+
     def test_core_candidate_is_allowed_before_stable_but_cannot_ship_as_stable_default(self):
         policy = copy.deepcopy(POLICY)
         policy["recipe"]["modules"]["github.com/NARUBROWN/spine"] = "v0.6.6-rc.1"
@@ -168,6 +203,7 @@ class ReleasePolicyTests(unittest.TestCase):
 
     def test_preview_recipe_cannot_ship_as_stable_default(self):
         policy = copy.deepcopy(REPOSITORY_POLICY)
+        policy.pop("hotfix_preview_branch", None)
         policy["recipe"]["modules"]["github.com/NARUBROWN/spine"] = "preview"
         self.github.policy = policy
         with patch.object(release, "resolve_module_query", return_value="v0.7.0-preview.2"), patch.object(release, "upstream_evidence", return_value={}):
