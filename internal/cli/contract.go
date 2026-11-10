@@ -670,7 +670,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		matches := signatures[registration.Handler]
 		if len(matches) == 1 {
 			registration.schemaSource = matches[0].schemaSource
-			registration.Parameters = bindMessageParameters(matches[0].parameters, "consumer")
+			registration.Parameters = bindMessageParameters(matches[0].parameters, "consumer", importPathsByAlias(matches[0].httpSource.File))
 			registration.Returns = matches[0].returns
 			if matches[0].unimplemented {
 				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "CONSUMER_HANDLER_NOT_IMPLEMENTED", Message: fmt.Sprintf("consumer %q still uses the generated fail-closed handler", registration.Name), Source: matches[0].source})
@@ -686,7 +686,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		matches := signatures[registration.Handler]
 		if len(matches) == 1 {
 			registration.schemaSource = matches[0].schemaSource
-			registration.Parameters = bindMessageParameters(matches[0].parameters, "websocket")
+			registration.Parameters = bindMessageParameters(matches[0].parameters, "websocket", importPathsByAlias(matches[0].httpSource.File))
 			registration.Returns = matches[0].returns
 			if matches[0].unimplemented {
 				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "WEBSOCKET_HANDLER_NOT_IMPLEMENTED", Message: fmt.Sprintf("WebSocket %q still uses the generated fail-closed handler", registration.Name), Source: matches[0].source})
@@ -769,13 +769,15 @@ func fieldTypes(fset *token.FileSet, fields *ast.FieldList) []string {
 	return result
 }
 
-func bindMessageParameters(parameters []handlerParameter, transport string) []handlerParameter {
+func bindMessageParameters(parameters []handlerParameter, transport string, imports map[string]string) []handlerParameter {
 	result := append([]handlerParameter(nil), parameters...)
 	payloadAssigned := false
 	for index := range result {
 		parameter := &result[index]
+		alias, name, _ := strings.Cut(parameter.Type, ".")
+		spineContext := name == "Ctx" && imports[alias] == spineImportPath+"/pkg/spine"
 		switch {
-		case parameter.Type == "context.Context" || strings.HasSuffix(parameter.Type, "ExecutionContext"):
+		case spineContext || parameter.Type == "context.Context" || strings.HasSuffix(parameter.Type, "ExecutionContext"):
 			parameter.Binding = "context"
 		case transport == "websocket" && strings.HasSuffix(parameter.Type, "ConnectionID"):
 			parameter.Binding = "connection"
