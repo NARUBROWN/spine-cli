@@ -2,20 +2,20 @@
 
 [Spine](https://github.com/NARUBROWN/spine) 앱을 생성하고, 실행 계약을 검사하고, API 명세를 내보내는 Go CLI입니다. 설치한 실행 파일은 `spine`입니다.
 
-**Stable 채널** | [공개 태그 `v0.4.3`](https://github.com/NARUBROWN/spine-cli/tree/v0.4.3)
+**RC 채널** | [공개 태그 `v0.4.3-rc.3`](https://github.com/NARUBROWN/spine-cli/tree/v0.4.3-rc.3)
 
-일반 개발과 운영에 사용하는 정식 릴리스 채널입니다.
+정식 릴리스 전에 기존 앱과의 호환성을 확인하는 채널입니다.
 
-다른 채널은 [Preview](https://github.com/NARUBROWN/spine-cli/tree/preview) | [RC](https://github.com/NARUBROWN/spine-cli/tree/rc)에서 확인하세요.
+다른 채널은 [Preview](https://github.com/NARUBROWN/spine-cli/tree/preview) | [Stable](https://github.com/NARUBROWN/spine-cli/tree/main)에서 확인하세요.
 
 ## 빠른 시작
 
 Go 1.25.5 이상이 필요합니다. `--validator playground`를 선택한 앱에는 Go 1.26.0 이상이 필요합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.3
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.3-rc.3
 spine version
-spine new todo-api --module github.com/acme/todo-api --channel main --no-interactive
+spine new todo-api --module github.com/acme/todo-api --channel rc --no-interactive
 cd todo-api
 spine dev
 ```
@@ -24,7 +24,7 @@ spine dev
 curl http://localhost:8080/health
 ```
 
-`/health`에서 HTTP 200과 `{"status":"ok"}`가 반환됩니다. `--channel main`은 정식 의존성을 선택합니다. 선택된 Spine 코어와 플랫폼 버전은 생성된 `go.mod`에서 확인할 수 있습니다.
+`/health`에서 HTTP 200과 `{"status":"ok"}`가 반환됩니다. `--channel rc`는 공개 RC와 정식 태그 중 최신 버전을 선택합니다. 정식 의존성이 선택될 수 있으니 생성된 `go.mod`를 확인하세요.
 
 ## 자주 쓰는 명령
 
