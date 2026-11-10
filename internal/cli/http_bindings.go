@@ -34,9 +34,13 @@ type httpBindingShape struct {
 	problem       string
 }
 
+func requiresExplicitHTTPInputs(version string) bool {
+	return semver.IsValid(version) && semver.Compare(version, "v0.7.2-preview.2") >= 0
+}
+
 // HTTP 검증과 route 생성은 동일한 소스 기반 resolver 지원 규칙을 사용합니다.
 func newHTTPBindingCatalog(module string, sources layoutSources, coreVersion string) *httpBindingCatalog {
-	catalog := &httpBindingCatalog{explicitInputs: semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.2-preview.2") >= 0, module: module, types: map[string]httpTypeDeclaration{}, errorMethods: map[string]bool{}, structured: semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.0-preview.1") >= 0}
+	catalog := &httpBindingCatalog{explicitInputs: requiresExplicitHTTPInputs(coreVersion), module: module, types: map[string]httpTypeDeclaration{}, errorMethods: map[string]bool{}, structured: semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.0-preview.1") >= 0}
 	for _, source := range sources.sortedFiles() {
 		for _, declaration := range source.File.Decls {
 			group, ok := declaration.(*ast.GenDecl)

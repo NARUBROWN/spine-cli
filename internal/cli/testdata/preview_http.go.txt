@@ -1,6 +1,9 @@
 package application
 
-import "github.com/NARUBROWN/spine/pkg/httpx"
+import (
+    "github.com/NARUBROWN/spine/pkg/httpx"
+    "github.com/NARUBROWN/spine/pkg/input"
+)
 
 type PreviewPath struct { ID int64 `path:"id"` }
 type PreviewQuery struct {
@@ -15,6 +18,6 @@ type PreviewResult struct {
 }
 type PreviewController struct{}
 func NewPreviewController() *PreviewController { return &PreviewController{} }
-func (*PreviewController) Get(path *PreviewPath, query *PreviewQuery, headers *PreviewHeaders) httpx.Response[PreviewResult] {
+func (*PreviewController) Get(path input.Path[PreviewPath], query input.Query[PreviewQuery], headers input.Header[PreviewHeaders]) httpx.Response[PreviewResult] {
     return httpx.Response[PreviewResult]{Body: PreviewResult{path.ID, query.Tags, headers.Host}}
 }
