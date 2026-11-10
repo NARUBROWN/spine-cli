@@ -94,7 +94,7 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 			} else if shape.binding == "path" {
 				otherPath = true
 			}
-			parameter.Deprecated = catalog.structured && shape.legacy
+			parameter.Deprecated = catalog.structured && (shape.legacy || shape.binding == "multipart")
 			if shape.binding == "path" && !parameter.SourceDTO && !shape.scalarPath {
 				if pathIndex < len(pathKeys) {
 					parameter.Key = pathKeys[pathIndex]

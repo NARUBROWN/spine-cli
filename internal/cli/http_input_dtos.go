@@ -172,12 +172,16 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 		for range count {
 			parameter := parameters[index]
 			index++
-			legacy, typed = legacy || parameter.Deprecated, typed || parameter.SourceDTO
+			legacy, typed = legacy || parameter.Deprecated && parameter.Binding != "multipart", typed || parameter.SourceDTO
 			legacyPath = legacyPath || parameter.Deprecated && parameter.Binding == "path"
 			scalarPath = scalarPath || parameter.scalarPath
 			pathDTO = pathDTO || parameter.SourceDTO && parameter.Binding == "path" && !parameter.scalarPath
 			if parameter.Deprecated {
-				diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_INPUT_API_DEPRECATED", Message: fmt.Sprintf("handler %s parameter %d uses a deprecated %s input", handler, index-1, parameter.Binding), Source: relativeSource(source.Fset.Position(field.Pos())), Hint: "Migrate path, query and header inputs in this handler to separate tagged struct pointers."})
+				hint := "Migrate path, query and header inputs in this handler to separate tagged struct pointers."
+				if parameter.Binding == "multipart" {
+					hint = "Use input.Body[T] with form-tagged *mime/multipart.FileHeader or []*mime/multipart.FileHeader fields. For dynamic file fields, use core.HttpRequestContext.MultipartForm."
+				}
+				diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_INPUT_API_DEPRECATED", Message: fmt.Sprintf("handler %s parameter %d uses a deprecated %s input", handler, index-1, parameter.Binding), Source: relativeSource(source.Fset.Position(field.Pos())), Hint: hint})
 			}
 			if parameter.Binding == "body" || parameter.SourceDTO && !parameter.scalarPath {
 				identity := catalog.dtoIdentity(source, field.Type)

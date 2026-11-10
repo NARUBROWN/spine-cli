@@ -99,3 +99,27 @@ func TestStructuredPathDTOCanBeRegisteredAndExported(t *testing.T) {
 		t.Fatalf("source DTO key change missing from semantic diff: %d %s %s", code, out.String(), errOut.String())
 	}
 }
+
+func TestUploadedFilesDeprecationPreservesBodyCompatibility(t *testing.T) {
+	for _, parameters := range []string{"upload m.UploadedFiles", "body input.Body[Upload], upload m.UploadedFiles", "upload m.UploadedFiles, body input.Body[Upload]"} {
+		t.Run(parameters, func(t *testing.T) {
+			httpBindingProject(t, "legacy", `import (m "github.com/NARUBROWN/spine/pkg/multipart"; "github.com/NARUBROWN/spine/pkg/input")`, "type Upload struct { Name string `form:\"name\"` }; type UploadBody = input.Body[Upload]", parameters, "/upload")
+			contract, err := inspectApplication()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if contractHasErrors(contract) {
+				t.Fatalf("compatibility: %+v", contract.Diagnostics)
+			}
+			found := false
+			for _, diagnostic := range contract.Diagnostics {
+				if diagnostic.Code == "HTTP_INPUT_API_DEPRECATED" && strings.Contains(diagnostic.Hint, "input.Body") {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("missing deprecation warning: %+v", contract.Diagnostics)
+			}
+		})
+	}
+}
