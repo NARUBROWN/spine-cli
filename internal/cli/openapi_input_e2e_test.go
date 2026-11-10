@@ -41,7 +41,11 @@ func (*InputProbe) JSON(body input.Body[JSONInput]) error { return nil }
 `)
 	var docs []map[string]any
 	for _, mode := range []string{"static", "runtime"} {
-		result := runE2E(binary, project, nil, "contract", "export", "--format", "openapi", "--source", mode)
+		args := []string{"contract", "export", "--format", "openapi", "--source", mode}
+		if mode == "runtime" && strings.Contains(string(source), "func (c *HealthController) RegisterRoutes(") {
+			args = append(args, "--prepare")
+		}
+		result := runE2E(binary, project, nil, args...)
 		assertE2ESuccess(t, result, mode)
 		_, err := os.Stat(filepath.Join(project, "ran-user-code"))
 		if mode == "static" && !os.IsNotExist(err) {
