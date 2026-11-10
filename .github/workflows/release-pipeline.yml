@@ -32,6 +32,7 @@ jobs:
     outputs:
       sha: ${{ steps.plan.outputs.sha }}
       version: ${{ steps.plan.outputs.version }}
+      approval_environment: ${{ steps.plan.outputs.approval_environment }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,7 +79,7 @@ jobs:
     permissions:
       contents: write
       actions: read
-    environment: ${{ format('release-{0}', inputs.channel) }}
+    environment: ${{ needs.plan.outputs.approval_environment }}
     steps:
       - uses: actions/checkout@v4
         with:

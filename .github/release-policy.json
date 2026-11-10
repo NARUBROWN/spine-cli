@@ -1,12 +1,12 @@
 {
   "schema_version": "spine-cli.release-policy/v1",
-  "next_version": "v0.4.3",
+  "next_version": "v0.4.4",
   "preview_hours": 72,
   "rc_hours": 24,
   "stable_interval_hours": 0,
   "approval_environment": "release-stable",
   "reviewer_login": "NARUBROWN",
-  "notes_path": "release/notes/v0.4.3.md",
+  "notes_path": "release/notes/v0.4.4.md",
   "recipe": {
     "id": "platform-contracts-preview",
     "modules": {
@@ -26,13 +26,14 @@
     "stable": "main"
   },
   "rc_cohort": {
-    "github.com/NARUBROWN/spine": "v0.7.0-rc.1",
-    "github.com/NARUBROWN/spine-echo-platform": "v0.2.0-rc.1",
-    "github.com/NARUBROWN/spine-gorilla-platform": "v0.2.0-rc.1",
-    "github.com/NARUBROWN/spine-kafka-platform": "v0.2.0-rc.1",
-    "github.com/NARUBROWN/spine-nats-platform": "v0.1.0-rc.1",
-    "github.com/NARUBROWN/spine-nethttp-platform": "v0.1.0-rc.1",
-    "github.com/NARUBROWN/spine-rabbitmq-platform": "v0.2.0-rc.1",
-    "github.com/NARUBROWN/spine-validator-playground": "v0.2.0-rc.1"
-  }
+    "github.com/NARUBROWN/spine": "v0.7.2-rc.1",
+    "github.com/NARUBROWN/spine-echo-platform": "v0.2.1-rc.1",
+    "github.com/NARUBROWN/spine-gorilla-platform": "v0.2.0",
+    "github.com/NARUBROWN/spine-kafka-platform": "v0.2.0",
+    "github.com/NARUBROWN/spine-nats-platform": "v0.1.0",
+    "github.com/NARUBROWN/spine-nethttp-platform": "v0.1.0",
+    "github.com/NARUBROWN/spine-rabbitmq-platform": "v0.2.0",
+    "github.com/NARUBROWN/spine-validator-playground": "v0.2.0"
+  },
+  "hotfix_preview_branch": "release/v0.4.4-hotfix-preview"
 }
