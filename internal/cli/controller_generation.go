@@ -57,7 +57,7 @@ func controllerRouteSchema() map[string]any {
 		"method":                 "RegisterRoutes(*api.Registry)",
 		"route_root":             "src/controller",
 		"legacy_route_root":      layeredRoutePath,
-		"inputs":                 []string{"input.Path[T]", "input.Query[T]", "input.Body[T]"},
+		"inputs":                 []string{"input.Path[T]", "input.Query[T]", "input.Header[T]", "input.Body[T]"},
 		"collection":             "once per prepared app, after DI resolution",
 		"unprepared_description": "ErrRoutesNotCollected; no automatic Prepare",
 	}

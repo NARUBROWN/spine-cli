@@ -81,7 +81,6 @@ func TestScalarPathRejectsAmbiguousAndUnsupported(t *testing.T) {
 		{"no key", `func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/users",func(input.Path[int])error{return nil})}`, "HTTP_PATH_SCALAR_AMBIGUOUS"},
 		{"too few", `func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/:org/:id",func(input.Path[int])error{return nil})}`, "HTTP_PATH_SCALAR_AMBIGUOUS"},
 		{"too many", `func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/:id",func(input.Path[int],input.Path[int64])error{return nil})}`, "HTTP_PATH_SCALAR_AMBIGUOUS"},
-		{"struct path wrapper", `func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/:id",func(input.Path[PathDTO])error{return nil})}`, "HTTP_INPUT_CONTRACT_INVALID"},
 		{"direct dto mixed", `func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/:id",func(input.Path[int],*PathDTO)error{return nil})}`, "HTTP_PATH_INPUT_MIXED"},
 		{"defined type", `type ID int;func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/:id",func(input.Path[ID])error{return nil})}`, "HTTP_INPUT_CONTRACT_INVALID"},
 		{"slice", `func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/:id",func(input.Path[[]int])error{return nil})}`, "HTTP_INPUT_CONTRACT_INVALID"},
@@ -188,4 +187,26 @@ func TestScalarPathUntagedCoreIsUnverified(t *testing.T) {
 		}
 	}
 	t.Fatalf("%+v", inspector.contract.Diagnostics)
+}
+
+func TestPathDTOContractAndStaticOpenAPI(t *testing.T) {
+	inspector := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/:id",func(input.Path[PathDTO])error{return nil})}`)
+	inspector.inspectControllerRoutes()
+	inspector.resolveHandlerSignatures()
+	if contractHasErrors(*inspector.contract) {
+		t.Fatalf("diagnostics: %+v", inspector.contract.Diagnostics)
+	}
+	param := inspector.contract.HTTP[0].Parameters[0]
+	if param.Binding != "path" || param.scalarPath || len(param.Keys) != 1 || param.Keys[0] != "id" {
+		t.Fatalf("parameter: %+v", param)
+	}
+	doc, err := buildOpenAPIDocument(*inspector.contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := doc["paths"].(map[string]any)["/{id}"].(map[string]any)["get"].(map[string]any)
+	entry := operation["parameters"].([]any)[0].(map[string]any)
+	if entry["name"] != "id" || entry["in"] != "path" || entry["required"] != true {
+		t.Fatalf("parameter: %+v", entry)
+	}
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"go/ast"
+	"net/http"
 	"strings"
 	"unicode"
 )
@@ -20,6 +21,8 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		binding = "path"
 	case "Query":
 		binding = "query"
+	case "Header":
+		binding = "header"
 	case "Body":
 		binding = "body"
 	default:
@@ -29,7 +32,6 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		if scalar, ok := catalog.scalarPathPayload(source, node.Index, map[string]bool{}); ok {
 			return httpBindingShape{binding: "path", kind: "pointer", source: "path", scalarPath: true, payload: scalar, payloadSource: source.Path}, true
 		}
-		return httpBindingShape{kind: "unsupported", problem: "input.Path requires a basic scalar payload"}, true
 	}
 	payloadSource, structure, ok := catalog.markerPayload(source, node.Index, map[string]bool{})
 	if !ok {
@@ -64,6 +66,14 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		}
 		if strings.ContainsAny(name, ",\r\n\t") {
 			return httpBindingShape{kind: "unsupported", problem: fmt.Sprintf("Invalid %s field %q", binding, name)}, true
+		}
+		if binding == "header" {
+			for _, r := range name {
+				if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", r)) {
+					return httpBindingShape{kind: "unsupported", problem: fmt.Sprintf("Invalid header field %q", name)}, true
+				}
+			}
+			name = http.CanonicalHeaderKey(name)
 		}
 		if seen[name] {
 			return httpBindingShape{kind: "unsupported", problem: "Duplicate input field " + name}, true
