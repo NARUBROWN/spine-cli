@@ -413,7 +413,11 @@ func (p *layeredPlanner) addMessageModule(r layeredRequest) error {
 	if r.Kind == "websocket" {
 		registration = r.Path
 	}
-	files := messageModuleFiles(r.Kind, r.Name.Name, registration, r.Fields)
+	publicContext, err := messageContext()
+	if err != nil {
+		return err
+	}
+	files := messageModuleFiles(r.Kind, r.Name.Name, registration, r.Fields, publicContext)
 	directory := filepath.ToSlash(filepath.Join("src", r.Kind, r.Name.Group, r.Name.Name.Package))
 	if _, _, err := roleTarget(generationRole{Root: "src/" + r.Kind}, generationName{Group: filepath.ToSlash(filepath.Join(r.Name.Group, r.Name.Name.Package))}); err != nil {
 		return err

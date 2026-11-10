@@ -281,10 +281,10 @@ func TestStaticGroupForwardingWithCoreCandidate(t *testing.T) {
 	}
 	inspector := controllerFixture(t, `
  type auth struct{}
- func(*auth)PreHandle(core.ExecutionContext,core.HandlerMeta)error{return nil}
- func(*auth)PostHandle(core.ExecutionContext,core.HandlerMeta){}
- func(*auth)BeforeResponse(core.ExecutionContext,core.HandlerMeta,error)error{return nil}
- func(*auth)AfterCompletion(core.ExecutionContext,core.HandlerMeta,error){}
+ func(*auth)PreHandle(spine.Ctx,core.HandlerMeta)error{return nil}
+ func(*auth)PostHandle(spine.Ctx,core.HandlerMeta){}
+ func(*auth)BeforeResponse(spine.Ctx,core.HandlerMeta,error)error{return nil}
+ func(*auth)AfterCompletion(spine.Ctx,core.HandlerMeta,error){}
  var outer,inner,local = &auth{},&auth{},&auth{}
  func(c *UserController)RegisterRoutes(r *api.Registry){ var users=r.Group("/users",api.Tags("Users"),api.Interceptors(outer)); register(users) }
 	func register(g *api.Group){var alias=g;nested:=alias.Group("/admin",api.Interceptors(inner));nested.GET("/",func(q input.Query[DTO])(Result,error){return Result{},nil},route.WithInterceptors(local))}
@@ -293,7 +293,7 @@ func TestStaticGroupForwardingWithCoreCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source = []byte(strings.Replace(string(source), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api"`+"\n"+`"github.com/NARUBROWN/spine/core"`+"\n"+`"github.com/NARUBROWN/spine/pkg/route"`, 1))
+	source = []byte(strings.Replace(string(source), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api"`+"\n"+`"github.com/NARUBROWN/spine/core"`+"\n"+`"github.com/NARUBROWN/spine/pkg/spine"`+"\n"+`"github.com/NARUBROWN/spine/pkg/route"`, 1))
 	if err = os.WriteFile("controller.go", source, 0644); err != nil {
 		t.Fatal(err)
 	}

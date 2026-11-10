@@ -68,6 +68,18 @@ func TestControllerCandidateEndToEnd(t *testing.T) {
 	}
 	runGo("test", "./...")
 	t.Chdir(root)
+	for _, arguments := range [][]string{
+		{"consumer", "audit", "--topic", "audit.created", "--field", "value:string", "--no-register"},
+		{"websocket", "audit", "--path", "/ws/audit", "--field", "value:string", "--no-register"},
+	} {
+		layeredGenerate(t, arguments...)
+		source, err := os.ReadFile(filepath.Join(root, "src", arguments[0], "audit", "audit_handler.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertMessageContext(t, string(source), true)
+	}
+	runGo("test", "./...")
 	contract, err := inspectApplication()
 	if err != nil || contractHasErrors(contract) || len(contract.HTTP) != 1 {
 		t.Fatalf("contract=%+v error=%v", contract, err)

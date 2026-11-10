@@ -211,7 +211,12 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 		if kind == "websocket" {
 			registrationName = socketPath
 		}
-		files = messageModuleFiles(kind, name, registrationName, sliceFields)
+		publicContext, contextErr := messageContext()
+		if contextErr != nil {
+			fmt.Fprintln(errOut, contextErr)
+			return 1
+		}
+		files = messageModuleFiles(kind, name, registrationName, sliceFields, publicContext)
 	} else {
 		packageName, packageErr := packageNameForDirectory(workingDirectory)
 		if packageErr != nil {
