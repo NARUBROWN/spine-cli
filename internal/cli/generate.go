@@ -394,7 +394,7 @@ func New%sService(repository *%sRepository) *%sService {
 }
 
 func controllerTemplate(n resourceName) string {
-	return previewHTTPPathTemplate(fmt.Sprintf(`package %s
+	return httpControllerInputTemplate(fmt.Sprintf(`package %s
 
 import (
 	"github.com/NARUBROWN/spine/pkg/httpx"
@@ -468,7 +468,7 @@ func New%[1]s%[2]s(%[4]s) *%[1]s%[2]s {
 }
 `, n.Type, suffix, fields, parameters, values) + methods
 	if kind == "controller" {
-		return previewHTTPPathTemplate(source, n.Type)
+		return httpControllerInputTemplate(source, n.Type)
 	}
 	return source
 }
