@@ -3,7 +3,10 @@ package cli
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
+	"go/parser"
 	"go/token"
+	"path/filepath"
 
 	"golang.org/x/mod/semver"
 )
@@ -14,13 +17,14 @@ type httpTypeDeclaration struct {
 }
 
 type httpBindingCatalog struct {
-	module         string
-	types          map[string]httpTypeDeclaration
-	errorMethods   map[string]bool
-	jsonDecoders   map[string]bool
-	xmlDecoders    map[string]bool
-	structured     bool
-	explicitInputs bool
+	module                   string
+	types                    map[string]httpTypeDeclaration
+	errorMethods             map[string]bool
+	jsonDecoders             map[string]bool
+	xmlDecoders              map[string]bool
+	structured               bool
+	explicitInputs           bool
+	controllerContextRemoved bool
 }
 
 type httpBindingShape struct {
@@ -170,6 +174,9 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 
 func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Expr, visiting map[string]bool) httpBindingShape {
 	key := canonicalType(source, expression, catalog.module)
+	if catalog.controllerContextRemoved && key == spineImportPath+"/core:ControllerContext" {
+		return httpBindingShape{kind: "unsupported", problem: "The selected core no longer exports core.ControllerContext. Use spine.Ctx from github.com/NARUBROWN/spine/pkg/spine"}
+	}
 	if known, ok := defaultHTTPBinding(key); ok {
 		return known
 	}
@@ -244,6 +251,34 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 		return httpBindingShape{kind: "unknown"}
 	default:
 		return httpBindingShape{kind: "unsupported"}
+	}
+}
+
+func (catalog *httpBindingCatalog) inspectSelectedCore(modules []selectedModule) {
+	for _, module := range modules {
+		if module.Path != spineImportPath {
+			continue
+		}
+		root := module.Dir
+		if module.Replace != nil && module.Replace.Dir != "" {
+			root = module.Replace.Dir
+		}
+		if root == "" {
+			return
+		}
+		dir := filepath.Join(root, "core")
+		pkg, err := build.Default.ImportDir(dir, 0)
+		if err != nil {
+			return
+		}
+		for _, name := range pkg.GoFiles {
+			file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, name), nil, 0)
+			if err != nil || file.Scope.Lookup("ControllerContext") != nil {
+				return
+			}
+		}
+		catalog.controllerContextRemoved = true
+		return
 	}
 }
 

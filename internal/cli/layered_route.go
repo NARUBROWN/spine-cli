@@ -46,6 +46,7 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 				return fmt.Errorf("HTTP binding module selection: %w", err)
 			}
 			catalog := newHTTPBindingCatalog(p.Module, p.Sources, selectedModuleVersion(modules, spineImportPath))
+			catalog.inspectSelectedCore(modules)
 			params, diagnostics := catalog.parameters(s, f.Type.Params, r.Path, r.Handler)
 			diagnostics = append(diagnostics, catalog.returns(s, f.Type.Results, r.Handler)...)
 			for _, diagnostic := range diagnostics {

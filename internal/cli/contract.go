@@ -618,6 +618,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 	}
 
 	bindings := newHTTPBindingCatalog(i.module, handlerSources, selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, spineImportPath))
+	bindings.inspectSelectedCore(i.contract.HTTPAdapter.SelectedModules)
 	for index := range i.contract.HTTP {
 		route := &i.contract.HTTP[index]
 		matches := signatures[route.Handler]

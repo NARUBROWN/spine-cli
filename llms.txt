@@ -681,7 +681,7 @@ Message 계약 불확실성/충돌:
 
 HTTP 정적 binding:
 
-- `context.Context`, `core.ControllerContext`, `pkg/spine.Ctx`와 확인 가능한 Get 전용 context interface: context
+- `context.Context`, `pkg/spine.Ctx`와 확인 가능한 Get 전용 인터페이스를 컨텍스트로 분류한다. 이전 코어의 `core.ControllerContext`를 사용하던 핸들러는 새 코어에서 `pkg/spine.Ctx`로 바꾼다.
 - 실제 Spine `path.Int`, `path.String`, `path.Boolean` 타입: route path parameter에 순서대로 binding
 - 실제 Spine `query.Values`, `query.Pagination`: query. Preview 코어에서는 Deprecated 경고를 표시한다.
 - 실제 Spine `header.Values`: header. Preview 코어에서는 Deprecated 경고를 표시한다.

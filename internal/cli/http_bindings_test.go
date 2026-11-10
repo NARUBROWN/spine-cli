@@ -2,10 +2,55 @@ package cli
 
 import (
 	"bytes"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestHTTPBindingsUseSelectedCoreContextExports(t *testing.T) {
+	root := t.TempDir()
+	coreDir := filepath.Join(root, "core")
+	if err := os.Mkdir(coreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "controller.go", `package probe
+import c "github.com/NARUBROWN/spine/core"
+func Get(ctx c.ControllerContext) {}`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &layoutSource{Path: "controller.go", File: file, Fset: fset}
+	parameters := file.Decls[1].(*ast.FuncDecl).Type.Params
+	modules := []selectedModule{{Path: spineImportPath, Version: "v0.7.2-preview.3", Replace: &selectedModule{Dir: root}}}
+	for _, tc := range []struct {
+		name, declaration string
+		removed           bool
+	}{
+		{"released core", "type ControllerContext interface{ Get(string) (any, bool) }", false},
+		{"internal context", "type ExecutionContext interface{}", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(coreDir, "context.go"), []byte("package core\n"+tc.declaration+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			catalog := newHTTPBindingCatalog("example.com/probe", nil, modules[0].Version)
+			catalog.inspectSelectedCore(modules)
+			args, diagnostics := catalog.parameters(source, parameters, "/probe", "probe.Get")
+			if tc.removed {
+				if len(diagnostics) != 1 || diagnostics[0].Code != "HTTP_INPUT_CONTRACT_INVALID" || !strings.Contains(diagnostics[0].Hint, "spine.Ctx") {
+					t.Fatalf("expected migration diagnostic: %+v", diagnostics)
+				}
+			} else if len(diagnostics) != 0 || len(args) != 1 || args[0].Binding != "context" {
+				t.Fatalf("expected released context binding: %+v %+v", args, diagnostics)
+			}
+		})
+	}
+}
 
 func httpBindingProject(t *testing.T, layout, imports, declarations, parameters, path string) {
 	if err := prepareTestModuleCache(); err != nil {
