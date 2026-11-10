@@ -14,7 +14,6 @@ import (
     "time"
 
     "github.com/NARUBROWN/spine/pkg/boot"
-    "github.com/NARUBROWN/spine/pkg/openapi"
     "github.com/NARUBROWN/spine/pkg/openapi/ui/redoc"
     "github.com/NARUBROWN/spine/pkg/openapi/ui/swaggerui"
 )
@@ -79,16 +78,8 @@ func TestPreviewHTTPAndExportedOpenAPI(t *testing.T) {
             continue
         }
         if status != 200 { t.Fatalf("custom OpenAPI route: %d %s", status, data) }
-        var exported []byte
-        if {{MODERN}} {
-            description, err := spine.DescribePreparedHTTP(prepared)
-            if err != nil { t.Fatal(err) }
-            exported, err = openapi.Generate(description, options.HTTP.OpenAPI)
-            if err != nil { t.Fatal(err) }
-        } else {
-            exported, err = os.ReadFile("../../exported-openapi.json")
-            if err != nil { t.Fatal(err) }
-        }
+        exported, err := os.ReadFile("../../exported-openapi.json")
+        if err != nil { t.Fatal(err) }
         var served, document map[string]any
         if err := json.Unmarshal(data, &served); err != nil { t.Fatal(err) }
         if err := json.Unmarshal(exported, &document); err != nil { t.Fatal(err) }

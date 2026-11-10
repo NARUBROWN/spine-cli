@@ -37,25 +37,29 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 	if !ok {
 		return httpBindingShape{kind: "unsupported", problem: "input." + marker + " requires a concrete struct payload"}, true
 	}
+	if binding == "body" {
+		if problem := catalog.bodyProblem(source, node.Index, map[string]bool{}); problem != "" {
+			return httpBindingShape{kind: "unsupported", problem: problem}, true
+		}
+		return httpBindingShape{binding: "body", kind: "pointer", payload: expressionText(source.Fset, node.Index), payloadSource: source.Path}, true
+	}
 	fields, known := catalog.inputFields(payloadSource, structure, visiting)
 	if !known {
 		return httpBindingShape{kind: "unknown", problem: "Cannot resolve embedded input fields"}, true
 	}
 	shape := httpBindingShape{binding: binding, kind: "pointer", payload: expressionText(source.Fset, node.Index), payloadSource: source.Path}
-	if binding != "body" {
-		shape.source = binding
-	}
+	shape.source = binding
 	seen := map[string]bool{}
 	for _, field := range fields {
+		if problem := unsupportedInputTag(field.tags); problem != "" {
+			return httpBindingShape{kind: "unsupported", problem: problem}, true
+		}
 		for _, other := range []string{"path", "query", "header", "form", "param"} {
-			if other != binding && (binding != "body" || other != "form") {
-				if value, exists := field.tags.Lookup(other); exists && value != "-" && (value != "" || binding == "body") {
+			if other != binding {
+				if value, exists := field.tags.Lookup(other); exists && value != "-" && value != "" {
 					return httpBindingShape{kind: "unsupported", problem: "A DTO mixes input sources"}, true
 				}
 			}
-		}
-		if binding == "body" {
-			continue
 		}
 		name := field.tags.Get(binding)
 		if name == "-" {

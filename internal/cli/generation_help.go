@@ -98,7 +98,7 @@ func printGeneratorGuide(kind string, out io.Writer) {
 	case "domain":
 		examples = []string{"spine g domain user --field id:int64", "spine g domain account/user --field name:string"}
 	case "dto":
-		fmt.Fprintln(out, "DTO fields include JSON tags. Receive HTTP body arguments as pointers such as *CreateUserRequest.")
+		fmt.Fprintln(out, "DTO fields include JSON tags. On current Spine, receive HTTP body arguments as input.Body[CreateUserRequest].")
 		examples = []string{"spine g dto create-user-request --field name:string", "spine g dto account/create-user-request --field name:string"}
 	case "repository":
 		examples = []string{"spine g repository user", "spine g repository account/user"}

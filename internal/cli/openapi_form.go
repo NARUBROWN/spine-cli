@@ -18,7 +18,7 @@ func (catalog *apiSchemas) staticFormContent(typeName, sourcePath string) (map[s
 	if pointer, ok := expression.(*ast.StarExpr); ok {
 		expression = pointer.X
 	}
-	bindings := newHTTPBindingCatalog(catalog.module, catalog.sources, "")
+	bindings := catalog.bindings
 	declaring, structure, ok := bindings.markerPayload(source, expression, map[string]bool{})
 	if !ok {
 		return nil, false, true
