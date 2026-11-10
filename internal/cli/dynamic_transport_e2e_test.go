@@ -35,7 +35,7 @@ func TestDynamicHTTPAndWebSocketComposition(t *testing.T) {
 	for _, layout := range []string{"legacy", layeredLayout} {
 		t.Run(layout, func(t *testing.T) {
 			workspace := t.TempDir()
-			args := []string{"new", "sample", "--module", "example.com/sample", "--layout", layout, "--platform", "sample-http", "--websocket-platform", "sample-socket"}
+			args := []string{"new", "sample", "--module", "example.com/sample", "--channel", "preview", "--layout", layout, "--platform", "sample-http", "--websocket-platform", "sample-socket"}
 			applyAssemblyPlan(t, binary, workspace, args...)
 			project := filepath.Join(workspace, "sample")
 			check := runE2E(binary, project, nil, "contract", "check", "--warnings-as-errors", "--json")
