@@ -2,7 +2,7 @@
 
 [Spine](https://github.com/NARUBROWN/spine) 앱을 생성하고, 실행 계약을 검사하고, API 명세를 내보내는 Go CLI입니다. 설치한 실행 파일은 `spine`입니다.
 
-**Preview 채널** | [공개 태그 `v0.4.4-preview.2`](https://github.com/NARUBROWN/spine-cli/tree/v0.4.4-preview.2)
+**Preview 채널** | [공개 태그 `v0.4.4-preview.4`](https://github.com/NARUBROWN/spine-cli/tree/v0.4.4-preview.4)
 
 개발 중인 기능을 시험하고 호환성 문제를 확인하는 채널입니다.
 
@@ -13,7 +13,7 @@
 Go 1.25.5 이상이 필요합니다. `--validator playground`를 선택한 앱에는 Go 1.26.0 이상이 필요합니다.
 
 ```sh
-go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.4-preview.2
+go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.4-preview.4
 spine version
 spine new todo-api --module github.com/acme/todo-api --channel preview --no-interactive
 cd todo-api

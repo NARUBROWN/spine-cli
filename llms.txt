@@ -16,8 +16,8 @@
 - 프로젝트와 제품 이름: `spine-cli`
 - 공식 설치 진입점: `github.com/NARUBROWN/spine-cli/cmd/spine`
 - 실행 파일과 호출 명령: `spine`
-- 로컬 빌드의 CLI 버전: `0.4.4-dev`
-- 공개 설치는 실제 모듈 버전을 표시하고 로컬 빌드의 `spine version`은 `spine-cli 0.4.4-dev`를 표시한다.
+- 로컬 빌드의 CLI 버전: `0.4.5-dev`
+- 공개 설치는 실제 모듈 버전을 표시하고 로컬 빌드의 `spine version`은 `spine-cli 0.4.5-dev`를 표시한다.
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
