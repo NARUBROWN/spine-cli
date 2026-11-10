@@ -14,10 +14,11 @@ type httpTypeDeclaration struct {
 }
 
 type httpBindingCatalog struct {
-	module       string
-	types        map[string]httpTypeDeclaration
-	errorMethods map[string]bool
-	structured   bool
+	module         string
+	types          map[string]httpTypeDeclaration
+	errorMethods   map[string]bool
+	structured     bool
+	explicitInputs bool
 }
 
 type httpBindingShape struct {
@@ -35,7 +36,7 @@ type httpBindingShape struct {
 
 // HTTP 검증과 route 생성은 동일한 소스 기반 resolver 지원 규칙을 사용합니다.
 func newHTTPBindingCatalog(module string, sources layoutSources, coreVersion string) *httpBindingCatalog {
-	catalog := &httpBindingCatalog{module: module, types: map[string]httpTypeDeclaration{}, errorMethods: map[string]bool{}, structured: semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.0-preview.1") >= 0}
+	catalog := &httpBindingCatalog{explicitInputs: semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.2-preview.2") >= 0, module: module, types: map[string]httpTypeDeclaration{}, errorMethods: map[string]bool{}, structured: semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.0-preview.1") >= 0}
 	for _, source := range sources.sortedFiles() {
 		for _, declaration := range source.File.Decls {
 			group, ok := declaration.(*ast.GenDecl)
@@ -171,6 +172,9 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 	case *ast.StarExpr:
 		shape := catalog.shape(source, node.X, visiting)
 		if shape.kind == "struct" {
+			if catalog.explicitInputs {
+				return httpBindingShape{kind: "unsupported", problem: "Unwrapped DTO pointers are unsupported; use input.Body[T], input.Query[T], input.Header[T] or input.Path[T]"}
+			}
 			if catalog.structured && shape.legacy {
 				return httpBindingShape{kind: "unsupported", problem: "Deprecated path/query/header wrappers must be values"}
 			}

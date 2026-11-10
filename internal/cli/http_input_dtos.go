@@ -177,7 +177,7 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 			scalarPath = scalarPath || parameter.scalarPath
 			pathDTO = pathDTO || parameter.SourceDTO && parameter.Binding == "path" && !parameter.scalarPath
 			if parameter.Deprecated {
-				hint := "Migrate path, query and header inputs in this handler to separate tagged struct pointers."
+				hint := "Migrate path, query and header inputs to input.Path[T], input.Query[T] and input.Header[T]."
 				if parameter.Binding == "multipart" {
 					hint = "Use input.Body[T] with form-tagged *mime/multipart.FileHeader or []*mime/multipart.FileHeader fields. For dynamic file fields, use core.HttpRequestContext.MultipartForm."
 				}
