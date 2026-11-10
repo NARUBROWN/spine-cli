@@ -39,15 +39,17 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
  func (*Registry) POST(string,any,...Option){}
  func (*Registry) GET(string,any,...Option){}
  `)
-	write("core/pkg/input/input.go", "package input\ntype Body[T any] *T\ntype Query[T any] *T\ntype Path[T any] *T\n")
+	write("core/pkg/input/input.go", "package input\ntype Body[T any] *T\ntype Query[T any] *T\ntype Path[T any] *T\ntype Header[T any] *T\n")
 	write("core/pkg/httpx/httpx.go", "package httpx\ntype Response[T any] struct{Body T}\n")
 	write("controller.go", `package typed
  import (
+ "mime/multipart"
  "github.com/NARUBROWN/spine/pkg/api"
  "github.com/NARUBROWN/spine/pkg/input"
  "github.com/NARUBROWN/spine/pkg/httpx"
  )
  type DTO struct{Name string; UserID int}
+ type FixtureFileHeader = multipart.FileHeader
  type PathDTO struct{ID int `+"`path:\"id\"`"+`}
  type Payload = input.Body[DTO]
  type Result = httpx.Response[DTO]
