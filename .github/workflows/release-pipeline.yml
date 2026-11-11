@@ -124,6 +124,7 @@ jobs:
           webhook_release: ${{ secrets.DISCORD_WEBHOOK_RELEASE }}
   public-after-tag:
     needs: [plan, tag]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.tag.result == 'success' }}
     uses: ./.github/workflows/release-public-check.yml
     with:
       source_sha: ${{ needs.plan.outputs.sha }}
@@ -131,11 +132,15 @@ jobs:
       artifact: public-after-tag
   finish:
     needs: [plan, tag, public-after-tag]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.tag.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
       actions: read
     steps:
+      - name: Require successful published tag installation
+        if: needs.public-after-tag.result != 'success'
+        run: exit 1
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
