@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/types"
 	"reflect"
+	"strings"
 )
 
 // checkControllerInputs는 선택한 실제 Go 타입으로 새 입력의 구조와 필드 지원을 확인합니다.
@@ -87,6 +88,16 @@ func checkControllerFields(structure *types.Struct, source string, visiting map[
 		if controllerTextType(base) {
 			continue
 		}
+		if source == "Header" {
+			if _, list := base.Underlying().(*types.Slice); list {
+				if name == "" {
+					name = controllerLowerCamel(field.Name())
+				}
+				if !controllerHeaderListAllowed(name) {
+					return fmt.Errorf("header %s does not support generic list binding; use a scalar or TextUnmarshaler", name)
+				}
+			}
+		}
 		switch value := base.Underlying().(type) {
 		case *types.Pointer:
 			base = value.Elem()
@@ -98,6 +109,15 @@ func checkControllerFields(structure *types.Struct, source string, visiting map[
 		}
 	}
 	return nil
+}
+
+// controllerHeaderListAllowed는 코어가 단일 값 또는 전용 문법으로 해석하는 헤더를 구분합니다.
+func controllerHeaderListAllowed(name string) bool {
+	switch strings.ToLower(name) {
+	case "authorization", "proxy-authorization", "content-type", "content-length", "host", "date", "if-modified-since", "if-unmodified-since", "if-range", "etag", "range", "content-range", "origin", "referer", "user-agent", "server", "location", "content-location", "max-forwards", "set-cookie", "cookie", "www-authenticate", "proxy-authenticate":
+		return false
+	}
+	return true
 }
 
 func controllerScalarType(t types.Type) bool {

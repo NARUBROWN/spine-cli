@@ -84,6 +84,25 @@ func (i *contractInspector) inspectControllerRoutes() {
 	}
 	all := map[string]*packages.Package{}
 	packages.Visit(loaded, func(pkg *packages.Package) bool { all[pkg.PkgPath] = pkg; return true }, nil)
+	i.controllerTypes = map[string]httpTypeDeclaration{}
+	for _, pkg := range all {
+		if pkg.Types == nil || len(pkg.Errors) != 0 || pkg.PkgPath == i.module || strings.HasPrefix(pkg.PkgPath, i.module+"/") {
+			continue
+		}
+		for _, file := range pkg.Syntax {
+			source := &layoutSource{Path: pkg.Fset.Position(file.Pos()).Filename, File: file, Fset: pkg.Fset, ImportPath: pkg.PkgPath}
+			for _, declaration := range file.Decls {
+				group, ok := declaration.(*ast.GenDecl)
+				if !ok || group.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range group.Specs {
+					typeSpec := spec.(*ast.TypeSpec)
+					i.controllerTypes[pkg.PkgPath+":"+typeSpec.Name.Name] = httpTypeDeclaration{source: source, spec: typeSpec}
+				}
+			}
+		}
+	}
 	apiPackage := all[spineImportPath+"/pkg/api"]
 	if apiPackage == nil || apiPackage.Types == nil {
 		if !importedAPI && !hasComponents {

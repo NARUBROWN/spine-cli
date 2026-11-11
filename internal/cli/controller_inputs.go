@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"go/ast"
+	"go/types"
 	"net/http"
 	"strings"
 	"unicode"
@@ -35,6 +36,9 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 	}
 	payloadSource, structure, ok := catalog.markerPayload(source, node.Index, map[string]bool{})
 	if !ok {
+		if catalog.unresolvedMarkerPayload(source, node.Index, map[string]bool{}) {
+			return httpBindingShape{kind: "unknown"}, true
+		}
 		return httpBindingShape{kind: "unsupported", problem: "input." + marker + " requires a concrete struct payload"}, true
 	}
 	fields, known := catalog.inputFields(payloadSource, structure, visiting)
@@ -88,6 +92,29 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		shape.fields = append(shape.fields, descriptor)
 	}
 	return shape, true
+}
+
+// unresolvedMarkerPayload는 찾지 못한 외부 선언을 잘못된 입력 타입으로 단정하지 않습니다.
+func (catalog *httpBindingCatalog) unresolvedMarkerPayload(source *layoutSource, expression ast.Expr, visiting map[string]bool) bool {
+	if node, ok := expression.(*ast.ParenExpr); ok {
+		return catalog.unresolvedMarkerPayload(source, node.X, visiting)
+	}
+	key := canonicalType(source, expression, catalog.module)
+	if declaration, exists := catalog.types[key]; exists {
+		if visiting[key] {
+			return true
+		}
+		visiting[key] = true
+		defer delete(visiting, key)
+		return catalog.unresolvedMarkerPayload(declaration.source, declaration.spec.Type, visiting)
+	}
+	switch node := expression.(type) {
+	case *ast.SelectorExpr, *ast.IndexExpr, *ast.IndexListExpr:
+		return true
+	case *ast.Ident:
+		return types.Universe.Lookup(node.Name) == nil
+	}
+	return false
 }
 
 func (catalog *httpBindingCatalog) markerPayload(source *layoutSource, expression ast.Expr, visiting map[string]bool) (*layoutSource, *ast.StructType, bool) {

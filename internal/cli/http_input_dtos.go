@@ -179,7 +179,7 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 			if parameter.Deprecated {
 				hint := "Migrate path, query and header inputs to input.Path[T], input.Query[T] and input.Header[T]."
 				if parameter.Binding == "multipart" {
-					hint = "Use input.Body[T] with form-tagged *mime/multipart.FileHeader or []*mime/multipart.FileHeader fields. For dynamic file fields, use core.HttpRequestContext.MultipartForm."
+					hint = "Use input.Body[T] with form-tagged *mime/multipart.FileHeader or []*mime/multipart.FileHeader fields. For dynamic file fields on cores with context views, call ctx.HTTPRequestContext(), check the returned boolean, and use request.MultipartForm()."
 				}
 				diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_INPUT_API_DEPRECATED", Message: fmt.Sprintf("handler %s parameter %d uses a deprecated %s input", handler, index-1, parameter.Binding), Source: relativeSource(source.Fset.Position(field.Pos())), Hint: hint})
 			}
