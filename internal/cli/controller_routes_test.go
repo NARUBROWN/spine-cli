@@ -70,9 +70,10 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
 
 func TestControllerRoutesResolveTypedContractAndHelpersWithoutExecution(t *testing.T) {
 	inspector := controllerFixture(t, `
+ type QueryDTO DTO
  func(c *UserController)RegisterRoutes(r *api.Registry){c.users(r)}
  func(c *UserController)users(r *api.Registry){
-  r.POST(endpoint,func(a Payload,p *PathDTO,q input.Query[DTO])(Result,error){return Result{Body:DTO{Name:a.Name}},nil})
+  r.POST(endpoint,func(a Payload,p *PathDTO,q input.Query[QueryDTO])(Result,error){return Result{Body:DTO{Name:a.Name}},nil})
  }
  `)
 	inspector.inspectControllerRoutes()

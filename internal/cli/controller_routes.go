@@ -596,6 +596,10 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 			s.inspector.controllerDiagnostic("HTTP_INPUT_CONTRACT_INVALID", err.Error(), source)
 			return
 		}
+		if err := checkControllerReturns(signature); err != nil {
+			s.inspector.controllerDiagnostic("HTTP_RETURN_UNSUPPORTED", err.Error(), source)
+			return
+		}
 	}
 	var fields, results *ast.FieldList
 	delegatedMethod := ""

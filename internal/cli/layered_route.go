@@ -64,6 +64,9 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 					if err := checkControllerInputs(signature); err != nil {
 						return fmt.Errorf("HTTP_INPUT_CONTRACT_INVALID: %s: %w", r.Handler, err)
 					}
+					if err := checkControllerReturns(signature); err != nil {
+						return fmt.Errorf("HTTP_RETURN_UNSUPPORTED: %s: %w", r.Handler, err)
+					}
 				}
 			}
 			catalog.inspectSelectedCore(modules)

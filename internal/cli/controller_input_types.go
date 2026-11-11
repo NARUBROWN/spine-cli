@@ -35,6 +35,9 @@ func checkControllerInputs(signature *types.Signature) error {
 			return fmt.Errorf("input.%s requires a struct payload", source)
 		}
 		if source == "Body" {
+			if err := checkControllerFormFields(structure, map[*types.Struct]bool{}); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := checkControllerFields(structure, source, map[*types.Struct]bool{}); err != nil {
@@ -42,6 +45,58 @@ func checkControllerInputs(signature *types.Signature) error {
 		}
 	}
 	return nil
+}
+
+func checkControllerFormFields(structure *types.Struct, seen map[*types.Struct]bool) error {
+	if seen[structure] {
+		return nil
+	}
+	seen[structure] = true
+	for i := 0; i < structure.NumFields(); i++ {
+		field := structure.Field(i)
+		if !field.Exported() {
+			continue
+		}
+		name := reflect.StructTag(structure.Tag(i)).Get("form")
+		t := field.Type()
+		if name == "" {
+			if nested, ok := t.Underlying().(*types.Struct); ok {
+				if err := checkControllerFormFields(nested, seen); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if name == "-" || controllerFormFileType(t) || controllerTextType(t) {
+			continue
+		}
+		switch underlying := t.Underlying().(type) {
+		case *types.Pointer:
+			t = underlying.Elem()
+		case *types.Slice:
+			t = underlying.Elem()
+		}
+		if !controllerScalarType(t) {
+			return fmt.Errorf("unsupported form field %s: %s", name, field.Type())
+		}
+	}
+	return nil
+}
+
+func controllerFormFileType(t types.Type) bool {
+	switch value := types.Unalias(t).(type) {
+	case *types.Pointer:
+		t = value.Elem()
+	case *types.Slice:
+		t = value.Elem()
+		if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
+			t = pointer.Elem()
+		}
+	default:
+		return false
+	}
+	named, ok := types.Unalias(t).(*types.Named)
+	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "mime/multipart" && named.Obj().Name() == "FileHeader"
 }
 
 func checkControllerFields(structure *types.Struct, source string, visiting map[*types.Struct]bool) error {
@@ -143,7 +198,7 @@ func controllerTextType(t types.Type) bool {
 		return false
 	}
 	signature, ok := method.Type().(*types.Signature)
-	if !ok || signature.Params().Len() != 1 || signature.Results().Len() != 1 {
+	if !ok || signature.Variadic() || signature.Params().Len() != 1 || signature.Results().Len() != 1 {
 		return false
 	}
 	return types.Identical(signature.Params().At(0).Type(), types.NewSlice(types.Typ[types.Byte])) && types.Identical(signature.Results().At(0).Type(), types.Universe.Lookup("error").Type())
