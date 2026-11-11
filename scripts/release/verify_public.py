@@ -132,6 +132,11 @@ def health(binary, app, env):
 def verify(plan, query, work, env):
     module = json.loads(execute(["go", "list", "-m", "-json", MODULE + "@" + query], work, env))
     resolved = module["Version"]
+    tag_only = plan.get("public_validation_scope") == "tag-install"
+    if tag_only and (query != plan["version"] or not plan.get("source_evidence")):
+        raise ReleaseError("태그 설치 검증에는 승격 근거와 정확한 새 태그가 필요합니다")
+    if query == plan["version"] and resolved != query:
+        raise ReleaseError("공개 모듈이 요청한 태그를 가리키지 않습니다")
     suffix = ".exe" if os.name == "nt" else ""
     for name, path in ENTRYPOINTS.items():
         execute(["go", "install", path + "@" + query], work, env)
@@ -141,8 +146,17 @@ def verify(plan, query, work, env):
         build = execute(["go", "version", "-m", binary], work, env)
         if not any(line.split()[:3] == ["mod", MODULE, resolved] for line in build.splitlines()):
             raise ReleaseError("CLI 빌드 정보가 공개 모듈 버전과 다릅니다")
-        for command in ("schema", "capabilities"):
-            envelope(binary, [command], work, env)
+        if not tag_only:
+            for command in ("schema", "capabilities"):
+                envelope(binary, [command], work, env)
+    report = {"result": "passed", "source_sha": plan["source_sha"], "query": query,
+              "resolved_cli_version": resolved, "components": plan["components"],
+              "os": {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}[platform.system()],
+              "go_version": execute(["go", "version"], work, env), "entrypoints": list(ENTRYPOINTS),
+              "checks": ["public installation and build provenance"]}
+    if tag_only:
+        report["scope"] = "tag-install"
+        return report
     cli = str(Path(env["GOBIN"]) / ("spine" + suffix))
     recipe = plan["components"]["recipe"]
     cases = composition_cases(plan)
@@ -216,13 +230,9 @@ def verify(plan, query, work, env):
                 update = envelope(cli, ["update", "--root", str(app), "--dry-run"], work, env)
                 envelope(cli, ["update", "--root", str(app), "--if-match", update["base_hash"]], work, env)
                 assert_modules(module_graph(execute(["go", "list", "-m", "-json", "all"], app, env)), expected)
-    report = {"result": "passed", "source_sha": plan["source_sha"], "query": query,
-            "resolved_cli_version": resolved, "components": plan["components"],
-            "os": {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}[platform.system()],
-            "go_version": execute(["go", "version"], work, env), "entrypoints": list(ENTRYPOINTS),
-            "checks": ["public installation and build provenance", "two layouts and default HTTP composition",
-                       "default recipe and selected public modules", "dry-run/if-match and source-preserving update",
-                       "static contracts and generated tests", "HTTP health and listener release"]}
+    report["checks"].extend(["two layouts and default HTTP composition", "default recipe and selected public modules",
+                             "dry-run/if-match and source-preserving update", "static contracts and generated tests",
+                             "HTTP health and listener release"])
     if rc_cohort:
         report["rc_cohort"] = rc_cohort
         report["rc_combination_checks"] = ["echo-full", "nethttp-full"]

@@ -54,6 +54,23 @@ class PublicEvidenceTests(unittest.TestCase):
         with self.assertRaises(release.ReleaseError):
             release.validate_reports(bad, plan, "v1.0.0")
 
+    def test_promoted_tag_requires_exact_install_and_previous_evidence(self):
+        version = "v1.0.0-rc.1"
+        plan = {"required_public_os": ["linux", "darwin", "windows"], "source_sha": "a" * 40,
+                "version": version, "components": {}, "public_validation_scope": "tag-install",
+                "source_evidence": {"artifact_id": 1}, "rc_cohort": {"example.com/core": "v1.0.0-rc.1"}}
+        reports = [{"os": os, "result": "passed", "source_sha": plan["source_sha"], "query": version,
+                    "components": {}, "entrypoints": ["spine", "spine-cli"], "scope": "tag-install",
+                    "resolved_cli_version": version} for os in plan["required_public_os"]]
+        release.validate_reports(reports, plan, version)
+        for key in ("scope", "resolved_cli_version"):
+            bad = copy.deepcopy(reports)
+            del bad[0][key]
+            with self.subTest(key=key), self.assertRaises(release.ReleaseError):
+                release.validate_reports(bad, plan, version)
+        with self.assertRaises(release.ReleaseError):
+            release.validate_reports(reports, dict(plan, source_evidence=None), version)
+
     def test_updated_module_distinguishes_indirect_dependencies(self):
         module = {"Require": [{"Path": "example.com/core", "Version": "v1.0.0"},
                               {"Path": "example.com/transitive", "Version": "v2.0.0", "Indirect": True}]}

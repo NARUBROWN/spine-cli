@@ -101,7 +101,9 @@ GitHub 토큰이 만든 태그의 push 이벤트에 의존하지 않습니다. �
 
 Preview 관찰을 마치면 검증한 후보를 `preview → rc` PR로 병합합니다. 후보가 merge commit의 두 번째 부모이며 소스 트리가 같은지 검사합니다. rc 브랜치에서 `Publish RC`를 실행하고 출처 Preview 태그와 새 RC 버전을 지정합니다. 같은 버전 계열의 공개 태그, 성공한 발행 워크플로와 Actions manifest가 필요합니다. RC도 태그와 Actions 검증 기록만 남깁니다.
 
-RC 관찰을 마치면 같은 방식으로 `rc → main` PR을 병합합니다. main에서 `Publish Stable`을 실행하고 출처 RC 태그를 지정합니다. 정식 버전은 RC에서 결정합니다. 각 단계에서 전체 검사, 세 OS의 공개 설치, 초안 검토와 환경 승인을 반복합니다. Production의 태그 설치 검증까지 성공하면 정식 GitHub Release를 만들고 manifest를 첨부합니다.
+RC 관찰을 마치면 같은 방식으로 `rc → main` PR을 병합합니다. main에서 `Publish Stable`을 실행하고 출처 RC 태그를 지정합니다. 정식 버전은 RC에서 결정합니다.
+
+Preview에서 전체 CI와 생성 앱을 검증합니다. RC 및 정식은 직전 후보의 소스 트리와 검증한 조합이 일치하면 전체 CI 결과를 재사용합니다. 각 승격에서 초안 검토와 환경 승인을 거치고, Linux, macOS와 Windows에서 새 태그로 두 CLI 진입점을 설치해 실제 버전을 확인합니다. 정식 설치 검증까지 성공하면 GitHub Release를 만들고 manifest를 첨부합니다.
 
 승격 검사는 출처 태그의 Actions artifact가 하나인지 확인하고 artifact ID로 내려받아 SHA-256을 검증합니다. 저장소, 버전, 브랜치, 소스 SHA와 트리, 실행 ID와 재실행 번호, 레시피, 세 OS의 검증 결과가 일치해야 합니다. 발행 워크플로 전체가 성공해야 승격할 수 있습니다. 출처 artifact의 ID와 해시도 승인 계획에 고정합니다.
 
