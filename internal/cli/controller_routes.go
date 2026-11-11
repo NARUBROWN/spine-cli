@@ -85,6 +85,8 @@ func (i *contractInspector) inspectControllerRoutes() {
 	all := map[string]*packages.Package{}
 	packages.Visit(loaded, func(pkg *packages.Package) bool { all[pkg.PkgPath] = pkg; return true }, nil)
 	i.controllerTypes = map[string]httpTypeDeclaration{}
+	i.controllerMethods = map[string]*types.Signature{}
+	i.controllerInstances = map[httpTypeUse]types.Type{}
 	for _, pkg := range all {
 		if pkg.Types == nil || len(pkg.Errors) != 0 || pkg.PkgPath == i.module || strings.HasPrefix(pkg.PkgPath, i.module+"/") {
 			continue
@@ -126,6 +128,17 @@ func (i *contractInspector) inspectControllerRoutes() {
 		if !strings.HasPrefix(pkg.PkgPath, i.module) {
 			continue
 		}
+		if pkg.TypesInfo != nil {
+			for expression, value := range pkg.TypesInfo.Types {
+				if !value.IsType() {
+					continue
+				}
+				if named, ok := types.Unalias(value.Type).(*types.Named); ok && named.TypeArgs().Len() > 0 {
+					use := httpTypeUseAt(pkg.Fset, expression)
+					i.controllerInstances[use] = value.Type
+				}
+			}
+		}
 		for _, problem := range pkg.Errors {
 			i.controllerDiagnostic("CONTROLLER_TYPECHECK_UNRESOLVED", problem.Msg, problem.Pos)
 		}
@@ -144,6 +157,9 @@ func (i *contractInspector) inspectControllerRoutes() {
 				object, ok := pkg.TypesInfo.Defs[function.Name].(*types.Func)
 				if ok {
 					scan.functions[object] = controllerFunction{pkg, source, function}
+					if signature, ok := object.Type().(*types.Signature); ok && signature.Recv() != nil {
+						i.controllerMethods[object.FullName()] = signature
+					}
 				}
 			}
 		}
@@ -581,7 +597,7 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 			s.inspector.controllerDiagnostic("HTTP_INPUT_CONTRACT_INVALID", err.Error(), source)
 			return
 		}
-		if err := checkControllerResponseCount(signature, coreVersion); err != nil {
+		if err := checkControllerReturns(signature, coreVersion); err != nil {
 			s.inspector.controllerDiagnostic("HTTP_RETURN_UNSUPPORTED", err.Error(), source)
 			return
 		}

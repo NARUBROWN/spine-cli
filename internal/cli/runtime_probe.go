@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -92,7 +95,11 @@ func executeRuntimeProbe() (runtimeProbePayload, error) {
 	if err != nil {
 		return runtimeProbePayload{}, err
 	}
-	source, err := format.Source([]byte(runtimeProbeSource(importPath)))
+	hasDescription, err := coreHasRegistrationDescription()
+	if err != nil {
+		return runtimeProbePayload{}, err
+	}
+	source, err := format.Source([]byte(runtimeProbeSource(importPath, hasDescription)))
 	if err != nil {
 		return runtimeProbePayload{}, fmt.Errorf("could not format runtime probe: %w", err)
 	}
@@ -127,6 +134,35 @@ func executeRuntimeProbe() (runtimeProbePayload, error) {
 	return payload, nil
 }
 
+func coreHasRegistrationDescription() (bool, error) {
+	output, err := exec.Command("go", "list", "-json", spineImportPath).Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+			return false, fmt.Errorf("could not load Spine core for the runtime probe: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return false, fmt.Errorf("could not load Spine core for the runtime probe: %w", err)
+	}
+	var pkg struct {
+		Dir     string
+		GoFiles []string
+	}
+	if err := json.Unmarshal(output, &pkg); err != nil {
+		return false, fmt.Errorf("could not read Spine package information: %w", err)
+	}
+	for _, name := range pkg.GoFiles {
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(pkg.Dir, name), nil, parser.SkipObjectResolution)
+		if err != nil {
+			return false, err
+		}
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == "DescribeRegistrations" {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func compositionImportPath() (string, error) {
 	config, err := loadProjectConfig()
 	if err != nil {
@@ -153,10 +189,36 @@ func compositionImportPath() (string, error) {
 	return strings.TrimSuffix(module, "/") + "/" + filepath.ToSlash(relative), nil
 }
 
-func runtimeProbeSource(compositionImport string) string {
-	handlerExpression := `fmt.Sprintf("(*%s).%s", meta.ControllerType.Elem().Name(), meta.Method.Name)`
+func runtimeProbeSource(compositionImport string, hasDescription bool) string {
+	handlerExpression := `fmt.Sprintf("(*%s).%s", receiver, method)`
 	if config, err := loadProjectConfig(); err == nil && config.Layout == layeredLayout {
-		handlerExpression = `fmt.Sprintf("(*%s.%s).%s", meta.ControllerType.Elem().PkgPath(), meta.ControllerType.Elem().Name(), meta.Method.Name)`
+		handlerExpression = `fmt.Sprintf("(*%s.%s).%s", packagePath, receiver, method)`
+	}
+	coreImport := spineImportPath
+	readRegistrations := `registrations, err := spine.DescribeRegistrations(app)
+	if err != nil {
+		panic(err)
+	}
+	for _, item := range registrations.Consumers {
+		handler := item.Handler
+		result.Consumers = append(result.Consumers, registration{Name: item.Topic, Handler: handlerName(handler.PackagePath, handler.Receiver, handler.Method)})
+	}
+	for _, item := range registrations.WebSockets {
+		handler := item.Handler
+		result.WebSockets = append(result.WebSockets, registration{Name: item.Path, Handler: handlerName(handler.PackagePath, handler.Receiver, handler.Method)})
+	}`
+	if !hasDescription {
+		coreImport = spineImportPath + "/core"
+		readRegistrations = `legacyHandlerName := func(meta core.HandlerMeta) string {
+		receiver := meta.ControllerType.Elem()
+		return handlerName(receiver.PkgPath(), receiver.Name(), meta.Method.Name)
+	}
+	for _, item := range app.Consumers().Registrations() {
+		result.Consumers = append(result.Consumers, registration{Name: item.Topic, Handler: legacyHandlerName(item.Meta)})
+	}
+	for _, item := range app.WebSocket().Registrations() {
+		result.WebSockets = append(result.WebSockets, registration{Name: item.Path, Handler: legacyHandlerName(item.Meta)})
+	}`
 	}
 	return fmt.Sprintf(`package main
 
@@ -165,7 +227,7 @@ import (
 	"fmt"
 
 	application %q
-	"github.com/NARUBROWN/spine/core"
+	%q
 )
 
 type registration struct {
@@ -178,7 +240,7 @@ type payload struct {
 	WebSockets []registration `+"`json:\"websockets\"`"+`
 }
 
-func handlerName(meta core.HandlerMeta) string {
+func handlerName(packagePath, receiver, method string) string {
 	return %s
 }
 
@@ -191,19 +253,14 @@ func main() {
 		panic(err)
 	}
 	result := payload{Consumers: []registration{}, WebSockets: []registration{}}
-	for _, item := range app.Consumers().Registrations() {
-		result.Consumers = append(result.Consumers, registration{Name: item.Topic, Handler: handlerName(item.Meta)})
-	}
-	for _, item := range app.WebSocket().Registrations() {
-		result.WebSockets = append(result.WebSockets, registration{Name: item.Path, Handler: handlerName(item.Meta)})
-	}
+	%s
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		panic(err)
 	}
 	fmt.Printf(%q+"%%s\n", encoded)
 }
-`, compositionImport, handlerExpression, runtimeProbeMarker)
+`, compositionImport, coreImport, handlerExpression, readRegistrations, runtimeProbeMarker)
 }
 
 func compareRuntimeProbe(static applicationContract, payload runtimeProbePayload) runtimeProbeReport {

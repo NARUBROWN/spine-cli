@@ -29,6 +29,7 @@ func TestRuntimeOpenAPIGeneratedApplications(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				modern = modern || strings.Contains(string(source), "func (c *HealthController) RegisterRoutes(")
 				updated := strings.Replace(string(source), "app.Constructor(", "app.Constructor(NewPreviewController)\napp.Route(\"GET\", \"/preview/:id\", (*PreviewController).Get)\napp.Constructor(", 1)
 				if updated == string(source) {
 					t.Fatal("generated health registration was not found")
@@ -40,18 +41,19 @@ func TestRuntimeOpenAPIGeneratedApplications(t *testing.T) {
 						t.Fatal(err)
 					}
 					generated := strings.ReplaceAll(string(contents), "{{VALIDATOR}}", strconv.FormatBool(validator == "playground"))
-					generated = strings.ReplaceAll(generated, "{{MODERN}}", strconv.FormatBool(modern))
 					addGeneratedTest(t, project, fixture.to, generated)
 				}
 				assertE2ESuccess(t, runE2E(binary, project, nil, "contract", "check", "--json"), "structured HTTP contract")
-				export := runE2E(binary, project, nil, "contract", "export", "--format", "openapi", "--source", "runtime", "--output", "exported-openapi.json")
+				args := []string{"contract", "export", "--format", "openapi", "--source", "runtime"}
 				if modern {
-					if export.code == 0 || !strings.Contains(export.stderr, "controller routes are not collected") || !strings.Contains(export.stderr, "did not call Prepare") {
-						t.Fatalf("runtime export boundary: %+v", export)
+					unprepared := runE2E(binary, project, nil, args...)
+					if unprepared.code == 0 || !strings.Contains(unprepared.stderr, "controller routes are not collected") {
+						t.Fatalf("runtime export boundary: %+v", unprepared)
 					}
-				} else {
-					assertE2ESuccess(t, export, "runtime OpenAPI export")
+					args = append(args, "--prepare")
 				}
+				args = append(args, "--output", "exported-openapi.json")
+				assertE2ESuccess(t, runE2E(binary, project, nil, args...), "runtime OpenAPI export")
 				t.Log(generatedGo(t, project, "test", "-race", "-v", "./...", "-count=1", "-timeout=90s"))
 			})
 		}

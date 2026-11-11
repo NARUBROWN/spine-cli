@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -28,6 +29,7 @@ type apiSchemas struct {
 	byName       map[string][]string
 	ids          map[string]string
 	schemas      map[string]any
+	bindings     *httpBindingCatalog
 }
 
 func newAPISchemas(module string) (*apiSchemas, error) {
@@ -35,7 +37,7 @@ func newAPISchemas(module string) (*apiSchemas, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := &apiSchemas{module: module, sources: sources, declarations: map[string]apiType{}, byName: map[string][]string{}, ids: map[string]string{}, schemas: map[string]any{}}
+	result := &apiSchemas{module: module, sources: sources, declarations: map[string]apiType{}, byName: map[string][]string{}, ids: map[string]string{}, schemas: map[string]any{}, bindings: newHTTPBindingCatalog(module, sources, "")}
 	for _, source := range sources.sortedFiles() {
 		for _, declaration := range source.File.Decls {
 			group, ok := declaration.(*ast.GenDecl)
@@ -242,34 +244,55 @@ func jsonFieldName(field *ast.Field) (string, bool, bool) {
 	return parts[0], omitEmpty, false
 }
 
-func (catalog *apiSchemas) response(returns []string, sourcePath string) (map[string]any, bool) {
+func (catalog *apiSchemas) response(returns []string, sourcePath string) (string, map[string]any, bool) {
 	source := catalog.source(sourcePath)
+	if source == nil {
+		return "", nil, false
+	}
 	for _, text := range returns {
 		expression, err := parser.ParseExpr(text)
 		if err != nil {
 			continue
 		}
-		generic, ok := expression.(*ast.IndexExpr)
-		if !ok {
-			continue
+		if media, schema, ok := catalog.responseContent(expression, source, map[string]bool{}); ok {
+			return media, schema, true
 		}
-		selector, ok := generic.X.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "Response" {
-			continue
-		}
-		alias, ok := selector.X.(*ast.Ident)
-		if !ok {
-			continue
-		}
-		if source != nil && importPathsByAlias(source.File)[alias.Name] != spineImportPath+"/pkg/httpx" {
-			continue
-		}
-		if source == nil && alias.Name != "httpx" {
-			continue
-		}
-		return catalog.expression(generic.Index, source), true
 	}
-	return nil, false
+	return "", nil, false
+}
+
+func (catalog *apiSchemas) responseContent(expression ast.Expr, source *layoutSource, seen map[string]bool) (string, map[string]any, bool) {
+	if body := catalog.bindings.instantiatedResponseBody(source, expression); body != nil {
+		if types.Identical(body, types.Typ[types.String]) {
+			return "text/plain", map[string]any{"type": "string"}, true
+		}
+		return "application/json", catalog.schema(catalog.bindings.httpTypeText(source, body), source.Path), true
+	}
+	key := canonicalType(source, expression, catalog.module)
+	if declaration, exists := catalog.declarations[key]; exists && declaration.spec.Assign.IsValid() && !seen[key] {
+		seen[key] = true
+		return catalog.responseContent(declaration.spec.Type, declaration.source, seen)
+	}
+	switch node := expression.(type) {
+	case *ast.ParenExpr:
+		return catalog.responseContent(node.X, source, seen)
+	case *ast.StarExpr:
+		return catalog.responseContent(node.X, source, seen)
+	case *ast.IndexExpr:
+		if canonicalType(source, node.X, catalog.module) != spineImportPath+"/pkg/httpx:Response" {
+			break
+		}
+		switch catalog.bindings.stringReturnBody(source, node.Index, map[string]bool{}) {
+		case "string":
+			return "text/plain", map[string]any{"type": "string"}, true
+		case "other":
+			return "application/json", catalog.expression(node.Index, source), true
+		}
+	}
+	if key == spineImportPath+"/pkg/httpx:Binary" {
+		return "*/*", map[string]any{}, true
+	}
+	return "", nil, false
 }
 
 func pathParameterSchema(typeName string) map[string]any {

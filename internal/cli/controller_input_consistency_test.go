@@ -90,3 +90,55 @@ func TestUnknownExternalInputIsUnresolvedRatherThanInvalid(t *testing.T) {
 		t.Fatalf("미해석 입력 진단이 필요합니다: %+v", contract.Diagnostics)
 	}
 }
+
+func TestControllerCheckMatchesCoreInputAndReturnTypes(t *testing.T) {
+	for _, tc := range []struct{ name, source, code string }{
+		{
+			"same payload across sources",
+			`type Query = input.Query[DTO]; type Headers = input.Header[DTO]
+			func (*UserController) RegisterRoutes(r *api.Registry) {
+				r.GET("/items", func(Query, Headers) error { return nil })
+			}`,
+			"HTTP_INPUT_DTO_DUPLICATED",
+		},
+		{
+			"unsupported form under JSON decoder",
+			"type Body struct { Value map[string]int `form:\"value\"` }; func (*Body) UnmarshalJSON([]byte) error { return nil }; " +
+				`func (*UserController) RegisterRoutes(r *api.Registry) {
+					r.POST("/items", func(input.Body[Body]) error { return nil })
+				}`,
+			"HTTP_INPUT_CONTRACT_INVALID",
+		},
+		{
+			"unsupported response payload",
+			`type ResultWithChannel = httpx.Response[struct{ Value chan int }]
+			func (*UserController) RegisterRoutes(r *api.Registry) {
+				r.GET("/items", func() ResultWithChannel { return ResultWithChannel{} })
+			}`,
+			"HTTP_RETURN_UNSUPPORTED",
+		},
+		{
+			"supported custom JSON serialization",
+			`type JSONChannel chan int
+			func (JSONChannel) MarshalJSON() ([]byte, error) { return nil, nil }
+			func (*UserController) RegisterRoutes(r *api.Registry) {
+				r.GET("/items", func() httpx.Response[JSONChannel] { return httpx.Response[JSONChannel]{} })
+			}`,
+			"",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inspector := controllerFixture(t, tc.source)
+			inspector.inspectControllerRoutes()
+			inspector.resolveHandlerSignatures()
+			for _, diagnostic := range inspector.contract.Diagnostics {
+				if diagnostic.Code == tc.code {
+					return
+				}
+			}
+			if tc.code != "" || contractHasErrors(*inspector.contract) {
+				t.Fatalf("기대 진단 %q, 실제 진단 %+v", tc.code, inspector.contract.Diagnostics)
+			}
+		})
+	}
+}

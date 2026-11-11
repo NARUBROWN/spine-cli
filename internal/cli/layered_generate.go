@@ -120,8 +120,8 @@ func parseLayeredRequest(args []string) (layeredRequest, error) {
 	if r.Kind == "consumer" && (r.Topic == "" || len(r.Fields) == 0) {
 		return r, fmt.Errorf("consumer requires --topic and at least one --field")
 	}
-	if r.Kind == "websocket" && (!strings.HasPrefix(r.Path, "/") || len(r.Fields) == 0) {
-		return r, fmt.Errorf("websocket requires --path and at least one --field")
+	if r.Kind == "websocket" && (!validWebSocketPath(r.Path) || len(r.Fields) == 0) {
+		return r, fmt.Errorf("websocket requires an absolute static --path and at least one --field")
 	}
 	if r.Kind != "consumer" && r.Topic != "" {
 		return r, fmt.Errorf("--topic requires consumer")

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"go/ast"
+	"go/parser"
 	"go/types"
 	"net/http"
 	"strings"
@@ -15,7 +16,10 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 	if !strings.HasPrefix(key, prefix) {
 		return httpBindingShape{}, false
 	}
-	marker := strings.TrimPrefix(key, prefix)
+	return catalog.inputMarker(source, strings.TrimPrefix(key, prefix), node.Index, visiting)
+}
+
+func (catalog *httpBindingCatalog) inputMarker(source *layoutSource, marker string, payload ast.Expr, visiting map[string]bool) (httpBindingShape, bool) {
 	binding := ""
 	switch marker {
 	case "Path":
@@ -30,36 +34,41 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		return httpBindingShape{}, false
 	}
 	if binding == "path" {
-		if scalar, ok := catalog.scalarPathPayload(source, node.Index, map[string]bool{}); ok {
+		if scalar, ok := catalog.scalarPathPayload(source, payload, map[string]bool{}); ok {
 			return httpBindingShape{binding: "path", kind: "pointer", source: "path", scalarPath: true, payload: scalar, payloadSource: source.Path}, true
 		}
 	}
-	payloadSource, structure, ok := catalog.markerPayload(source, node.Index, map[string]bool{})
+	payloadSource, structure, ok := catalog.markerPayload(source, payload, map[string]bool{})
 	if !ok {
-		if catalog.unresolvedMarkerPayload(source, node.Index, map[string]bool{}) {
+		if catalog.unresolvedMarkerPayload(source, payload, map[string]bool{}) {
 			return httpBindingShape{kind: "unknown"}, true
 		}
 		return httpBindingShape{kind: "unsupported", problem: "input." + marker + " requires a concrete struct payload"}, true
 	}
-	fields, known := catalog.inputFields(payloadSource, structure, visiting, binding == "body")
+	if binding == "body" {
+		if problem := catalog.bodyProblem(source, payload, map[string]bool{}); problem != "" {
+			return httpBindingShape{kind: "unsupported", problem: problem}, true
+		}
+		return httpBindingShape{binding: "body", kind: "pointer", payload: expressionText(source.Fset, payload), payloadSource: source.Path}, true
+	}
+	fields, known := catalog.inputFields(payloadSource, structure, visiting, false)
 	if !known {
 		return httpBindingShape{kind: "unknown", problem: "Cannot resolve embedded input fields"}, true
 	}
-	shape := httpBindingShape{binding: binding, kind: "pointer", payload: expressionText(source.Fset, node.Index), payloadSource: source.Path}
-	if binding != "body" {
-		shape.source = binding
-	}
+	shape := httpBindingShape{binding: binding, kind: "pointer", payload: expressionText(source.Fset, payload), payloadSource: source.Path}
+	shape.source = binding
 	seen := map[string]bool{}
+	concrete := catalog.instanceFields(source, payload, binding)
 	for _, field := range fields {
+		if problem := unsupportedInputTag(field.tags); problem != "" {
+			return httpBindingShape{kind: "unsupported", problem: problem}, true
+		}
 		for _, other := range []string{"path", "query", "header", "form", "param"} {
-			if other != binding && (binding != "body" || other != "form") {
-				if value, exists := field.tags.Lookup(other); exists && value != "-" && (value != "" || binding == "body") {
+			if other != binding {
+				if value, exists := field.tags.Lookup(other); exists && value != "-" && value != "" {
 					return httpBindingShape{kind: "unsupported", problem: "A DTO mixes input sources"}, true
 				}
 			}
-		}
-		if binding == "body" {
-			continue
 		}
 		name := field.tags.Get(binding)
 		if name == "-" {
@@ -68,7 +77,7 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		if name == "" {
 			name = controllerLowerCamel(field.name)
 		}
-		if strings.ContainsAny(name, ",\r\n\t") {
+		if strings.Contains(name, ",") || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 			return httpBindingShape{kind: "unsupported", problem: fmt.Sprintf("Invalid %s field %q", binding, name)}, true
 		}
 		if binding == "header" {
@@ -78,6 +87,9 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 				}
 			}
 			name = http.CanonicalHeaderKey(name)
+			if list, ok := field.expression.(*ast.ArrayType); ok && list.Len == nil && !controllerHeaderListAllowed(name) {
+				return httpBindingShape{kind: "unsupported", problem: fmt.Sprintf("Header %s does not support generic list binding", name)}, true
+			}
 		}
 		if seen[name] {
 			return httpBindingShape{kind: "unsupported", problem: "Duplicate input field " + name}, true
@@ -85,13 +97,52 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		seen[name] = true
 		shape.keys = append(shape.keys, name)
 		descriptor := handlerInputField{Name: name, Type: expressionText(field.source.Fset, field.expression), source: field.source.Path, description: field.tags.Get("description")}
+		exampleType := field.expression
+		if instantiated := concrete[name]; instantiated != nil {
+			descriptor.Type = types.TypeString(instantiated, func(pkg *types.Package) string { return pkg.Name() })
+			if expression, err := parser.ParseExpr(descriptor.Type); err == nil {
+				exampleType = expression
+			}
+		}
 		if example, ok := field.tags.Lookup("example"); ok {
-			descriptor.example, descriptor.hasExample = staticFieldExample(field.expression, example, field.source)
+			descriptor.example, descriptor.hasExample = staticFieldExample(exampleType, example, field.source)
 			descriptor.invalidExample = !descriptor.hasExample
 		}
 		shape.fields = append(shape.fields, descriptor)
 	}
 	return shape, true
+}
+
+// inputAlias uses the instantiated Go type to resolve aliases and reordered type arguments.
+func (catalog *httpBindingCatalog) inputAlias(source *layoutSource, expression ast.Expr, visiting map[string]bool) (httpBindingShape, bool) {
+	instance := catalog.instantiatedHTTPType(source, expression)
+	if instance == nil || instance.Obj().Pkg() == nil || instance.Obj().Pkg().Path() != spineImportPath+"/pkg/input" || instance.TypeArgs().Len() != 1 {
+		return httpBindingShape{}, false
+	}
+	argument, err := parser.ParseExpr(catalog.httpTypeText(source, instance.TypeArgs().At(0)))
+	if err != nil {
+		return httpBindingShape{}, false
+	}
+	return catalog.inputMarker(source, instance.Obj().Name(), argument, visiting)
+}
+
+func (catalog *httpBindingCatalog) httpTypeText(source *layoutSource, payload types.Type) string {
+	local := source.ImportPath
+	if local == "" {
+		local = modulePackage(catalog.module, source.Package)
+	}
+	imports := importPathsByAlias(source.File)
+	return types.TypeString(payload, func(pkg *types.Package) string {
+		if pkg.Path() == local {
+			return ""
+		}
+		for alias, path := range imports {
+			if pkg.Path() == path {
+				return alias
+			}
+		}
+		return pkg.Name()
+	})
 }
 
 // unresolvedMarkerPayload는 찾지 못한 외부 선언을 잘못된 입력 타입으로 단정하지 않습니다.
@@ -124,14 +175,38 @@ func (catalog *httpBindingCatalog) markerPayload(source *layoutSource, expressio
 	if structure, ok := expression.(*ast.StructType); ok {
 		return source, structure, true
 	}
-	key := canonicalType(source, expression, catalog.module)
+	base, arguments := genericType(expression)
+	key := canonicalType(source, base, catalog.module)
 	declaration, ok := catalog.types[key]
 	if !ok || visiting[key] {
 		return nil, nil, false
 	}
+	if arguments != 0 {
+		if declaration.spec.TypeParams == nil {
+			return nil, nil, false
+		}
+		count := 0
+		for _, field := range declaration.spec.TypeParams.List {
+			count += len(field.Names)
+		}
+		if count != arguments {
+			return nil, nil, false
+		}
+	}
 	visiting[key] = true
 	defer delete(visiting, key)
 	return catalog.markerPayload(declaration.source, declaration.spec.Type, visiting)
+}
+
+func genericType(expression ast.Expr) (ast.Expr, int) {
+	switch node := expression.(type) {
+	case *ast.IndexExpr:
+		return node.X, 1
+	case *ast.IndexListExpr:
+		return node.X, len(node.Indices)
+	default:
+		return expression, 0
+	}
 }
 
 func controllerLowerCamel(name string) string {

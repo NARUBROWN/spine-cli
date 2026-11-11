@@ -3,7 +3,11 @@ package cli
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
+	"go/parser"
 	"go/token"
+	"go/types"
+	"path/filepath"
 
 	"golang.org/x/mod/semver"
 )
@@ -13,12 +17,48 @@ type httpTypeDeclaration struct {
 	spec   *ast.TypeSpec
 }
 
+type httpTypeUse struct {
+	path, expression string
+}
+
+func httpTypeUseAt(fset *token.FileSet, expression ast.Expr) httpTypeUse {
+	path := fset.Position(expression.Pos()).Filename
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = absolute
+	}
+	return httpTypeUse{path, expressionText(fset, expression)}
+}
+
+func (catalog *httpBindingCatalog) instantiatedHTTPType(source *layoutSource, expression ast.Expr) *types.Named {
+	path, err := filepath.Abs(source.Path)
+	if err != nil {
+		return nil
+	}
+	value := catalog.instances[httpTypeUse{path, expressionText(source.Fset, expression)}]
+	if value == nil {
+		return nil
+	}
+	named, _ := types.Unalias(value).(*types.Named)
+	return named
+}
+
+func (i *contractInspector) configureHTTPBindings(catalog *httpBindingCatalog) {
+	for key, declaration := range i.controllerTypes {
+		catalog.types[key] = declaration
+	}
+	catalog.instances = i.controllerInstances
+}
+
 type httpBindingCatalog struct {
-	module         string
-	types          map[string]httpTypeDeclaration
-	errorMethods   map[string]bool
-	structured     bool
-	explicitInputs bool
+	instances                map[httpTypeUse]types.Type
+	module                   string
+	types                    map[string]httpTypeDeclaration
+	errorMethods             map[string]bool
+	jsonDecoders             map[string]bool
+	xmlDecoders              map[string]bool
+	structured               bool
+	explicitInputs           bool
+	controllerContextRemoved bool
 }
 
 type httpBindingShape struct {
@@ -40,7 +80,15 @@ func requiresExplicitHTTPInputs(version string) bool {
 
 // HTTP 검증과 route 생성은 동일한 소스 기반 resolver 지원 규칙을 사용합니다.
 func newHTTPBindingCatalog(module string, sources layoutSources, coreVersion string) *httpBindingCatalog {
-	catalog := &httpBindingCatalog{explicitInputs: requiresExplicitHTTPInputs(coreVersion), module: module, types: map[string]httpTypeDeclaration{}, errorMethods: map[string]bool{}, structured: semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.0-preview.1") >= 0}
+	catalog := &httpBindingCatalog{
+		explicitInputs: requiresExplicitHTTPInputs(coreVersion),
+		structured:     semver.IsValid(coreVersion) && semver.Compare(coreVersion, "v0.7.0-preview.1") >= 0,
+		module:         module,
+		types:          map[string]httpTypeDeclaration{},
+		errorMethods:   map[string]bool{},
+		jsonDecoders:   map[string]bool{},
+		xmlDecoders:    map[string]bool{},
+	}
 	for _, source := range sources.sortedFiles() {
 		for _, declaration := range source.File.Decls {
 			group, ok := declaration.(*ast.GenDecl)
@@ -57,7 +105,20 @@ func newHTTPBindingCatalog(module string, sources layoutSources, coreVersion str
 	for _, source := range sources.sortedFiles() {
 		for _, node := range source.File.Decls {
 			function, ok := node.(*ast.FuncDecl)
-			if !ok || function.Recv == nil || len(function.Recv.List) != 1 || function.Name.Name != "Error" || len(fieldTypes(source.Fset, function.Type.Params)) != 0 {
+			if !ok || function.Recv == nil || len(function.Recv.List) != 1 {
+				continue
+			}
+			if function.Name.Name == "UnmarshalJSON" {
+				params, results := fieldTypes(source.Fset, function.Type.Params), fieldTypes(source.Fset, function.Type.Results)
+				if len(params) == 1 && (params[0] == "[]byte" || params[0] == "[]uint8") && len(results) == 1 && results[0] == "error" {
+					catalog.jsonDecoders[catalog.dtoIdentity(source, function.Recv.List[0].Type)] = true
+				}
+			}
+			switch function.Name.Name {
+			case "UnmarshalXML", "UnmarshalXMLAttr", "UnmarshalText":
+				catalog.xmlDecoders[catalog.dtoIdentity(source, function.Recv.List[0].Type)] = true
+			}
+			if function.Name.Name != "Error" || len(fieldTypes(source.Fset, function.Type.Params)) != 0 {
 				continue
 			}
 			results := function.Type.Results
@@ -109,7 +170,7 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 			if shape.binding == "" {
 				code := "HTTP_PARAMETER_BINDING_UNSUPPORTED"
 				hint := "Use a supported context/path/query/header parameter or a pointer to a DTO struct."
-				if shape.kind == "struct" {
+				if shape.kind == "struct" && !catalog.explicitInputs {
 					hint = "Use *" + parameter.Type + " for a DTO body; default HTTP resolvers do not accept a struct value."
 				}
 				if shape.kind == "unknown" || shape.kind == "interface" {
@@ -118,7 +179,13 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 				}
 				if shape.problem != "" {
 					code = "HTTP_INPUT_CONTRACT_INVALID"
-					hint = shape.problem + ". Use separate struct pointers with path, query or header tags."
+					hint = shape.problem + "."
+					if !catalog.explicitInputs {
+						hint += " Use separate struct pointers with path, query or header tags."
+					}
+				}
+				if catalog.explicitInputs && shape.kind != "unknown" && shape.kind != "interface" && shape.problem == "" {
+					hint = "Use input.Body[T], input.Path[T], input.Query[T] or input.Header[T] for the input source."
 				}
 				parameter.Binding = "unresolved"
 				diagnostics = append(diagnostics, contractDiagnostic{
@@ -141,6 +208,9 @@ func (catalog *httpBindingCatalog) parameters(source *layoutSource, fields *ast.
 
 func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Expr, visiting map[string]bool) httpBindingShape {
 	key := canonicalType(source, expression, catalog.module)
+	if catalog.controllerContextRemoved && key == spineImportPath+"/core:ControllerContext" {
+		return httpBindingShape{kind: "unsupported", problem: "The selected core no longer exports core.ControllerContext. Use spine.Ctx from github.com/NARUBROWN/spine/pkg/spine"}
+	}
 	if known, ok := defaultHTTPBinding(key); ok {
 		return known
 	}
@@ -168,6 +238,9 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 	switch node := expression.(type) {
 	case *ast.IndexExpr:
 		if marker, ok := catalog.markerShape(source, node, visiting); ok {
+			return marker
+		}
+		if marker, ok := catalog.inputAlias(source, expression, visiting); ok {
 			return marker
 		}
 		return httpBindingShape{kind: "unknown"}
@@ -211,10 +284,43 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 			return httpBindingShape{kind: "scalar"}
 		}
 		return httpBindingShape{kind: "unknown"}
-	case *ast.SelectorExpr, *ast.IndexListExpr:
+	case *ast.SelectorExpr:
+		return httpBindingShape{kind: "unknown"}
+	case *ast.IndexListExpr:
+		if marker, ok := catalog.inputAlias(source, expression, visiting); ok {
+			return marker
+		}
 		return httpBindingShape{kind: "unknown"}
 	default:
 		return httpBindingShape{kind: "unsupported"}
+	}
+}
+
+func (catalog *httpBindingCatalog) inspectSelectedCore(modules []selectedModule) {
+	for _, module := range modules {
+		if module.Path != spineImportPath {
+			continue
+		}
+		root := module.Dir
+		if module.Replace != nil && module.Replace.Dir != "" {
+			root = module.Replace.Dir
+		}
+		if root == "" {
+			return
+		}
+		dir := filepath.Join(root, "core")
+		pkg, err := build.Default.ImportDir(dir, 0)
+		if err != nil {
+			return
+		}
+		for _, name := range pkg.GoFiles {
+			file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, name), nil, 0)
+			if err != nil || file.Scope.Lookup("ControllerContext") != nil {
+				return
+			}
+		}
+		catalog.controllerContextRemoved = true
+		return
 	}
 }
 

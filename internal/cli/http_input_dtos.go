@@ -3,10 +3,12 @@ package cli
 import (
 	"fmt"
 	"go/ast"
+	"go/types"
 	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 type httpInputField struct {
@@ -56,7 +58,7 @@ func (catalog *httpBindingCatalog) inputStruct(source *layoutSource, node *ast.S
 		if key == "-" {
 			continue
 		}
-		if key == "" || strings.ContainsAny(key, ",\r\n\t") {
+		if key == "" || strings.Contains(key, ",") || strings.IndexFunc(key, unicode.IsControl) >= 0 {
 			return httpBindingShape{kind: "unsupported", problem: fmt.Sprintf("Field %s needs an explicit %s tag or '-'", field.name, selected)}
 		}
 		if selected == "header" {
@@ -153,6 +155,10 @@ func embeddedHTTPFieldName(expression ast.Expr) string {
 		return node.Sel.Name
 	case *ast.StarExpr:
 		return embeddedHTTPFieldName(node.X)
+	case *ast.IndexExpr:
+		return embeddedHTTPFieldName(node.X)
+	case *ast.IndexListExpr:
+		return embeddedHTTPFieldName(node.X)
 	}
 	return ""
 }
@@ -169,6 +175,36 @@ func (catalog *httpBindingCatalog) dtoIdentity(source *layoutSource, expression 
 		return catalog.dtoIdentity(declaration.source, declaration.spec.Type)
 	}
 	return key
+}
+
+func (catalog *httpBindingCatalog) inputDTOIdentity(source *layoutSource, expression ast.Expr, seen map[string]bool) string {
+	if instance := catalog.instances[httpTypeUseAt(source.Fset, expression)]; instance != nil {
+		if named, ok := types.Unalias(instance).(*types.Named); ok && named.Obj().Pkg() != nil &&
+			named.Obj().Pkg().Path() == spineImportPath+"/pkg/input" {
+			if pointer, ok := named.Underlying().(*types.Pointer); ok {
+				return types.TypeString(types.Unalias(pointer.Elem()), (*types.Package).Path)
+			}
+		}
+	}
+	if paren, ok := expression.(*ast.ParenExpr); ok {
+		return catalog.inputDTOIdentity(source, paren.X, seen)
+	}
+	if marker, ok := expression.(*ast.IndexExpr); ok {
+		switch canonicalType(source, marker.X, catalog.module) {
+		case spineImportPath + "/pkg/input:Path", spineImportPath + "/pkg/input:Query",
+			spineImportPath + "/pkg/input:Header", spineImportPath + "/pkg/input:Body":
+			return catalog.dtoIdentity(source, marker.Index)
+		}
+	}
+	key := canonicalType(source, expression, catalog.module)
+	if declaration, ok := catalog.types[key]; ok && declaration.spec.Assign.IsValid() {
+		if seen[key] {
+			return key
+		}
+		seen[key] = true
+		return catalog.inputDTOIdentity(declaration.source, declaration.spec.Type, seen)
+	}
+	return catalog.dtoIdentity(source, expression)
 }
 
 func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSource, fields *ast.FieldList, parameters []handlerParameter, handler string) []contractDiagnostic {
@@ -199,7 +235,7 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 				diagnostics = append(diagnostics, contractDiagnostic{Severity: "warning", Code: "HTTP_INPUT_API_DEPRECATED", Message: fmt.Sprintf("handler %s parameter %d uses a deprecated %s input", handler, index-1, parameter.Binding), Source: relativeSource(source.Fset.Position(field.Pos())), Hint: hint})
 			}
 			if parameter.Binding == "body" || parameter.SourceDTO && !parameter.scalarPath {
-				identity := catalog.dtoIdentity(source, field.Type)
+				identity := catalog.inputDTOIdentity(source, field.Type, map[string]bool{})
 				if seenTypes[identity] {
 					add("HTTP_INPUT_DTO_DUPLICATED", "the same DTO type appears more than once")
 				}

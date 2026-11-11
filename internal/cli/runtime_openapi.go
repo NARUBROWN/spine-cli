@@ -19,17 +19,31 @@ const runtimeOpenAPIMarker = "SPINE_RUNTIME_OPENAPI="
 // executeRuntimeOpenAPI는 리스너 없이 앱의 설명 API를 호출합니다.
 // BuildApplication과 Go 도구는 실행되므로 정적 검사와 별도인 실행 증거입니다.
 func executeRuntimeOpenAPI() ([]byte, error) {
+	return executeRuntimeOpenAPIWithPreparation(false)
+}
+
+func executeRuntimeOpenAPIWithPreparation(prepare bool) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	return executeRuntimeOpenAPIContext(ctx)
+	return executeRuntimeOpenAPIProcess(ctx, prepare)
 }
 
 func executeRuntimeOpenAPIContext(ctx context.Context) ([]byte, error) {
+	return executeRuntimeOpenAPIProcess(ctx, false)
+}
+
+func executeRuntimeOpenAPIProcess(ctx context.Context, prepare bool) ([]byte, error) {
 	importPath, err := compositionImportPath()
 	if err != nil {
 		return nil, err
 	}
-	source, err := format.Source([]byte(fmt.Sprintf(runtimeOpenAPISource, importPath)))
+	imports := ""
+	describe := "description, err := spine.DescribeHTTP(app, options)"
+	if prepare {
+		imports = "\"context\"\n\"errors\"\n\"time\""
+		describe = preparedOpenAPIDescription
+	}
+	source, err := format.Source([]byte(fmt.Sprintf(runtimeOpenAPISource, imports, importPath, describe)))
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +65,7 @@ func executeRuntimeOpenAPIContext(ctx context.Context) ([]byte, error) {
 			message = err.Error()
 		}
 		if strings.Contains(message, "controller routes require a prepared application") {
-			return nil, fmt.Errorf("controller routes are not collected: use --source static or DescribePreparedHTTP on an explicitly prepared application; runtime export did not call Prepare or execute DI constructors")
+			return nil, fmt.Errorf("controller routes are not collected: runtime export did not call Prepare; use --source static or --source runtime --prepare to execute DI constructors and collect controller routes")
 		}
 		return nil, fmt.Errorf("runtime OpenAPI export failed: %s\nSpine v0.7.0-preview.1 or compatible DescribeHTTP and pkg/openapi APIs are required. Use --source static for offline source export", message)
 	}
@@ -70,6 +84,7 @@ func executeRuntimeOpenAPIContext(ctx context.Context) ([]byte, error) {
 const runtimeOpenAPISource = `package main
 
 import (
+ %s
  "encoding/base64"
  "fmt"
  "os"
@@ -85,11 +100,20 @@ func export() error {
  app, options, err := application.BuildApplication()
  if err != nil { return err }
  if options.HTTP == nil { return fmt.Errorf("HTTP is disabled") }
- description, err := spine.DescribeHTTP(app, options)
+ %s
  if err != nil { return err }
  document, err := openapi.Generate(description, options.HTTP.OpenAPI)
  if err != nil { return err }
  fmt.Print("\nSPINE_RUNTIME_OPENAPI=" + base64.StdEncoding.EncodeToString(document) + "\n")
  return nil
 }
+`
+
+const preparedOpenAPIDescription = `
+ prepared, err := app.Prepare(context.Background(), options)
+ if err != nil { return err }
+ description, err := spine.DescribePreparedHTTP(prepared)
+ closeContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+ defer cancel()
+ if closeErr := prepared.Close(closeContext); closeErr != nil { return errors.Join(err, closeErr) }
 `

@@ -55,9 +55,7 @@ func (p *layeredPlanner) addControllerRoute(inspector *contractInspector, reques
 	// 서로 다른 파일의 import 별칭은 타입 표현식을 원래 파일 기준으로 변환합니다.
 
 	catalog := newHTTPBindingCatalog(p.Module, p.Sources, controllerRoutesMinimum)
-	for key, declaration := range inspector.controllerTypes {
-		catalog.types[key] = declaration
-	}
+	inspector.configureHTTPBindings(catalog)
 	var declarations, arguments []string
 	for _, field := range handler.Type.Params.List {
 		count := len(field.Names)

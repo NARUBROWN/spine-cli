@@ -7,7 +7,9 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,6 +28,7 @@ const (
 )
 
 type applicationContract struct {
+	httpInstances    map[httpTypeUse]types.Type
 	SchemaVersion    string                    `json:"schema_version"`
 	AnalysisMode     string                    `json:"analysis_mode"`
 	Complete         bool                      `json:"analysis_complete"`
@@ -129,13 +132,15 @@ type contractDiagnostic struct {
 }
 
 type contractInspector struct {
-	contract           *applicationContract
-	module             string
-	seen               map[string]bool
-	qualified          bool
-	sources            layoutSources
-	controllerHandlers map[string]staticHandlerSignature
-	controllerTypes    map[string]httpTypeDeclaration
+	contract            *applicationContract
+	module              string
+	seen                map[string]bool
+	qualified           bool
+	sources             layoutSources
+	controllerHandlers  map[string]staticHandlerSignature
+	controllerTypes     map[string]httpTypeDeclaration
+	controllerMethods   map[string]*types.Signature
+	controllerInstances map[httpTypeUse]types.Type
 }
 
 func inspectApplication() (applicationContract, error) {
@@ -619,9 +624,9 @@ func (i *contractInspector) resolveHandlerSignatures() {
 	}
 
 	bindings := newHTTPBindingCatalog(i.module, handlerSources, selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, spineImportPath))
-	for key, declaration := range i.controllerTypes {
-		bindings.types[key] = declaration
-	}
+	bindings.inspectSelectedCore(i.contract.HTTPAdapter.SelectedModules)
+	i.configureHTTPBindings(bindings)
+	i.contract.httpInstances = bindings.instances
 	for index := range i.contract.HTTP {
 		route := &i.contract.HTTP[index]
 		matches := signatures[route.Handler]
@@ -658,7 +663,8 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			}
 			i.contract.Diagnostics = append(i.contract.Diagnostics, diagnostics...)
 			route.Returns = matches[0].returns
-			i.contract.Diagnostics = append(i.contract.Diagnostics, bindings.returns(matches[0].httpSource, matches[0].httpResults, route.Handler)...)
+			_, registryCallback := i.controllerHandlers[route.Handler]
+			i.contract.Diagnostics = append(i.contract.Diagnostics, bindings.returns(matches[0].httpSource, matches[0].httpResults, route.Handler, registryCallback)...)
 			if err := validateHTTPPathBindings(route.Parameters, route.Path); err != nil {
 				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_BINDING_MISMATCH", Message: fmt.Sprintf("route %s %s: %v", route.Method, route.Path, err), Source: route.Source})
 			}
@@ -687,7 +693,16 @@ func (i *contractInspector) resolveHandlerSignatures() {
 	for index := range i.contract.WebSockets {
 		registration := &i.contract.WebSockets[index]
 		matches := signatures[registration.Handler]
+		if coreHasStaticWebSocketContract(i.contract.HTTPAdapter.SelectedModules) && !validWebSocketPath(registration.Name) {
+			i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{
+				Severity: "error", Code: "WEBSOCKET_PATH_INVALID", Source: registration.Source,
+				Message: fmt.Sprintf("WebSocket path %q must be an absolute static path.", registration.Name),
+			})
+		}
 		if len(matches) == 1 {
+			if coreHasStaticWebSocketContract(i.contract.HTTPAdapter.SelectedModules) {
+				i.checkWebSocketSignature(registration, matches[0], bindings)
+			}
 			registration.schemaSource = matches[0].schemaSource
 			registration.Parameters = bindMessageParameters(matches[0].parameters, "websocket", importPathsByAlias(matches[0].httpSource.File))
 			registration.Returns = matches[0].returns
@@ -698,6 +713,51 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "WEBSOCKET_HANDLER_SIGNATURE_UNRESOLVED", Message: "could not resolve handler signature " + registration.Handler + " from project source", Source: registration.Source})
 		} else {
 			i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "WEBSOCKET_HANDLER_SIGNATURE_AMBIGUOUS", Message: "multiple methods match " + registration.Handler, Source: registration.Source})
+		}
+	}
+}
+
+func validWebSocketPath(path string) bool {
+	parsed, err := url.ParseRequestURI(path)
+	return err == nil && strings.HasPrefix(path, "/") && parsed.Path == path &&
+		parsed.RawQuery == "" && !strings.ContainsAny(path, ":*{}") && !strings.Contains(path, "//")
+}
+
+func coreHasStaticWebSocketContract(modules []selectedModule) bool {
+	version := selectedModuleVersion(modules, spineImportPath)
+	return semver.IsValid(version) && semver.Compare(version, "v0.7.5-preview.1") >= 0
+}
+
+func (i *contractInspector) checkWebSocketSignature(registration *namedRegistration, signature staticHandlerSignature, bindings *httpBindingCatalog) {
+	add := func(code, message string) {
+		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{
+			Severity: "error", Code: code, Message: message, Source: signature.source,
+		})
+	}
+	unsupportedReturn := func() {
+		add("WEBSOCKET_RETURN_UNSUPPORTED", fmt.Sprintf("WebSocket handler %s must return only error values.", registration.Handler))
+	}
+	if method := i.controllerMethods[registration.Handler]; method != nil {
+		errorType := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
+		for index := 0; index < method.Results().Len(); index++ {
+			if !types.Implements(method.Results().At(index).Type(), errorType) {
+				unsupportedReturn()
+				break
+			}
+		}
+	} else if signature.httpResults != nil {
+		for _, result := range signature.httpResults.List {
+			if bindings.returnShape(signature.httpSource, result.Type, 0, map[string]bool{}).kind != "error" {
+				unsupportedReturn()
+				break
+			}
+		}
+	}
+	if signature.httpFields != nil {
+		for _, field := range signature.httpFields.List {
+			if _, variadic := field.Type.(*ast.Ellipsis); variadic {
+				add("WEBSOCKET_PARAMETER_UNSUPPORTED", fmt.Sprintf("WebSocket handler %s must use a fixed parameter list.", registration.Handler))
+			}
 		}
 	}
 }

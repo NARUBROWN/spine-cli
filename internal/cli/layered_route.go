@@ -24,7 +24,7 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 	found := 0
 	var handlerSource *layoutSource
 	var handlerFunction *ast.FuncDecl
-	var controllerInspector *contractInspector
+	var registryInspector *contractInspector
 	for _, s := range p.Sources {
 		if s.Package != dir {
 			continue
@@ -48,20 +48,30 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 			}
 			catalog := newHTTPBindingCatalog(p.Module, p.Sources, selectedModuleVersion(modules, spineImportPath))
 			if controllerRoutesProject() {
-				controllerInspector, err = inspectLayeredRegistrations(p.Config, p.Module, p.Sources)
+				inspector, err := inspectLayeredRegistrations(p.Config, p.Module, p.Sources)
 				if err != nil {
 					return err
 				}
-				controllerInspector.inspectControllerRoutes()
-				for key, declaration := range controllerInspector.controllerTypes {
-					catalog.types[key] = declaration
+				inspector.inspectControllerRoutes()
+				registryInspector = inspector
+				inspector.configureHTTPBindings(catalog)
+				receiver := modulePackage(p.Module, dir) + "." + name
+				signature := inspector.controllerMethods["(*"+receiver+")."+method]
+				if signature == nil {
+					signature = inspector.controllerMethods["("+receiver+")."+method]
 				}
-				if err := checkPreviewStableControllerMethod(dir, name, method, p.Sources, selectedModuleVersion(modules, spineImportPath)); err != nil {
-					return err
+				if signature != nil {
+					if err := checkControllerInputs(signature, selectedModuleVersion(modules, spineImportPath)); err != nil {
+						return fmt.Errorf("HTTP_INPUT_CONTRACT_INVALID: %s: %w", r.Handler, err)
+					}
+					if err := checkControllerReturns(signature, selectedModuleVersion(modules, spineImportPath)); err != nil {
+						return fmt.Errorf("HTTP_RETURN_UNSUPPORTED: %s: %w", r.Handler, err)
+					}
 				}
 			}
+			catalog.inspectSelectedCore(modules)
 			params, diagnostics := catalog.parameters(s, f.Type.Params, r.Path, r.Handler)
-			diagnostics = append(diagnostics, catalog.returns(s, f.Type.Results, r.Handler)...)
+			diagnostics = append(diagnostics, catalog.returns(s, f.Type.Results, r.Handler, controllerRoutesProject())...)
 			for _, diagnostic := range diagnostics {
 				if diagnostic.Severity == "error" {
 					return fmt.Errorf("%s: %s (%s). %s", diagnostic.Code, diagnostic.Message, diagnostic.Source, diagnostic.Hint)
@@ -91,7 +101,7 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 		if dependency.Factory != name+".Constructor" {
 			return fmt.Errorf("controller %s requires a Constructor method for route collection; keep legacy factory routes registered with app.Route or migrate to a controller prototype", name)
 		}
-		if err = p.addControllerRoute(controllerInspector, r, dir, name, method, handlerSource, handlerFunction); err != nil {
+		if err = p.addControllerRoute(registryInspector, r, dir, name, method, handlerSource, handlerFunction); err != nil {
 			return err
 		}
 		return p.registerConstructorRole(dir, dependency.Factory, "Controller")

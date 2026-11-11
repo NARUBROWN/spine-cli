@@ -46,8 +46,9 @@ func(c *UserController)RegisterRoutes(r *api.Registry){r.GET("/users/:id",func(i
 
 func TestMultipleScalarPathsFollowRouteAndPathArgumentOrder(t *testing.T) {
 	inspector := controllerFixture(t, `
+type QueryDTO DTO
 func(c *UserController)RegisterRoutes(r *api.Registry){
- r.POST("/orgs/:org/users/:id",func(q input.Query[DTO],org input.Path[string],body Payload,id input.Path[int64])error{return nil})
+ r.POST("/orgs/:org/users/:id",func(q input.Query[QueryDTO],org input.Path[string],body Payload,id input.Path[int64])error{return nil})
 }`)
 	inspector.contract.HTTPAdapter.SelectedModules[0].Version = multiScalarPathMinimum
 	inspector.inspectControllerRoutes()

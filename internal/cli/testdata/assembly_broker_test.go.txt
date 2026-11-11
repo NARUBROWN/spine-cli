@@ -19,6 +19,7 @@ import (
  event "github.com/NARUBROWN/spine/contract/event"
  "github.com/NARUBROWN/spine/pkg/event/publish"
  "github.com/NARUBROWN/spine/pkg/httpx"
+ "github.com/NARUBROWN/spine/pkg/input"
  "github.com/NARUBROWN/spine/pkg/ws"
  "github.com/gorilla/websocket"
  amqp "github.com/rabbitmq/amqp091-go"
@@ -33,7 +34,7 @@ type brokerEvent struct { brokerDTO; topic string }
 func (e brokerEvent) Name() string {return e.topic}
 func (brokerEvent) OccurredAt() time.Time {return time.Now()}
 type brokerController struct {input,output string;sent,handled atomic.Int32}
-func (c *brokerController) Emit(ctx context.Context,input *brokerDTO) httpx.Response[string] {
+func (c *brokerController) Emit(ctx context.Context,input input.Body[brokerDTO]) httpx.Response[string] {
  c.sent.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:*input,topic:c.input});return httpx.Response[string]{Body:"accepted"}
 }
 func (c *brokerController) EmitWS(ctx context.Context,input brokerDTO) error {
