@@ -106,6 +106,10 @@ func activeWorkspace(root string) (string, error) {
 
 // selectedModules는 프로젝트를 실행하지 않고 Go가 선택한 모듈 버전을 읽습니다.
 func selectedModules(ctx context.Context, root string, offline bool) ([]selectedModule, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
 	queryRoot := root
 	if offline {
 		settings, err := readActiveGoSettings(root)
