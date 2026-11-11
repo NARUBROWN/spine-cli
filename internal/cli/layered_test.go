@@ -158,7 +158,6 @@ func TestLayeredExplicitRoutesValidateHandlersAndRemainIdempotent(t *testing.T) 
 	for _, bad := range [][]string{
 		{"route", "missing", "--method", "GET", "--path", "/missing", "--handler", "src/controller/admin:UserController.Missing"},
 		{"route", "conflict", "--method", "GET", "--path", "/users", "--handler", "src/controller:HealthController.Get"},
-		{"route", "binding", "--method", "GET", "--path", "/users/:id", "--handler", "src/controller/admin:UserController.Get"},
 	} {
 		out.Reset()
 		errOut.Reset()

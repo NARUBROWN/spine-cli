@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// staticFormContent은 알 수 있는 폼 필드만 출력하고 검증 규칙은 추측하지 않습니다.
-func (catalog *apiSchemas) staticFormContent(typeName, sourcePath string) (map[string]any, bool, bool) {
+// staticFormContent은 폼 필드와 기본 playground 검증의 명시적 required 규칙만 사용합니다.
+func (catalog *apiSchemas) staticFormContent(typeName, sourcePath string, playground bool) (map[string]any, bool, bool) {
 	source := catalog.source(sourcePath)
 	expression, err := parser.ParseExpr(typeName)
 	if err != nil || source == nil {
@@ -18,13 +18,15 @@ func (catalog *apiSchemas) staticFormContent(typeName, sourcePath string) (map[s
 	if pointer, ok := expression.(*ast.StarExpr); ok {
 		expression = pointer.X
 	}
-	bindings := newHTTPBindingCatalog(catalog.module, catalog.sources, "")
+	bindings := catalog.bindings
 	declaring, structure, ok := bindings.markerPayload(source, expression, map[string]bool{})
 	if !ok {
 		return nil, false, true
 	}
 	properties := map[string]any{}
-	hasFile, uncertain := false, false
+	urlProperties := map[string]any{}
+	jsonAvailable, xmlAvailable, urlAvailable := true, true, true
+	uncertain := false
 	var collect func(*layoutSource, *ast.StructType, map[string]bool)
 	collect = func(src *layoutSource, node *ast.StructType, seen map[string]bool) {
 		for _, f := range node.Fields.List {
@@ -62,7 +64,14 @@ func (catalog *apiSchemas) staticFormContent(typeName, sourcePath string) (map[s
 				}
 				schema, file, known := catalog.formFieldSchema(f.Type, src, map[string]bool{})
 				uncertain = uncertain || !known
-				hasFile = hasFile || file
+				if !file {
+					urlProperties[name] = schema
+				}
+				if firstRule, _, _ := strings.Cut(tag.Get("validate"), ","); playground && firstRule == "required" {
+					jsonAvailable = jsonAvailable && !file && tag.Get("json") != "-"
+					xmlAvailable = xmlAvailable && !file && tag.Get("xml") != "-"
+					urlAvailable = urlAvailable && !file
+				}
 				if description := tag.Get("description"); description != "" {
 					schema["description"] = description
 				}
@@ -101,9 +110,17 @@ func (catalog *apiSchemas) staticFormContent(typeName, sourcePath string) (map[s
 	}
 	form := map[string]any{"type": "object", "properties": properties, "x-spine-validation-unresolved": true}
 	media := map[string]any{"multipart/form-data": map[string]any{"schema": form}}
-	if !hasFile {
-		media["application/x-www-form-urlencoded"] = map[string]any{"schema": form}
+	if urlAvailable {
+		media["application/x-www-form-urlencoded"] = map[string]any{"schema": map[string]any{
+			"type": "object", "properties": urlProperties, "x-spine-validation-unresolved": true,
+		}}
+	}
+	if jsonAvailable {
 		media["application/json"] = map[string]any{"schema": catalog.schema(typeName, sourcePath)}
+	}
+	if xmlAvailable {
+		xml := map[string]any{"schema": catalog.xmlSchema(typeName, sourcePath)}
+		media["application/xml"], media["text/xml"] = xml, xml
 	}
 	return media, true, false
 }

@@ -1,12 +1,12 @@
 package application
-import("github.com/NARUBROWN/spine";"context";"net/http/httptest";"strings";"testing";"github.com/NARUBROWN/spine/pkg/httpx")
+import("github.com/NARUBROWN/spine";"context";"net/http/httptest";"strings";"testing";"github.com/NARUBROWN/spine/pkg/httpx";"github.com/NARUBROWN/spine/pkg/input";"github.com/NARUBROWN/spine/pkg/api")
 type omittedInput struct { Email string `json:"email" validate:"required,email"` }
 type omittedController struct{}
-func (*omittedController) Post(input *omittedInput) httpx.Response[string] {return httpx.Response[string]{Body:input.Email}}
+func(c *omittedController) RegisterRoutes(r *api.Registry) {r.POST("/unvalidated",c.Post)}
+func (*omittedController) Post(dto input.Body[omittedInput]) httpx.Response[string] {return httpx.Response[string]{Body:dto.Email}}
 func TestValidatorIsOmitted(t *testing.T) {
  app,options,err:=BuildApplication();if err!=nil {t.Fatal(err)}
  app.Constructor(func()*omittedController{return &omittedController{}})
- app.Route("POST","/unvalidated",(*omittedController).Post)
  prepared,err:=app.Prepare(context.Background(),options);if err!=nil {t.Fatal(err)}
  defer prepared.Close(context.Background())
  handler,err:=spine.NetHTTPHandler(prepared);if err!=nil {t.Fatal(err)}

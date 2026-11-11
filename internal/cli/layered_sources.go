@@ -94,6 +94,8 @@ type layoutSource struct {
 	File    *ast.File
 	Fset    *token.FileSet
 	Package string
+	// ImportPath는 타입 검사기가 확인한 외부 패키지의 경로입니다.
+	ImportPath string
 }
 
 // readLayoutSources는 프로젝트 코드를 실행하지 않고 현재 빌드에 포함된 소스만 읽습니다.
@@ -262,6 +264,9 @@ func canonicalType(s *layoutSource, expression ast.Expr, module string) string {
 	case *ast.Ident:
 		if types.Universe.Lookup(e.Name) != nil {
 			return e.Name
+		}
+		if s.ImportPath != "" {
+			return s.ImportPath + ":" + e.Name
 		}
 		return modulePackage(module, s.Package) + ":" + e.Name
 	case *ast.SelectorExpr:

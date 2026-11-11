@@ -681,7 +681,7 @@ Message 계약 불확실성/충돌:
 
 HTTP 정적 binding:
 
-- `context.Context`, `core.ControllerContext`, `pkg/spine.Ctx`와 확인 가능한 Get 전용 context interface: context
+- `context.Context`, `pkg/spine.Ctx`와 확인 가능한 Get 전용 인터페이스를 컨텍스트로 분류한다. 이전 코어의 `core.ControllerContext`를 사용하던 핸들러는 새 코어에서 `pkg/spine.Ctx`로 바꾼다.
 - 실제 Spine `path.Int`, `path.String`, `path.Boolean` 타입: route path parameter에 순서대로 binding
 - 실제 Spine `query.Values`, `query.Pagination`: query. Preview 코어에서는 Deprecated 경고를 표시한다.
 - 실제 Spine `header.Values`: header. Preview 코어에서는 Deprecated 경고를 표시한다.
@@ -774,7 +774,7 @@ spine contract diff --against contracts/api.json --json
 
 ```sh
 spine contract export --format openapi --output openapi.json
-spine contract export --format openapi --source runtime --output runtime-openapi.json
+spine contract export --format openapi --source runtime --prepare --output runtime-openapi.json
 spine contract export --format asyncapi --output asyncapi.json
 ```
 
@@ -782,15 +782,15 @@ spine contract export --format asyncapi --output asyncapi.json
 `--force`가 필요하다. error diagnostic이 있는 contract는 export하지 않는다.
 
 source 기본값은 static이다. --source runtime은 import 가능한 composition의 BuildApplication을 실행하고
-공개 코어의 DescribeHTTP와 openapi.Generate를 호출한다. 리스너, DI 생성자와 요청 핸들러는 시작하지
-않지만 composition 사용자 코드와 Go 도구는 실행한다. 실패하면 static으로 자동 전환하지 않는다.
+공개 코어의 DescribeHTTP와 openapi.Generate를 호출한다. Registry 라우트에는 --prepare를 추가한다.
+이 옵션은 리스너 없이 앱을 준비하고 명세를 읽은 뒤 닫는다. DI 생성자와 설정된 DB, 브로커 초기화가 실행될 수 있다.
 검증기를 등록하지 않은 앱의 런타임 명세는 경로 중심 정보만 제공한다. OpenAPI HTTP 리소스는
 기본 비활성화이며 boot.HTTPOptions.OpenAPI.Enabled로 켠다. AsyncAPI는 static만 지원한다.
 
 기존 static OpenAPI 3.1 export:
 
 - 확인 가능한 HTTP path와 path parameter
-- pointer request DTO와 source에서 찾은 struct schema
+- input.Body[T]의 JSON, XML 및 해당되는 폼 스키마
 - `httpx.Response[T]`의 body type과 해당 import 별칭
 - 스키마 타입은 패키지 경로와 타입 이름으로 구분하고, 동명 타입의 component ID에는 안정적인 구분자를 사용
 - JSON 태그가 없으면 Go 필드 이름을 유지하고 `json:"-"`와 선택적 필드 태그를 반영
