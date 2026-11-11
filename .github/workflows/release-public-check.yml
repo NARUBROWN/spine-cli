@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install exact public CLI and exercise generated applications
+      - name: Verify the public CLI according to the release plan
         env:
           RELEASE_QUERY: ${{ inputs.query }}
         run: python scripts/release/verify_public.py --query "$env:RELEASE_QUERY"

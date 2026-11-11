@@ -129,9 +129,31 @@ def health(binary, app, env):
                     raise ReleaseError("생성 앱의 리스너가 해제되지 않았습니다") from exc
 
 
+def wait_for_public_tag(module, version, directory, env):
+    target = f"{module}@{version}"
+    command = ["go", "mod", "download", "-json", target]
+    # 새 태그의 공개 체크섬이 전파될 때만 다시 조회합니다.
+    for delay in (15, 30, 60, 120, 0):
+        result = subprocess.run(command, cwd=directory, env=env, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            return
+        error = result.stdout + result.stderr
+        waiting_for_checksum = (target in error and "verifying module" in error and
+                                "sum.golang.org/lookup/" in error and "404 Not Found" in error)
+        if not delay or not waiting_for_checksum:
+            raise ReleaseError(f"{target} 공개 모듈 다운로드 실패\n{error.strip()}")
+        print(f"{target} 공개 체크섬을 {delay}초 뒤 다시 조회합니다.", flush=True)
+        time.sleep(delay)
+
+
 def verify(plan, query, work, env):
     module = json.loads(execute(["go", "list", "-m", "-json", MODULE + "@" + query], work, env))
     resolved = module["Version"]
+    tag_only = plan.get("public_validation_scope") == "tag-install"
+    if tag_only and (query != plan["version"] or not plan.get("source_evidence")):
+        raise ReleaseError("태그 설치 검증에는 승격 근거와 정확한 새 태그가 필요합니다")
+    if query == plan["version"] and resolved != query:
+        raise ReleaseError("공개 모듈이 요청한 태그를 가리키지 않습니다")
     suffix = ".exe" if os.name == "nt" else ""
     for name, path in ENTRYPOINTS.items():
         execute(["go", "install", path + "@" + query], work, env)
@@ -141,8 +163,17 @@ def verify(plan, query, work, env):
         build = execute(["go", "version", "-m", binary], work, env)
         if not any(line.split()[:3] == ["mod", MODULE, resolved] for line in build.splitlines()):
             raise ReleaseError("CLI 빌드 정보가 공개 모듈 버전과 다릅니다")
-        for command in ("schema", "capabilities"):
-            envelope(binary, [command], work, env)
+        if not tag_only:
+            for command in ("schema", "capabilities"):
+                envelope(binary, [command], work, env)
+    report = {"result": "passed", "source_sha": plan["source_sha"], "query": query,
+              "resolved_cli_version": resolved, "components": plan["components"],
+              "os": {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}[platform.system()],
+              "go_version": execute(["go", "version"], work, env), "entrypoints": list(ENTRYPOINTS),
+              "checks": ["public installation and build provenance"]}
+    if tag_only:
+        report["scope"] = "tag-install"
+        return report
     cli = str(Path(env["GOBIN"]) / ("spine" + suffix))
     recipe = plan["components"]["recipe"]
     cases = composition_cases(plan)
@@ -216,13 +247,9 @@ def verify(plan, query, work, env):
                 update = envelope(cli, ["update", "--root", str(app), "--dry-run"], work, env)
                 envelope(cli, ["update", "--root", str(app), "--if-match", update["base_hash"]], work, env)
                 assert_modules(module_graph(execute(["go", "list", "-m", "-json", "all"], app, env)), expected)
-    report = {"result": "passed", "source_sha": plan["source_sha"], "query": query,
-            "resolved_cli_version": resolved, "components": plan["components"],
-            "os": {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}[platform.system()],
-            "go_version": execute(["go", "version"], work, env), "entrypoints": list(ENTRYPOINTS),
-            "checks": ["public installation and build provenance", "two layouts and default HTTP composition",
-                       "default recipe and selected public modules", "dry-run/if-match and source-preserving update",
-                       "static contracts and generated tests", "HTTP health and listener release"]}
+    report["checks"].extend(["two layouts and default HTTP composition", "default recipe and selected public modules",
+                             "dry-run/if-match and source-preserving update", "static contracts and generated tests",
+                             "HTTP health and listener release"])
     if rc_cohort:
         report["rc_cohort"] = rc_cohort
         report["rc_combination_checks"] = ["echo-full", "nethttp-full"]
@@ -247,6 +274,8 @@ def main():
                    GOPROXY="https://proxy.golang.org,direct", GOSUMDB="sum.golang.org",
                    GOBIN=str(work/"bin"), GOCACHE=str(work/"build-cache"), GOMODCACHE=str(work/"mod-cache"))
         Path(env["GOBIN"]).mkdir()
+        if args.query == plan["version"]:
+            wait_for_public_tag(MODULE, args.query, work, env)
         report = verify(plan, args.query, work, env)
     Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

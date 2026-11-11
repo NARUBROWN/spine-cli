@@ -9,6 +9,9 @@ on:
       channel:
         type: string
         required: false
+      reuse_common:
+        type: boolean
+        default: false
     outputs:
       verified_sha:
         value: ${{ jobs.verified.outputs.sha }}
@@ -24,7 +27,28 @@ permissions:
 env:
   GOWORK: 'off'
 jobs:
+  source:
+    name: Check for previously verified source
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      reuse_common: ${{ inputs.reuse_common || steps.promotion.outputs.candidate != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: ${{ !inputs.ref && (github.base_ref == 'rc' || github.base_ref == 'main' || github.ref_name == 'rc' || github.ref_name == 'main') }}
+        with:
+          persist-credentials: false
+      - name: Verify the previous candidate
+        if: ${{ !inputs.ref && (github.base_ref == 'rc' || github.base_ref == 'main' || github.ref_name == 'rc' || github.ref_name == 'main') }}
+        id: promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/release.py check-promotion-ci
   policy:
+    needs: source
+    if: needs.source.outputs.reuse_common != 'true'
     name: Release Policy
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +72,8 @@ jobs:
       - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - run: actionlint -shellcheck= -pyflakes=
   portable:
+    needs: source
+    if: needs.source.outputs.reuse_common != 'true'
     name: Portable CLI (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -68,6 +94,8 @@ jobs:
       - if: runner.os != 'Windows'
         run: go test ./internal/cli -run '^(TestRunAndDevGracefulShutdown|TestGeneratedHTTPShutdownDrainsRequests|TestDevRuntimeLifecycleEndToEnd)$' -count=1 -timeout=5m
   public-platforms:
+    needs: source
+    if: needs.source.outputs.reuse_common != 'true'
     name: Public Platforms and Full Regression
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -140,6 +168,8 @@ jobs:
         run: |
           echo "Extended public adapter regression: $REGRESSION_OUTCOME. Optional, see job log and artifact for details." >> "$GITHUB_STEP_SUMMARY"
   core-regression:
+    needs: source
+    if: needs.source.outputs.reuse_common != 'true'
     name: Required Core Regression
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -236,19 +266,25 @@ jobs:
     name: ${{ github.event_name == 'pull_request' && format('Verified Source / {0}', github.base_ref) || 'Verified Source' }}
     runs-on: ubuntu-latest
     if: ${{ always() }}
-    needs: [policy, portable, core-regression, public-platforms, live-composition, optional-composition]
+    needs: [source, policy, portable, core-regression, public-platforms, live-composition, optional-composition]
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
       - id: source
         env:
           RESULTS: ${{ toJSON(needs) }}
+          REUSE_COMMON: ${{ needs.source.outputs.reuse_common }}
           SOURCE_SHA: ${{ inputs.ref || github.sha }}
         run: |
           python3 - <<'PY'
           import json, os
-          if any(j['result'] != 'success' for j in json.loads(os.environ['RESULTS']).values()):
-              raise SystemExit('필수 검사가 모두 성공해야 합니다')
+          jobs = json.loads(os.environ['RESULTS'])
+          reuse_common = os.environ['REUSE_COMMON'] == 'true'
+          common = {'policy', 'portable', 'core-regression', 'public-platforms'}
+          for name, job in jobs.items():
+              expected = 'skipped' if reuse_common and name in common else 'success'
+              if job['result'] != expected:
+                  raise SystemExit(f'검사 {name}의 결과가 예상과 다릅니다: {job["result"]}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('sha=' + os.environ['SOURCE_SHA'] + '\n')
           PY
