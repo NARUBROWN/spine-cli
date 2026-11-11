@@ -193,6 +193,8 @@ type Date = clock.Time
 type Other = external.SomeType
 type Inner struct { Upload *File `+"`form:\"upload\"`"+` }
 type Form struct { Inner Inner }
+type RequiredFile struct { Upload *File `+"`form:\"upload\" validate:\"required\"`"+` }
+type RequiredForm struct { Name string `+"`form:\"name\" json:\"-\" xml:\"-\" validate:\"required\"`"+` }
 type Unknown struct { Other external.SomeType }
 type AliasUnknown struct { Other Other }
 type JSONPayload struct { Created clock.Time; Another Date; Duration clock.Duration; IP net.IP; Raw json.RawMessage }
@@ -205,33 +207,43 @@ type ExternalFile struct { Upload []external.File `+"`form:\"file\"`"+` }
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, known, unresolved := catalog.staticFormContent("*Form", "formtypes.go")
+	content, known, unresolved := catalog.staticFormContent("*Form", "formtypes.go", true)
 	if !known || unresolved {
 		t.Fatalf("nested form unresolved: %#v", content)
 	}
 	media := content["multipart/form-data"].(map[string]any)
 	schema := media["schema"].(map[string]any)
 	upload := schema["properties"].(map[string]any)["upload"].(map[string]any)
-	if upload["format"] != "binary" || content["application/json"] != nil {
-		t.Fatalf("wrong file form: %#v", content)
+	encoded := content["application/x-www-form-urlencoded"].(map[string]any)
+	encodedProperties := encoded["schema"].(map[string]any)["properties"].(map[string]any)
+	if upload["format"] != "binary" || encodedProperties["upload"] != nil || content["application/json"] == nil || content["application/xml"] == nil {
+		t.Fatalf("wrong optional file form: %#v", content)
 	}
-	_, known, unresolved = catalog.staticFormContent("*Unknown", "formtypes.go")
+	content, known, unresolved = catalog.staticFormContent("RequiredFile", "formtypes.go", true)
+	if !known || unresolved || len(content) != 1 || content["multipart/form-data"] == nil {
+		t.Fatalf("wrong required file form: %#v", content)
+	}
+	content, known, unresolved = catalog.staticFormContent("RequiredForm", "formtypes.go", true)
+	if !known || unresolved || len(content) != 2 || content["multipart/form-data"] == nil || content["application/x-www-form-urlencoded"] == nil {
+		t.Fatalf("wrong required form media: %#v", content)
+	}
+	_, known, unresolved = catalog.staticFormContent("*Unknown", "formtypes.go", true)
 	if known || !unresolved {
 		t.Fatal("unknown embedded fields were treated as resolved")
 	}
-	_, known, unresolved = catalog.staticFormContent("*AliasUnknown", "formtypes.go")
+	_, known, unresolved = catalog.staticFormContent("*AliasUnknown", "formtypes.go", true)
 	if known || !unresolved {
 		t.Fatal("unknown external alias was treated as resolved")
 	}
-	_, known, unresolved = catalog.staticFormContent("*JSONPayload", "formtypes.go")
+	_, known, unresolved = catalog.staticFormContent("*JSONPayload", "formtypes.go", true)
 	if known || unresolved {
 		t.Fatal("known standard JSON fields were treated as an unknown form")
 	}
-	_, known, unresolved = catalog.staticFormContent("*Encoded", "formtypes.go")
+	_, known, unresolved = catalog.staticFormContent("*Encoded", "formtypes.go", true)
 	if known || !unresolved {
 		t.Fatal("custom text decoder was treated as a known wire type")
 	}
-	_, known, unresolved = catalog.staticFormContent("*ExternalFile", "formtypes.go")
+	_, known, unresolved = catalog.staticFormContent("*ExternalFile", "formtypes.go", true)
 	if known || !unresolved {
 		t.Fatal("unknown array element was treated as a known wire type")
 	}

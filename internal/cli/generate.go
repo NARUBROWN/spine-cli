@@ -179,8 +179,8 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 			fmt.Fprintln(errOut, "websocket generation supports --path and --field, not --storage or --topic")
 			return 1
 		}
-		if !strings.HasPrefix(socketPath, "/") {
-			fmt.Fprintln(errOut, "websocket generation requires --path beginning with /")
+		if !validWebSocketPath(socketPath) {
+			fmt.Fprintln(errOut, "websocket generation requires an absolute static --path")
 			return 1
 		}
 		if err := validateMessageFields(sliceFields); err != nil {

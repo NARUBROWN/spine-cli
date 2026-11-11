@@ -58,3 +58,50 @@ func(c *UserController) RegisterRoutes(r *api.Registry) {
 		t.Fatalf("text response described as JSON: %s", encoded)
 	}
 }
+
+func TestGenericHTTPAliasesAndResponsePayload(t *testing.T) {
+	inspector := controllerFixture(t, `type Query[T any] = input.Query[T]
+type Response[T any] = httpx.Response[T]
+type QueryDTO struct { Text string }
+type Reply[T any] struct { Value T }
+func(c *UserController) RegisterRoutes(r *api.Registry) {
+	r.GET("/generic", func(q Query[QueryDTO]) Response[Reply[string]] { return Response[Reply[string]]{} })
+}`)
+	inspector.contract.HTTPAdapter.SelectedModules[0].Version = "v0.7.5-preview.1"
+	inspector.inspectControllerRoutes()
+	inspector.resolveHandlerSignatures()
+	if contractHasErrors(*inspector.contract) {
+		t.Fatalf("valid generic handler rejected: %+v", inspector.contract.Diagnostics)
+	}
+	route := inspector.contract.HTTP[0]
+	if got := route.Parameters[0]; got.Binding != "query" || len(got.InputFields) != 1 || got.InputFields[0].Name != "text" {
+		t.Fatalf("wrong query binding: %+v", got)
+	}
+}
+
+func TestStaticWebSocketMatchesCorePathAndReturnContracts(t *testing.T) {
+	inspector := controllerFixture(t, `
+func (*UserController) RegisterRoutes(*api.Registry) {}
+type SocketError struct{}
+func (*SocketError) Error() string { return "socket error" }
+func (*UserController) Invalid() string { return "" }
+func (*UserController) Valid() *SocketError { return nil }
+`)
+	inspector.contract.HTTPAdapter.SelectedModules[0].Version = "v0.7.5-preview.1"
+	inspector.contract.WebSockets = []namedRegistration{
+		{Name: "/ws/:id", Handler: "(*example.com/typed.UserController).Valid"},
+		{Name: "/ws/invalid", Handler: "(*example.com/typed.UserController).Invalid"},
+		{Name: "/ws/valid", Handler: "(*example.com/typed.UserController).Valid"},
+	}
+	inspector.inspectControllerRoutes()
+	inspector.resolveHandlerSignatures()
+	counts := map[string]int{}
+	for _, diagnostic := range inspector.contract.Diagnostics {
+		if diagnostic.Severity == "error" {
+			counts[diagnostic.Code]++
+		}
+	}
+	if len(counts) != 2 || counts["WEBSOCKET_PATH_INVALID"] != 1 || counts["WEBSOCKET_RETURN_UNSUPPORTED"] != 1 {
+		t.Fatalf("wrong WebSocket diagnostics: %+v", inspector.contract.Diagnostics)
+	}
+}

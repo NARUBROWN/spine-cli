@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -261,6 +262,12 @@ func (catalog *apiSchemas) response(returns []string, sourcePath string) (string
 }
 
 func (catalog *apiSchemas) responseContent(expression ast.Expr, source *layoutSource, seen map[string]bool) (string, map[string]any, bool) {
+	if body := catalog.bindings.instantiatedResponseBody(source, expression); body != nil {
+		if types.Identical(body, types.Typ[types.String]) {
+			return "text/plain", map[string]any{"type": "string"}, true
+		}
+		return "application/json", catalog.schema(catalog.bindings.httpTypeText(source, body), source.Path), true
+	}
 	key := canonicalType(source, expression, catalog.module)
 	if declaration, exists := catalog.declarations[key]; exists && declaration.spec.Assign.IsValid() && !seen[key] {
 		seen[key] = true

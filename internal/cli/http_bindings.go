@@ -29,6 +29,19 @@ func httpTypeUseAt(fset *token.FileSet, expression ast.Expr) httpTypeUse {
 	return httpTypeUse{path, expressionText(fset, expression)}
 }
 
+func (catalog *httpBindingCatalog) instantiatedHTTPType(source *layoutSource, expression ast.Expr) *types.Named {
+	path, err := filepath.Abs(source.Path)
+	if err != nil {
+		return nil
+	}
+	value := catalog.instances[httpTypeUse{path, expressionText(source.Fset, expression)}]
+	if value == nil {
+		return nil
+	}
+	named, _ := types.Unalias(value).(*types.Named)
+	return named
+}
+
 func (i *contractInspector) configureHTTPBindings(catalog *httpBindingCatalog) {
 	for key, declaration := range i.controllerTypes {
 		catalog.types[key] = declaration
@@ -227,6 +240,9 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 		if marker, ok := catalog.markerShape(source, node, visiting); ok {
 			return marker
 		}
+		if marker, ok := catalog.inputAlias(source, expression, visiting); ok {
+			return marker
+		}
 		return httpBindingShape{kind: "unknown"}
 	case *ast.ParenExpr:
 		return catalog.shape(source, node.X, visiting)
@@ -268,7 +284,12 @@ func (catalog *httpBindingCatalog) shape(source *layoutSource, expression ast.Ex
 			return httpBindingShape{kind: "scalar"}
 		}
 		return httpBindingShape{kind: "unknown"}
-	case *ast.SelectorExpr, *ast.IndexListExpr:
+	case *ast.SelectorExpr:
+		return httpBindingShape{kind: "unknown"}
+	case *ast.IndexListExpr:
+		if marker, ok := catalog.inputAlias(source, expression, visiting); ok {
+			return marker
+		}
 		return httpBindingShape{kind: "unknown"}
 	default:
 		return httpBindingShape{kind: "unsupported"}

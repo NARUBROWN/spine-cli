@@ -122,6 +122,7 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
+	catalog.bindings.instances = contract.httpInstances
 	paths := map[string]any{}
 	for _, route := range contract.HTTP {
 		openAPIPath := openAPIPath(route.Path)
@@ -193,7 +194,8 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 				}
 				content := map[string]any{"application/json": map[string]any{"schema": catalog.schema(payload, source)}}
 				requestBody := map[string]any{"content": content}
-				form, ok, unresolved := catalog.staticFormContent(payload, source)
+				playground := contract.Validator.Provider == "playground" && contract.Validator.Resolution == "static-source"
+				form, ok, unresolved := catalog.staticFormContent(payload, source, playground)
 				if ok {
 					requestBody["content"] = form
 				}
@@ -201,7 +203,8 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 					requestBody["content"] = map[string]any{}
 					requestBody["x-spine-unresolved-content"] = true
 				}
-				if media := requestBody["content"].(map[string]any); media["application/json"] != nil {
+				if !ok && !unresolved {
+					media := requestBody["content"].(map[string]any)
 					xml := map[string]any{"schema": catalog.xmlSchema(payload, source)}
 					media["application/xml"], media["text/xml"] = xml, xml
 				}

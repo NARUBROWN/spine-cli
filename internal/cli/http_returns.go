@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"go/ast"
+	"go/types"
 )
 
 type httpReturnShape struct {
@@ -53,6 +54,12 @@ func (catalog *httpBindingCatalog) returnShape(source *layoutSource, expression 
 	}
 	if pointer, ok := expression.(*ast.StarExpr); ok {
 		return catalog.returnShape(source, pointer.X, pointers+1, visiting)
+	}
+	if body := catalog.instantiatedResponseBody(source, expression); body != nil {
+		if pointers > 1 || types.Identical(body.Underlying(), types.Typ[types.String]) && !types.Identical(body, types.Typ[types.String]) {
+			return httpReturnShape{kind: "unsupported"}
+		}
+		return httpReturnShape{kind: "response", nilable: pointers == 1}
 	}
 	key := canonicalType(source, expression, catalog.module)
 	if identifier, ok := expression.(*ast.Ident); ok {
@@ -319,4 +326,13 @@ func (catalog *httpBindingCatalog) errorReceiverKey(source *layoutSource, expres
 		return catalog.errorReceiverKey(declaration.source, declaration.spec.Type, visiting)
 	}
 	return key
+}
+
+func (catalog *httpBindingCatalog) instantiatedResponseBody(source *layoutSource, expression ast.Expr) types.Type {
+	response := catalog.instantiatedHTTPType(source, expression)
+	if response != nil && response.Obj().Pkg() != nil && response.Obj().Pkg().Path() == spineImportPath+"/pkg/httpx" &&
+		response.Obj().Name() == "Response" && response.TypeArgs().Len() == 1 {
+		return types.Unalias(response.TypeArgs().At(0))
+	}
+	return nil
 }
