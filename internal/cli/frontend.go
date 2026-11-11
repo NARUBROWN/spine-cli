@@ -170,6 +170,12 @@ func frontendSourceState(projectRoot string, config projectConfig) (string, bool
 		_, _ = digest.Write(contents)
 		_, _ = digest.Write([]byte{'\n'})
 	}
+	environment, err := readFrontendEnvFile(projectRoot)
+	if err != nil {
+		return "", true, err
+	}
+	fmt.Fprintf(digest, "\nproject.env:%d:", len(environment))
+	_, _ = digest.Write(environment)
 	return fmt.Sprintf("%x", digest.Sum(nil)), true, nil
 }
 
@@ -203,6 +209,9 @@ func newFrontendBuilderForSettings(settings frontendSettings, production bool) (
 		MinifyIdentifiers: production,
 		MinifySyntax:      production,
 		LegalComments:     api.LegalCommentsLinked,
+		Define:            map[string]string{"import.meta.env": "__spine_frontend_env"},
+		Inject:            []string{frontendEnvModule},
+		Plugins:           []api.Plugin{frontendEnvPlugin(projectRoot)},
 	}
 	switch settings.descriptor.JSX {
 	case "automatic":
