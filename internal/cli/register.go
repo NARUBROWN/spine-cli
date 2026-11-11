@@ -60,21 +60,41 @@ func prepareComponentWiring(kind string, name resourceName, directory, packageNa
 	importPath := module + "/" + filepath.ToSlash(directory)
 	alias := packageName
 	constructorName := "New" + name.Type + strings.ToUpper(kind[:1]) + kind[1:]
+	modernHTTP := kind == "controller" && requiresExplicitHTTPInputs(declaredSpineVersion())
 	statements := []ast.Stmt{}
-	if !hasComponentConstructor(function.Body, alias, constructorName, appName) {
+	factoryRegistered := hasComponentConstructor(function.Body, alias, constructorName, appName, nil)
+	if modernHTTP && factoryRegistered {
+		return nil, fmt.Errorf("migrate the existing %s registration to constructor.Controller before regenerating", constructorName)
+	}
+	registered := factoryRegistered
+	if modernHTTP {
+		registered = hasComponentConstructor(function.Body, alias, name.Type+"Controller", appName, importPathsByAlias(file))
+	}
+	if !registered {
 		if err := rejectDuplicateConstructorNames(constructorName); err != nil {
 			return nil, err
 		}
 		if err := addNamedImport(file, alias, importPath); err != nil {
 			return nil, err
 		}
+		var argument ast.Expr = &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(constructorName)}
+		if modernHTTP {
+			markerAlias := availableImportAlias(file, "constructor", constructorImportPath)
+			if err := addNamedImport(file, markerAlias, constructorImportPath); err != nil {
+				return nil, err
+			}
+			typ := &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name.Type + "Controller")}
+			argument = &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(markerAlias), Sel: ast.NewIdent("Controller")}, Args: []ast.Expr{
+				&ast.UnaryExpr{Op: token.AND, X: &ast.CompositeLit{Type: typ}},
+			}}
+		}
 		statements = append(statements, &ast.ExprStmt{X: &ast.CallExpr{
 			Fun:  &ast.SelectorExpr{X: ast.NewIdent(appName), Sel: ast.NewIdent("Constructor")},
-			Args: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(constructorName)}},
+			Args: []ast.Expr{argument},
 		}})
 	}
 	changes := []fileChange{}
-	if kind == "controller" {
+	if kind == "controller" && !modernHTTP {
 		routeChange, routeErr := prepareLayeredControllerRoute(name, module, directory, packageName)
 		if routeErr != nil {
 			return nil, routeErr
@@ -336,7 +356,7 @@ func isControllerGetHandler(expression ast.Expr, alias, controller string) bool 
 	return ok && packageName.Name == alias
 }
 
-func hasComponentConstructor(root ast.Node, alias, constructorName, appName string) bool {
+func hasComponentConstructor(root ast.Node, alias, constructorName, appName string, imports map[string]string) bool {
 	found := false
 	ast.Inspect(root, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
@@ -348,6 +368,18 @@ func hasComponentConstructor(root ast.Node, alias, constructorName, appName stri
 			return true
 		}
 		for _, argument := range call.Args {
+			if imports != nil {
+				role, value, _ := componentRoleArgument(argument, imports)
+				prototype, ok := value.(*ast.UnaryExpr)
+				if role != "Controller" || !ok || prototype.Op != token.AND {
+					continue
+				}
+				literal, ok := prototype.X.(*ast.CompositeLit)
+				if !ok {
+					continue
+				}
+				argument = literal.Type
+			}
 			constructor, selectorOK := argument.(*ast.SelectorExpr)
 			if !selectorOK {
 				continue

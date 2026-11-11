@@ -24,6 +24,7 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 	found := 0
 	var handlerSource *layoutSource
 	var handlerFunction *ast.FuncDecl
+	var controllerInspector *contractInspector
 	for _, s := range p.Sources {
 		if s.Package != dir {
 			continue
@@ -46,6 +47,19 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 				return fmt.Errorf("HTTP binding module selection: %w", err)
 			}
 			catalog := newHTTPBindingCatalog(p.Module, p.Sources, selectedModuleVersion(modules, spineImportPath))
+			if controllerRoutesProject() {
+				controllerInspector, err = inspectLayeredRegistrations(p.Config, p.Module, p.Sources)
+				if err != nil {
+					return err
+				}
+				controllerInspector.inspectControllerRoutes()
+				for key, declaration := range controllerInspector.controllerTypes {
+					catalog.types[key] = declaration
+				}
+				if err := checkPreviewStableControllerMethod(dir, name, method, p.Sources, selectedModuleVersion(modules, spineImportPath)); err != nil {
+					return err
+				}
+			}
 			params, diagnostics := catalog.parameters(s, f.Type.Params, r.Path, r.Handler)
 			diagnostics = append(diagnostics, catalog.returns(s, f.Type.Results, r.Handler)...)
 			for _, diagnostic := range diagnostics {
@@ -77,7 +91,7 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 		if dependency.Factory != name+".Constructor" {
 			return fmt.Errorf("controller %s requires a Constructor method for route collection; keep legacy factory routes registered with app.Route or migrate to a controller prototype", name)
 		}
-		if err = p.addControllerRoute(r, dir, name, method, handlerSource, handlerFunction); err != nil {
+		if err = p.addControllerRoute(controllerInspector, r, dir, name, method, handlerSource, handlerFunction); err != nil {
 			return err
 		}
 		return p.registerConstructorRole(dir, dependency.Factory, "Controller")

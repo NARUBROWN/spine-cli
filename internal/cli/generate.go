@@ -53,6 +53,12 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "unknown generator: %s\n", kind)
 		return 1
 	}
+	httpGenerator := kind == "resource" || kind == "slice" || kind == "controller"
+	if config, err := loadProjectConfig(); err == nil && config.Platform == "none" && httpGenerator {
+		fmt.Fprintln(errOut, "this generator requires an HTTP platform")
+		return 1
+	}
+	modernHTTP := httpGenerator && requiresExplicitHTTPInputs(declaredSpineVersion())
 	options := writeOptions{}
 	register, jsonOutput := true, false
 	storage := ""
@@ -205,7 +211,12 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 		if kind == "websocket" {
 			registrationName = socketPath
 		}
-		files = messageModuleFiles(kind, name, registrationName, sliceFields)
+		publicContext, contextErr := messageContext()
+		if contextErr != nil {
+			fmt.Fprintln(errOut, contextErr)
+			return 1
+		}
+		files = messageModuleFiles(kind, name, registrationName, sliceFields, publicContext)
 	} else {
 		packageName, packageErr := packageNameForDirectory(workingDirectory)
 		if packageErr != nil {
@@ -220,6 +231,16 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 			files[path] = standaloneServiceTemplate(name, packageName, dependencies)
 		case "repository":
 			files[path] = standaloneRepositoryTemplate(name, packageName, dependencies)
+		}
+	}
+	if modernHTTP {
+		for path, source := range files {
+			switch {
+			case strings.HasSuffix(path, "_controller.go"):
+				files[path] = legacyControllerRoutes(source, name, kind == "slice")
+			case strings.HasSuffix(path, "_route.go") || filepath.Base(path) == "module.go":
+				files[path] = legacyControllerModule(source, name)
+			}
 		}
 	}
 	for path, contents := range files {
@@ -347,6 +368,8 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(out, "Registered the %s contract %q in the application composition root.\n", kind, registrationName)
 	} else if kind == "consumer" || kind == "websocket" {
 		fmt.Fprintf(out, "Register the generated %s module from the application composition root.\n", kind)
+	} else if kind == "controller" && register && modernHTTP {
+		fmt.Fprintf(out, "Registered %sController with GET /%s/:id.\n", name.Type, name.Route)
 	} else if kind == "controller" && register {
 		fmt.Fprintf(out, "Registered New%sController and collected GET /%s/:id in src/route/route.go.\n", name.Type, name.Route)
 	} else if register {

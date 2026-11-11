@@ -576,8 +576,13 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 		}
 	}
 	if signature, ok := function.pkg.TypesInfo.TypeOf(call.Args[handlerIndex]).(*types.Signature); ok {
-		if err := checkControllerInputs(signature); err != nil {
+		coreVersion := selectedModuleVersion(s.inspector.contract.HTTPAdapter.SelectedModules, spineImportPath)
+		if err := checkControllerInputs(signature, coreVersion); err != nil {
 			s.inspector.controllerDiagnostic("HTTP_INPUT_CONTRACT_INVALID", err.Error(), source)
+			return
+		}
+		if err := checkControllerResponseCount(signature, coreVersion); err != nil {
+			s.inspector.controllerDiagnostic("HTTP_RETURN_UNSUPPORTED", err.Error(), source)
 			return
 		}
 	}

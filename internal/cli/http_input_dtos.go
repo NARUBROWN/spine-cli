@@ -18,7 +18,7 @@ type httpInputField struct {
 
 // 태그와 키만 정적으로 확인합니다. validator 규칙과 사용자 decoder는 실행하지 않습니다.
 func (catalog *httpBindingCatalog) inputStruct(source *layoutSource, node *ast.StructType, visiting map[string]bool) httpBindingShape {
-	fields, known := catalog.inputFields(source, node, visiting)
+	fields, known := catalog.inputFields(source, node, visiting, false)
 	if !known {
 		return httpBindingShape{kind: "unknown"}
 	}
@@ -77,7 +77,7 @@ func (catalog *httpBindingCatalog) inputStruct(source *layoutSource, node *ast.S
 	return shape
 }
 
-func (catalog *httpBindingCatalog) inputFields(source *layoutSource, node *ast.StructType, visiting map[string]bool) ([]httpInputField, bool) {
+func (catalog *httpBindingCatalog) inputFields(source *layoutSource, node *ast.StructType, visiting map[string]bool, body bool) ([]httpInputField, bool) {
 	var fields []httpInputField
 	for _, field := range node.Fields.List {
 		tags := reflect.StructTag("")
@@ -109,25 +109,40 @@ func (catalog *httpBindingCatalog) inputFields(source *layoutSource, node *ast.S
 			fields = append(fields, httpInputField{name: name, tags: tags, expression: field.Type, source: source})
 			continue
 		}
-		if key := canonicalType(source, field.Type, catalog.module); key != "" {
-			declaration, ok := catalog.types[key]
-			if ok && !visiting[key] {
-				if embedded, ok := declaration.spec.Type.(*ast.StructType); ok {
-					visiting[key] = true
-					flattened, known := catalog.inputFields(declaration.source, embedded, visiting)
-					delete(visiting, key)
-					if !known {
-						return nil, false
-					}
-					fields = append(fields, flattened...)
-					continue
-				}
-			}
+		flattened, known := catalog.embeddedInputFields(source, field.Type, visiting, body)
+		if !known {
+			return nil, false
 		}
-		// 외부 또는 재귀 임베딩의 입력 출처를 추측하지 않습니다.
-		return nil, false
+		fields = append(fields, flattened...)
 	}
 	return fields, true
+}
+
+// Body는 JSON과 XML 디코더가 지원하는 익명 포인터를 따라갑니다.
+// 다른 입력 출처의 익명 포인터 제한은 그대로 유지합니다.
+func (catalog *httpBindingCatalog) embeddedInputFields(source *layoutSource, expression ast.Expr, visiting map[string]bool, body bool) ([]httpInputField, bool) {
+	switch node := expression.(type) {
+	case *ast.ParenExpr:
+		return catalog.embeddedInputFields(source, node.X, visiting, body)
+	case *ast.StarExpr:
+		if body {
+			return catalog.embeddedInputFields(source, node.X, visiting, body)
+		}
+		return nil, false
+	case *ast.StructType:
+		return catalog.inputFields(source, node, visiting, body)
+	}
+	key := canonicalType(source, expression, catalog.module)
+	declaration, known := catalog.types[key]
+	if !known {
+		return nil, false
+	}
+	if visiting[key] {
+		return nil, body
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+	return catalog.embeddedInputFields(declaration.source, declaration.spec.Type, visiting, body)
 }
 
 func embeddedHTTPFieldName(expression ast.Expr) string {
@@ -218,9 +233,18 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 func validateHTTPPathBindings(parameters []handlerParameter, path string) error {
 	declared := contractPathKeys(path)
 	bound := []string{}
+	scalars, legacy := 0, 0
+	pathDTO := false
 	for _, parameter := range parameters {
 		if parameter.Binding != "path" {
 			continue
+		}
+		if parameter.scalarPath {
+			scalars++
+		} else if parameter.SourceDTO {
+			pathDTO = true
+		} else {
+			legacy++
 		}
 		if parameter.SourceDTO {
 			bound = append(bound, parameter.Keys...)
@@ -228,11 +252,17 @@ func validateHTTPPathBindings(parameters []handlerParameter, path string) error 
 			bound = append(bound, parameter.Key)
 		}
 	}
-	if len(bound) != len(declared) {
+	if scalars > 0 && (pathDTO || legacy > 0) {
+		return fmt.Errorf("scalar path inputs cannot be mixed with path DTOs or deprecated path wrappers")
+	}
+	if scalars > 0 && scalars != len(declared) || legacy > len(declared) {
 		return fmt.Errorf("declares %d path keys but the handler binds %d", len(declared), len(bound))
 	}
 	seen := map[string]bool{}
 	for _, key := range declared {
+		if seen[key] {
+			return fmt.Errorf("route repeats path key %q", key)
+		}
 		seen[key] = true
 	}
 	for _, key := range bound {

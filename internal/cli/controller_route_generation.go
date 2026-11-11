@@ -8,12 +8,7 @@ import (
 )
 
 // addControllerRoute는 사용자 메서드를 재작성하지 않고 컨트롤러 안에 콜백을 추가합니다.
-func (p *layeredPlanner) addControllerRoute(request layeredRequest, directory, typeName, method string, source *layoutSource, handler *ast.FuncDecl) error {
-	inspector, err := inspectLayeredRegistrations(p.Config, p.Module, p.Sources)
-	if err != nil {
-		return err
-	}
-	inspector.inspectControllerRoutes()
+func (p *layeredPlanner) addControllerRoute(inspector *contractInspector, request layeredRequest, directory, typeName, method string, source *layoutSource, handler *ast.FuncDecl) error {
 	for _, diagnostic := range inspector.contract.Diagnostics {
 		if diagnostic.Severity == "error" {
 			return fmt.Errorf("%s: %s", diagnostic.Code, diagnostic.Message)

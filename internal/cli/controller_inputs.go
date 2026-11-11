@@ -41,7 +41,7 @@ func (catalog *httpBindingCatalog) markerShape(source *layoutSource, node *ast.I
 		}
 		return httpBindingShape{kind: "unsupported", problem: "input." + marker + " requires a concrete struct payload"}, true
 	}
-	fields, known := catalog.inputFields(payloadSource, structure, visiting)
+	fields, known := catalog.inputFields(payloadSource, structure, visiting, binding == "body")
 	if !known {
 		return httpBindingShape{kind: "unknown", problem: "Cannot resolve embedded input fields"}, true
 	}

@@ -130,6 +130,7 @@ func assemblyGoMod(options newProjectOptions) string {
 
 func assemblyApplication(options newProjectOptions) (string, error) {
 	var source strings.Builder
+	modernLegacy := options.Layout == "legacy" && requiresExplicitHTTPInputs(selectedModuleVersion(options.Modules, spineImportPath))
 	source.WriteString("package application\n\nimport (\n\"github.com/NARUBROWN/spine\"\n\"github.com/NARUBROWN/spine/pkg/boot\"\n")
 	if options.Platform != "" && options.Platform != "none" {
 		source.WriteString("\"os\"\n")
@@ -144,6 +145,9 @@ func assemblyApplication(options newProjectOptions) (string, error) {
 			}
 		} else {
 			source.WriteString("\"github.com/NARUBROWN/spine/pkg/httpx\"\n")
+			if modernLegacy {
+				source.WriteString("\"github.com/NARUBROWN/spine/pkg/api\"\n\"github.com/NARUBROWN/spine/pkg/constructor\"\n")
+			}
 		}
 	}
 	if options.WebSocketPlatform != "" && options.WebSocketPlatform != "none" {
@@ -176,6 +180,10 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
  return httpx.Response[map[string]string]{Body: map[string]string{"status":"ok"}}
 }
 `)
+		if modernLegacy {
+			source.WriteString("func (*HealthController) Constructor() *HealthController { return NewHealthController() }\n")
+			source.WriteString("func (c *HealthController) RegisterRoutes(r *api.Registry) { r.GET(\"/health\", c.Get) }\n")
+		}
 	}
 	source.WriteString("// BuildApplication은 플랫폼 설정을 검사하고 생성자와 수신 계약을 하나의 App에 연결합니다.\nfunc BuildApplication() (spine.App, boot.Options, error) {\n")
 	for index, spec := range options.Events {
@@ -222,6 +230,8 @@ func (*HealthController) Get() httpx.Response[map[string]string] {
 			if !controllerRoutesScaffold(options) {
 				source.WriteString("if err := route.Register(app); err != nil { return nil, boot.Options{}, err }\n")
 			}
+		} else if modernLegacy {
+			source.WriteString("app.Constructor(constructor.Controller(&HealthController{}))\n")
 		} else {
 			source.WriteString("app.Constructor(NewHealthController)\napp.Route(\"GET\",\"/health\",(*HealthController).Get)\n")
 		}

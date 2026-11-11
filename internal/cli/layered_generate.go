@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/mod/module"
 )
 
 type layeredRequest struct {
@@ -36,6 +38,12 @@ func parseLayeredRequest(args []string) (layeredRequest, error) {
 	r.Name, err = parseGenerationName(args[1])
 	if err != nil {
 		return r, err
+	}
+	// 메시지 모듈은 leaf도 패키지 디렉터리로 사용합니다.
+	if r.Kind == "consumer" || r.Kind == "websocket" {
+		if err := module.CheckImportPath(filepath.ToSlash(filepath.Join(r.Name.Group, r.Name.Name.Package))); err != nil {
+			return r, fmt.Errorf("invalid Go import path for generation %q: %w", args[1], err)
+		}
 	}
 	for i := 2; i < len(args); i++ {
 		switch args[i] {
@@ -94,7 +102,11 @@ func parseLayeredRequest(args []string) (layeredRequest, error) {
 			return r, fmt.Errorf("route generation requires registration")
 		}
 		switch r.Method {
-		case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE":
+		case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS":
+		case "CONNECT", "TRACE":
+			if controllerRoutesProject() {
+				return r, fmt.Errorf("%s route generation is unsupported by the selected core's api.Registry", r.Method)
+			}
 		default:
 			return r, fmt.Errorf("route requires a supported --method")
 		}
@@ -413,7 +425,11 @@ func (p *layeredPlanner) addMessageModule(r layeredRequest) error {
 	if r.Kind == "websocket" {
 		registration = r.Path
 	}
-	files := messageModuleFiles(r.Kind, r.Name.Name, registration, r.Fields)
+	publicContext, err := messageContext()
+	if err != nil {
+		return err
+	}
+	files := messageModuleFiles(r.Kind, r.Name.Name, registration, r.Fields, publicContext)
 	directory := filepath.ToSlash(filepath.Join("src", r.Kind, r.Name.Group, r.Name.Name.Package))
 	if _, _, err := roleTarget(generationRole{Root: "src/" + r.Kind}, generationName{Group: filepath.ToSlash(filepath.Join(r.Name.Group, r.Name.Name.Package))}); err != nil {
 		return err
