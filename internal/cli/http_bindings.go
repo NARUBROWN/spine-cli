@@ -6,6 +6,7 @@ import (
 	"go/build"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 
 	"golang.org/x/mod/semver"
@@ -16,7 +17,27 @@ type httpTypeDeclaration struct {
 	spec   *ast.TypeSpec
 }
 
+type httpTypeUse struct {
+	path, expression string
+}
+
+func httpTypeUseAt(fset *token.FileSet, expression ast.Expr) httpTypeUse {
+	path := fset.Position(expression.Pos()).Filename
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = absolute
+	}
+	return httpTypeUse{path, expressionText(fset, expression)}
+}
+
+func (i *contractInspector) configureHTTPBindings(catalog *httpBindingCatalog) {
+	for key, declaration := range i.controllerTypes {
+		catalog.types[key] = declaration
+	}
+	catalog.instances = i.controllerInstances
+}
+
 type httpBindingCatalog struct {
+	instances                map[httpTypeUse]types.Type
 	module                   string
 	types                    map[string]httpTypeDeclaration
 	errorMethods             map[string]bool

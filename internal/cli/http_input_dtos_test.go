@@ -113,7 +113,13 @@ func TestUploadedFilesDeprecationPreservesBodyCompatibility(t *testing.T) {
 			}
 			found := false
 			for _, diagnostic := range contract.Diagnostics {
+				if strings.Contains(diagnostic.Hint, "core.HttpRequestContext") {
+					t.Fatalf("삭제된 내부 API를 권장하면 안 됩니다: %+v", diagnostic)
+				}
 				if diagnostic.Code == "HTTP_INPUT_API_DEPRECATED" && strings.Contains(diagnostic.Hint, "input.Body") {
+					if !strings.Contains(diagnostic.Hint, "ctx.HTTPRequestContext()") || !strings.Contains(diagnostic.Hint, "boolean") {
+						t.Fatalf("지원 여부를 확인하는 요청 뷰 경로를 안내해야 합니다: %+v", diagnostic)
+					}
 					found = true
 				}
 			}

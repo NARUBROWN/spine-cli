@@ -7,6 +7,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io"
 	"os"
 	"path/filepath"
@@ -129,12 +130,15 @@ type contractDiagnostic struct {
 }
 
 type contractInspector struct {
-	contract           *applicationContract
-	module             string
-	seen               map[string]bool
-	qualified          bool
-	sources            layoutSources
-	controllerHandlers map[string]staticHandlerSignature
+	contract            *applicationContract
+	module              string
+	seen                map[string]bool
+	qualified           bool
+	sources             layoutSources
+	controllerHandlers  map[string]staticHandlerSignature
+	controllerTypes     map[string]httpTypeDeclaration
+	controllerMethods   map[string]*types.Signature
+	controllerInstances map[httpTypeUse]types.Type
 }
 
 func inspectApplication() (applicationContract, error) {
@@ -619,6 +623,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 
 	bindings := newHTTPBindingCatalog(i.module, handlerSources, selectedModuleVersion(i.contract.HTTPAdapter.SelectedModules, spineImportPath))
 	bindings.inspectSelectedCore(i.contract.HTTPAdapter.SelectedModules)
+	i.configureHTTPBindings(bindings)
 	for index := range i.contract.HTTP {
 		route := &i.contract.HTTP[index]
 		matches := signatures[route.Handler]
@@ -655,7 +660,8 @@ func (i *contractInspector) resolveHandlerSignatures() {
 			}
 			i.contract.Diagnostics = append(i.contract.Diagnostics, diagnostics...)
 			route.Returns = matches[0].returns
-			i.contract.Diagnostics = append(i.contract.Diagnostics, bindings.returns(matches[0].httpSource, matches[0].httpResults, route.Handler)...)
+			_, registryCallback := i.controllerHandlers[route.Handler]
+			i.contract.Diagnostics = append(i.contract.Diagnostics, bindings.returns(matches[0].httpSource, matches[0].httpResults, route.Handler, registryCallback)...)
 			if err := validateHTTPPathBindings(route.Parameters, route.Path); err != nil {
 				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "HTTP_PATH_BINDING_MISMATCH", Message: fmt.Sprintf("route %s %s: %v", route.Method, route.Path, err), Source: route.Source})
 			}

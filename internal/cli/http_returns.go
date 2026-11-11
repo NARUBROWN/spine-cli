@@ -11,14 +11,15 @@ type httpReturnShape struct {
 }
 
 // 기본 반환 핸들러는 오류를 먼저 처리한 뒤 첫 번째 nil이 아닌 성공 값을 사용합니다.
-func (catalog *httpBindingCatalog) returns(source *layoutSource, fields *ast.FieldList, handler string) []contractDiagnostic {
+func (catalog *httpBindingCatalog) returns(source *layoutSource, fields *ast.FieldList, handler string, strict ...bool) []contractDiagnostic {
 	if fields == nil {
 		return nil
 	}
+	checkAll := len(strict) > 0 && strict[0]
 	shapes := make([]httpReturnShape, len(fields.List))
 	for index, field := range fields.List {
 		shapes[index] = catalog.returnShape(source, field.Type, 0, map[string]bool{})
-		if shapes[index].kind == "error" && !shapes[index].nilable {
+		if !checkAll && shapes[index].kind == "error" && !shapes[index].nilable {
 			return nil
 		}
 	}
@@ -29,7 +30,7 @@ func (catalog *httpBindingCatalog) returns(source *layoutSource, fields *ast.Fie
 			continue
 		}
 		if shape.kind == "response" {
-			if !shape.nilable {
+			if !checkAll && !shape.nilable {
 				break
 			}
 			continue
@@ -56,9 +57,28 @@ func (catalog *httpBindingCatalog) returnShape(source *layoutSource, expression 
 	key := canonicalType(source, expression, catalog.module)
 	if identifier, ok := expression.(*ast.Ident); ok {
 		local := modulePackage(catalog.module, source.Package) + ":" + identifier.Name
+		if source.ImportPath != "" {
+			local = source.ImportPath + ":" + identifier.Name
+		}
 		if _, exists := catalog.types[local]; exists {
 			key = local
 		}
+	}
+	// 공개 반환 타입은 의존 패키지의 선언을 읽었어도 고유한 런타임 계약으로 판정합니다.
+	if key == "error" && pointers == 0 {
+		return httpReturnShape{kind: "error", nilable: true}
+	}
+	if key == spineImportPath+"/pkg/httperr:HTTPError" {
+		if pointers == 1 {
+			return httpReturnShape{kind: "error", nilable: true}
+		}
+		return httpReturnShape{kind: "unsupported"}
+	}
+	if key == spineImportPath+"/pkg/httpx:Binary" || key == spineImportPath+"/pkg/httpx:Redirect" {
+		if pointers <= 1 {
+			return httpReturnShape{kind: "response", nilable: pointers == 1}
+		}
+		return httpReturnShape{kind: "unsupported"}
 	}
 	if declaration, ok := catalog.types[key]; ok {
 		if visiting[key] || declaration.spec.TypeParams != nil {
@@ -102,21 +122,6 @@ func (catalog *httpBindingCatalog) returnShape(source *layoutSource, expression 
 		}
 		// 새로 정의한 타입은 원래 httpx 타입의 런타임 식별자를 유지하지 않습니다.
 		return httpReturnShape{kind: "unsupported", nilable: pointers > 0}
-	}
-	if key == "error" && pointers == 0 {
-		return httpReturnShape{kind: "error", nilable: true}
-	}
-	if key == spineImportPath+"/pkg/httperr:HTTPError" {
-		if pointers == 1 {
-			return httpReturnShape{kind: "error", nilable: true}
-		}
-		return httpReturnShape{kind: "unsupported"}
-	}
-	if key == spineImportPath+"/pkg/httpx:Binary" || key == spineImportPath+"/pkg/httpx:Redirect" {
-		if pointers <= 1 {
-			return httpReturnShape{kind: "response", nilable: pointers == 1}
-		}
-		return httpReturnShape{kind: "unsupported"}
 	}
 	if instance, ok := expression.(*ast.IndexExpr); ok && canonicalType(source, instance.X, catalog.module) == spineImportPath+"/pkg/httpx:Response" {
 		if pointers > 1 {

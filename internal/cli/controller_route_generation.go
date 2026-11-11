@@ -8,12 +8,7 @@ import (
 )
 
 // addControllerRoute는 사용자 메서드를 재작성하지 않고 컨트롤러 안에 콜백을 추가합니다.
-func (p *layeredPlanner) addControllerRoute(request layeredRequest, directory, typeName, method string, source *layoutSource, handler *ast.FuncDecl) error {
-	inspector, err := inspectLayeredRegistrations(p.Config, p.Module, p.Sources)
-	if err != nil {
-		return err
-	}
-	inspector.inspectControllerRoutes()
+func (p *layeredPlanner) addControllerRoute(inspector *contractInspector, request layeredRequest, directory, typeName, method string, source *layoutSource, handler *ast.FuncDecl) error {
 	for _, diagnostic := range inspector.contract.Diagnostics {
 		if diagnostic.Severity == "error" {
 			return fmt.Errorf("%s: %s", diagnostic.Code, diagnostic.Message)
@@ -60,6 +55,7 @@ func (p *layeredPlanner) addControllerRoute(request layeredRequest, directory, t
 	// 서로 다른 파일의 import 별칭은 타입 표현식을 원래 파일 기준으로 변환합니다.
 
 	catalog := newHTTPBindingCatalog(p.Module, p.Sources, controllerRoutesMinimum)
+	inspector.configureHTTPBindings(catalog)
 	var declarations, arguments []string
 	for _, field := range handler.Type.Params.List {
 		count := len(field.Names)
