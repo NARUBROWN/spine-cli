@@ -8,7 +8,7 @@ on:
         type: string
         required: true
       source_sha:
-        description: preview 브랜치 HEAD의 전체 40자리 커밋 SHA
+        description: 정책에 지정된 Preview 브랜치 HEAD의 전체 40자리 커밋 SHA
         type: string
         required: true
 permissions:

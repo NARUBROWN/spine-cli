@@ -36,8 +36,8 @@ type Date = clock.Time
 type JSONInput struct { Created clock.Time `+"`json:\"created\"`"+`; Modified Date `+"`json:\"modified\"`"+` }
 type InputProbe struct{}
 func NewInputProbe() *InputProbe { return &InputProbe{} }
-func (*InputProbe) Post(path *PathInput, query *QueryInput, header *HeaderInput, body input.Body[UploadInput]) error { return nil }
-func (*InputProbe) JSON(body *JSONInput) error { return nil }
+func (*InputProbe) Post(path input.Path[PathInput], query input.Query[QueryInput], header input.Header[HeaderInput], body input.Body[UploadInput]) error { return nil }
+func (*InputProbe) JSON(body input.Body[JSONInput]) error { return nil }
 `)
 	var docs []map[string]any
 	for _, mode := range []string{"static", "runtime"} {

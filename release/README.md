@@ -89,13 +89,21 @@ GITHUB_REPOSITORY=NARUBROWN/spine-cli python3 scripts/release/release.py check-e
 5. 세 OS에서 그 태그를 공개 설치하고 동일한 생성 검사를 실행합니다.
 6. 모두 성공하면 `release-manifest-<태그>` Actions artifact에 `release-manifest.json`을 저장합니다. Preview의 GitHub Release는 만들지 않습니다.
 
+### 핫픽스 Preview
+
+`hotfix_preview_branch`를 설정한 버전은 `release/vX.Y.Z-hotfix-preview`에서 `Publish Preview`를 실행합니다. `release-hotfix-preview` 승인 환경에 지정 리뷰어를 두고 이 브랜치만 허용합니다. 관리자 우회는 끕니다.
+
+핫픽스 Preview는 `rc_cohort`에 지정한 코어와 플랫폼 태그로 생성 앱을 검사합니다. `--channel rc`가 공개 RC 또는 더 높은 정식 버전을 선택하므로 각 모듈에 실제로 선택되는 태그를 지정합니다. RC로 올릴 때는 이 Preview의 매니페스트와 동일한 소스 트리를 사용합니다.
+
 GitHub 토큰이 만든 태그의 push 이벤트에 의존하지 않습니다. 태그 전후 검사는 재사용 워크플로를 직접 호출합니다. 발행 검증 작업 하나가 실패하면 뒤 단계는 실행하지 않습니다. Discord 알림 실패는 경고로 처리해 발행 검증을 계속합니다.
 
 ## RC와 Production 승격
 
 Preview 관찰을 마치면 검증한 후보를 `preview → rc` PR로 병합합니다. 후보가 merge commit의 두 번째 부모이며 소스 트리가 같은지 검사합니다. rc 브랜치에서 `Publish RC`를 실행하고 출처 Preview 태그와 새 RC 버전을 지정합니다. 같은 버전 계열의 공개 태그, 성공한 발행 워크플로와 Actions manifest가 필요합니다. RC도 태그와 Actions 검증 기록만 남깁니다.
 
-RC 관찰을 마치면 같은 방식으로 `rc → main` PR을 병합합니다. main에서 `Publish Stable`을 실행하고 출처 RC 태그를 지정합니다. 정식 버전은 RC에서 결정합니다. 각 단계에서 전체 검사, 세 OS의 공개 설치, 초안 검토와 환경 승인을 반복합니다. Production의 태그 설치 검증까지 성공하면 정식 GitHub Release를 만들고 manifest를 첨부합니다.
+RC 관찰을 마치면 같은 방식으로 `rc → main` PR을 병합합니다. main에서 `Publish Stable`을 실행하고 출처 RC 태그를 지정합니다. 정식 버전은 RC에서 결정합니다.
+
+Preview에서 전체 CI와 생성 앱을 검증합니다. RC 및 정식은 직전 후보의 소스 트리와 검증한 조합이 일치하면 전체 CI 결과를 재사용합니다. 각 승격에서 초안 검토와 환경 승인을 거치고, Linux, macOS와 Windows에서 새 태그로 두 CLI 진입점을 설치해 실제 버전을 확인합니다. 정식 설치 검증까지 성공하면 GitHub Release를 만들고 manifest를 첨부합니다.
 
 승격 검사는 출처 태그의 Actions artifact가 하나인지 확인하고 artifact ID로 내려받아 SHA-256을 검증합니다. 저장소, 버전, 브랜치, 소스 SHA와 트리, 실행 ID와 재실행 번호, 레시피, 세 OS의 검증 결과가 일치해야 합니다. 발행 워크플로 전체가 성공해야 승격할 수 있습니다. 출처 artifact의 ID와 해시도 승인 계획에 고정합니다.
 

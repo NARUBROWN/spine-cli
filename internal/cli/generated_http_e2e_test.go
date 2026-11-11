@@ -76,6 +76,13 @@ func (*Controller) Download() *httpx.Binary { return &httpx.Binary{ContentType:"
 func (*Controller) Redirect() httpx.Redirect { return httpx.Redirect{Location:"/health"} }
 
 `
+			if requiresExplicitHTTPInputs(selected) {
+				handlerSource = strings.Replace(handlerSource, `"github.com/NARUBROWN/spine/pkg/path"`, `"github.com/NARUBROWN/spine/pkg/input"`, 1)
+				handlerSource = strings.ReplaceAll(handlerSource, "req *Request", "req input.Body[Request]")
+				handlerSource = strings.ReplaceAll(handlerSource, "req *WrapperBody", "req input.Body[WrapperBody]")
+				handlerSource = strings.ReplaceAll(handlerSource, "id path.Int", "id input.Path[int64]")
+				handlerSource = strings.ReplaceAll(handlerSource, "id.Value", "*id")
+			}
 			handlerPath := filepath.Join(project, "handlers", "controller.go")
 			writeE2EFile(t, handlerPath, handlerSource)
 			if modern {

@@ -2,7 +2,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { evaluate } = require("./branch_flow.cjs");
+const { configuredHotfixPreviewBranch, evaluate } = require("./branch_flow.cjs");
 
 test("작업 브랜치의 허용 대상은 preview뿐입니다", () => {
   for (const head of ["feat/order", "fix/socket", "docs/release"]) {
@@ -27,6 +27,23 @@ test("fork의 채널 이름으로 승격 권한을 가장할 수 없습니다", 
       assert.equal(evaluate({ head, base, sameRepository: false }).allowed, base === "preview");
     }
   }
+});
+
+test("RC 정책이 지정한 같은 저장소의 핫픽스 Preview만 rc로 승격합니다", () => {
+  const head = "release/v0.4.4-hotfix-preview";
+  const policy = {
+    schema_version: "spine-cli.release-policy/v1",
+    next_version: "v0.4.4",
+    hotfix_preview_branch: head,
+  };
+  const hotfixPreviewBranch = configuredHotfixPreviewBranch(policy);
+  assert.equal(hotfixPreviewBranch, head);
+  assert.equal(configuredHotfixPreviewBranch({ ...policy, next_version: "v0.4.5" }), undefined);
+  assert.equal(configuredHotfixPreviewBranch({ ...policy, next_version: "v0.04.4" }), undefined);
+  assert.equal(evaluate({ head, base: "rc", sameRepository: true, hotfixPreviewBranch }).allowed, true);
+  assert.equal(evaluate({ head, base: "rc", sameRepository: false, hotfixPreviewBranch }).allowed, false);
+  assert.equal(evaluate({ head, base: "main", sameRepository: true, hotfixPreviewBranch }).allowed, false);
+  assert.equal(evaluate({ head, base: "rc", sameRepository: true }).allowed, false);
 });
 
 test("서로 다른 대상 브랜치의 필수 상태를 공유하지 않습니다", () => {
