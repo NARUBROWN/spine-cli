@@ -15,6 +15,7 @@ import (
 
 	validation "github.com/NARUBROWN/spine/contract/validator"
 	"github.com/NARUBROWN/spine/pkg/httpx"
+ "github.com/NARUBROWN/spine/pkg/input"
 	ws "github.com/NARUBROWN/spine/pkg/ws"
 	"github.com/gorilla/websocket"
 )
@@ -32,15 +33,15 @@ type panicDTO struct {
 }
 type validationController struct{ calls atomic.Int32 }
 
-func (c *validationController) JSON(dto *inputDTO) httpx.Response[string] {
+func (c *validationController) JSON(dto input.Body[inputDTO]) httpx.Response[string] {
 	c.calls.Add(1)
 	return httpx.Response[string]{Body: dto.Email}
 }
-func (c *validationController) Form(dto *formDTO) httpx.Response[string] {
+func (c *validationController) Form(dto input.Body[formDTO]) httpx.Response[string] {
 	c.calls.Add(1)
 	return httpx.Response[string]{Body: dto.Name}
 }
-func (c *validationController) Panic(*panicDTO) httpx.Response[string] {
+func (c *validationController) Panic(input.Body[panicDTO]) httpx.Response[string] {
 	c.calls.Add(1)
 	return httpx.Response[string]{Body: "unreachable"}
 }
