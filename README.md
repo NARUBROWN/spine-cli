@@ -39,6 +39,29 @@ curl http://localhost:8080/health
 
 기존 파일을 수정하는 생성 작업은 `--dry-run --json`으로 변경을 확인하고, 검토한 `base_hash`를 `--if-match`로 전달하세요. CLI 자체는 위의 `go install` 명령으로 갱신합니다.
 
+## React에서 루트 환경 변수 사용하기
+
+React CSR 통합은 `spine.toml`이 있는 루트의 `.env`에 선언한 변수를 프론트 빌드에 전달합니다.
+변수 이름에 접두사를 붙이거나 프론트 폴더에 `.env`를 복사할 필요가 없습니다.
+
+```dotenv
+# 프로젝트 루트의 .env
+API_URL=/api
+APP_NAME=Spine
+```
+
+```ts
+const apiURL = import.meta.env.API_URL
+```
+
+`.env`에 선언한 이름과 같은 실행 환경 변수가 있으면 그 값을 우선합니다. 값은 문자열이며,
+없는 변수는 `undefined`입니다. `.env`에 넣은 값은 프론트 번들에 포함되어 브라우저에 공개됩니다.
+
+`spine dev`는 루트 `.env`의 생성, 수정, 삭제를 감지해 프론트를 다시 빌드합니다. 페이지를
+새로고침하면 변경된 값을 읽습니다. `spine run`과 `spine build`는 빌드 시점의 값을 사용하므로
+배포 환경에서 값을 바꿨다면 다시 빌드해야 합니다. 읽는 파일은 루트 `.env` 하나이며,
+프론트 폴더의 `.env`와 모드별 `.env.*`는 읽지 않습니다. 서버의 `.env` 로딩은 앱에서 관리합니다.
+
 ## 더 보기
 
 - [플랫폼 연결](PLATFORMS.md)
