@@ -8,15 +8,29 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"golang.org/x/mod/semver"
 )
 
-func checkControllerReturns(signature *types.Signature) error {
+func previewStableHTTPContracts(coreVersion []string) bool {
+	return len(coreVersion) > 0 && semver.IsValid(coreVersion[0]) && semver.Compare(coreVersion[0], "v0.7.5-preview.1") >= 0
+}
+
+func checkControllerReturns(signature *types.Signature, coreVersion ...string) error {
+	firstResponse := -1
 	for i := 0; i < signature.Results().Len(); i++ {
 		t := types.Unalias(signature.Results().At(i).Type())
 		if pointer, ok := t.(*types.Pointer); ok {
 			t = types.Unalias(pointer.Elem())
 		}
 		response, ok := t.(*types.Named)
+		if previewStableHTTPContracts(coreVersion) && ok && response.Obj().Pkg() != nil && response.Obj().Pkg().Path() == spineImportPath+"/pkg/httpx" &&
+			(response.Obj().Name() == "Response" || response.Obj().Name() == "Binary" || response.Obj().Name() == "Redirect") {
+			if firstResponse >= 0 {
+				return fmt.Errorf("HTTP response contract: handler declares responses at return indexes %d and %d; return at most one HTTP response, optionally accompanied by an error", firstResponse, i)
+			}
+			firstResponse = i
+		}
 		if !ok || response.Obj().Pkg() == nil || response.Obj().Pkg().Path() != spineImportPath+"/pkg/httpx" ||
 			response.Obj().Name() != "Response" || response.TypeArgs().Len() != 1 {
 			continue

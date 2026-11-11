@@ -20,7 +20,11 @@ func TestMessageGeneratorsUseSelectedCoreContext(t *testing.T) {
 				if hasPublic {
 					writeE2EFile(t, filepath.Join(core, "pkg", "spine", "types.go"), "package spine\ntype Ctx interface { Get(string)(any,bool) }\n")
 				}
-				writeE2EFile(t, "go.mod", "module example.com/messages\ngo 1.25.0\nrequire "+spineImportPath+" v0.7.5-preview.1\nreplace "+spineImportPath+" => "+filepath.ToSlash(core)+"\n")
+				version := "v0.7.2-preview.3"
+				if hasPublic {
+					version = "v0.7.5-preview.1"
+				}
+				writeE2EFile(t, "go.mod", "module example.com/messages\ngo 1.25.0\nrequire "+spineImportPath+" "+version+"\nreplace "+spineImportPath+" => "+filepath.ToSlash(core)+"\n")
 				writeE2EFile(t, "spine.toml", "module = \"example.com/messages\"\nentrypoint = \".\"\ncomposition = \".\"\nlayout = \""+layout+"\"\nport = 8080\n")
 				public, err := messageContext()
 				if err != nil || public != hasPublic {
@@ -42,6 +46,24 @@ func TestMessageGeneratorsUseSelectedCoreContext(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestMessageContextDoesNotGenerateDeprecatedFallbackForModernCore(t *testing.T) {
+	for _, declaration := range []string{"", "var Ctx any"} {
+		t.Run(declaration, func(t *testing.T) {
+			inTempDir(t)
+			core := filepath.Join(t.TempDir(), "core")
+			if err := os.MkdirAll(filepath.Join(core, "pkg", "spine"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			writeE2EFile(t, filepath.Join(core, "go.mod"), "module "+spineImportPath+"\ngo 1.25.0\n")
+			writeE2EFile(t, filepath.Join(core, "pkg", "spine", "types.go"), "package spine\n"+declaration+"\n")
+			writeE2EFile(t, "go.mod", "module example.com/messages\ngo 1.25.0\nrequire "+spineImportPath+" v0.7.5-preview.1\nreplace "+spineImportPath+" => "+filepath.ToSlash(core)+"\n")
+			if _, err := messageContext(); err == nil || !strings.Contains(err.Error(), "requires pkg/spine.Ctx") {
+				t.Fatalf("modern core must fail instead of generating a deprecated context fallback: %v", err)
+			}
+		})
 	}
 }
 func assertMessageContext(t *testing.T, source string, public bool) {

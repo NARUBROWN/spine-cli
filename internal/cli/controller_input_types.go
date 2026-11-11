@@ -10,7 +10,7 @@ import (
 )
 
 // checkControllerInputs는 선택한 실제 Go 타입으로 새 입력의 구조와 필드 지원을 확인합니다.
-func checkControllerInputs(signature *types.Signature) error {
+func checkControllerInputs(signature *types.Signature, coreVersion ...string) error {
 	if signature.Variadic() {
 		return fmt.Errorf("variadic controller callbacks are unsupported")
 	}
@@ -37,6 +37,11 @@ func checkControllerInputs(signature *types.Signature) error {
 		if source == "Body" {
 			if err := checkControllerFormFields(structure, map[*types.Struct]bool{}); err != nil {
 				return err
+			}
+			if previewStableHTTPContracts(coreVersion) {
+				if err := checkControllerXMLBody(pointer.Elem()); err != nil {
+					return err
+				}
 			}
 			continue
 		}

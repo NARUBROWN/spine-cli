@@ -254,9 +254,18 @@ func (catalog *httpBindingCatalog) inputParameterDiagnostics(source *layoutSourc
 func validateHTTPPathBindings(parameters []handlerParameter, path string) error {
 	declared := contractPathKeys(path)
 	bound := []string{}
+	scalars, legacy := 0, 0
+	pathDTO := false
 	for _, parameter := range parameters {
 		if parameter.Binding != "path" {
 			continue
+		}
+		if parameter.scalarPath {
+			scalars++
+		} else if parameter.SourceDTO {
+			pathDTO = true
+		} else {
+			legacy++
 		}
 		if parameter.SourceDTO {
 			bound = append(bound, parameter.Keys...)
@@ -264,11 +273,17 @@ func validateHTTPPathBindings(parameters []handlerParameter, path string) error 
 			bound = append(bound, parameter.Key)
 		}
 	}
-	if len(bound) != len(declared) {
+	if scalars > 0 && (pathDTO || legacy > 0) {
+		return fmt.Errorf("scalar path inputs cannot be mixed with path DTOs or deprecated path wrappers")
+	}
+	if scalars > 0 && scalars != len(declared) || legacy > len(declared) {
 		return fmt.Errorf("declares %d path keys but the handler binds %d", len(declared), len(bound))
 	}
 	seen := map[string]bool{}
 	for _, key := range declared {
+		if seen[key] {
+			return fmt.Errorf("route repeats path key %q", key)
+		}
 		seen[key] = true
 	}
 	for _, key := range bound {

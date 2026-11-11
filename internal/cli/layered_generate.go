@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/mod/module"
 )
 
 type layeredRequest struct {
@@ -36,6 +38,12 @@ func parseLayeredRequest(args []string) (layeredRequest, error) {
 	r.Name, err = parseGenerationName(args[1])
 	if err != nil {
 		return r, err
+	}
+	// 메시지 모듈은 leaf도 패키지 디렉터리로 사용합니다.
+	if r.Kind == "consumer" || r.Kind == "websocket" {
+		if err := module.CheckImportPath(filepath.ToSlash(filepath.Join(r.Name.Group, r.Name.Name.Package))); err != nil {
+			return r, fmt.Errorf("invalid Go import path for generation %q: %w", args[1], err)
+		}
 	}
 	for i := 2; i < len(args); i++ {
 		switch args[i] {
@@ -94,7 +102,11 @@ func parseLayeredRequest(args []string) (layeredRequest, error) {
 			return r, fmt.Errorf("route generation requires registration")
 		}
 		switch r.Method {
-		case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE":
+		case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS":
+		case "CONNECT", "TRACE":
+			if controllerRoutesProject() {
+				return r, fmt.Errorf("%s route generation is unsupported by the selected core's api.Registry", r.Method)
+			}
 		default:
 			return r, fmt.Errorf("route requires a supported --method")
 		}

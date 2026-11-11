@@ -3,11 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
+	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 func validateMessageFields(fields []sliceField) error {
@@ -54,7 +57,12 @@ func messageContext() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("message context module selection: %w", err)
 	}
-	return modulesExportSpineContext(modules), nil
+	public := modulesExportSpineContext(modules)
+	version := selectedModuleVersion(modules, spineImportPath)
+	if !public && semver.IsValid(version) && semver.Compare(version, "v0.7.5-preview.1") >= 0 {
+		return false, fmt.Errorf("selected core %s requires pkg/spine.Ctx for message generation; check the selected module source or replace directive before regenerating", version)
+	}
+	return public, nil
 }
 
 func modulesExportSpineContext(modules []selectedModule) bool {
@@ -79,7 +87,11 @@ func modulesExportSpineContext(modules []selectedModule) bool {
 			if err != nil {
 				return false
 			}
-			if file.Scope.Lookup("Ctx") != nil {
+			object := file.Scope.Lookup("Ctx")
+			if object != nil {
+				if _, declaredType := object.Decl.(*ast.TypeSpec); !declaredType {
+					continue
+				}
 				return true
 			}
 		}

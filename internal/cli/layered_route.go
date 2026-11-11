@@ -61,10 +61,10 @@ func (p *layeredPlanner) addRoute(r layeredRequest) error {
 					signature = inspector.controllerMethods["("+receiver+")."+method]
 				}
 				if signature != nil {
-					if err := checkControllerInputs(signature); err != nil {
+					if err := checkControllerInputs(signature, selectedModuleVersion(modules, spineImportPath)); err != nil {
 						return fmt.Errorf("HTTP_INPUT_CONTRACT_INVALID: %s: %w", r.Handler, err)
 					}
-					if err := checkControllerReturns(signature); err != nil {
+					if err := checkControllerReturns(signature, selectedModuleVersion(modules, spineImportPath)); err != nil {
 						return fmt.Errorf("HTTP_RETURN_UNSUPPORTED: %s: %w", r.Handler, err)
 					}
 				}
