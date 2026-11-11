@@ -19,6 +19,7 @@ import (
  "github.com/NARUBROWN/spine/pkg/event/publish"
  "github.com/NARUBROWN/spine/pkg/httpx"
  "github.com/NARUBROWN/spine/pkg/input"
+ "github.com/NARUBROWN/spine/pkg/api"
  "github.com/nats-io/nats.go"
  "github.com/nats-io/nats.go/jetstream"
 )
@@ -31,6 +32,7 @@ type natsEvent struct { natsDTO; topic string }
 func(e natsEvent) Name() string {return e.topic}
 func(e natsEvent) OccurredAt() time.Time {return time.Now()}
 type natsController struct{handled atomic.Int32}
+func(c *natsController) RegisterRoutes(r *api.Registry) {r.POST("/orders",c.Emit)}
 func(c *natsController) Emit(ctx context.Context,body input.Body[natsDTO]) httpx.Response[string] {
  publish.Event(ctx,natsEvent{natsDTO:*body,topic:"order.created"})
  return httpx.Response[string]{Body:"accepted"}
@@ -69,7 +71,6 @@ func TestGeneratedNATSRuntime(t *testing.T) {
   listener,err:=net.Listen("tcp","127.0.0.1:0");if err!=nil{t.Fatal(err)}
   options.Address=listener.Addr().String();listener.Close()
   endpoint="http://"+options.Address
-  app.Route("POST","/orders",(*natsController).Emit)
  }
  options.EnableGracefulShutdown=true;options.ShutdownTimeout=3*time.Second
  runCtx,stop:=context.WithCancel(ctx)
