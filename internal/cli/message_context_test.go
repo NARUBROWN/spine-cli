@@ -20,7 +20,7 @@ func TestMessageGeneratorsUseSelectedCoreContext(t *testing.T) {
 				if hasPublic {
 					writeE2EFile(t, filepath.Join(core, "pkg", "spine", "types.go"), "package spine\ntype Ctx interface { Get(string)(any,bool) }\n")
 				}
-				writeE2EFile(t, "go.mod", "module example.com/messages\ngo 1.25.0\nrequire "+spineImportPath+" v0.7.2-preview.3\nreplace "+spineImportPath+" => "+filepath.ToSlash(core)+"\n")
+				writeE2EFile(t, "go.mod", "module example.com/messages\ngo 1.25.0\nrequire "+spineImportPath+" v0.7.5-preview.1\nreplace "+spineImportPath+" => "+filepath.ToSlash(core)+"\n")
 				writeE2EFile(t, "spine.toml", "module = \"example.com/messages\"\nentrypoint = \".\"\ncomposition = \".\"\nlayout = \""+layout+"\"\nport = 8080\n")
 				public, err := messageContext()
 				if err != nil || public != hasPublic {

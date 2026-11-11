@@ -20,7 +20,7 @@ func TestControllerCandidateEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	options := newProjectOptions{Module: "example.com/controller-candidate", Layout: layeredLayout, Platform: "nethttp", Validator: "none", WebSocketPlatform: "none", Modules: []selectedModule{{Path: spineImportPath, Version: controllerRoutesMinimum}, {Path: nethttpPlatformPath, Version: "v0.1.0-preview.2"}}}
+	options := newProjectOptions{Module: "example.com/controller-candidate", Layout: layeredLayout, Platform: "nethttp", Validator: "none", WebSocketPlatform: "none", Modules: []selectedModule{{Path: spineImportPath, Version: "v0.7.5-preview.1"}, {Path: nethttpPlatformPath, Version: "v0.1.0-preview.2"}}}
 	files, err := newProjectFiles(options)
 	if err != nil {
 		t.Fatal(err)
@@ -109,10 +109,10 @@ func TestControllerCandidateEndToEnd(t *testing.T) {
 		t.Fatalf("generation did not retain one aliased role registration block:\n%s", application)
 	}
 	handlers := `package controller
- import("context";models "github.com/NARUBROWN/spine/pkg/httpx")
+ import(spine "github.com/NARUBROWN/spine/pkg/spine";"github.com/NARUBROWN/spine/pkg/input";models "github.com/NARUBROWN/spine/pkg/httpx")
  type AuditBody struct{Name string ` + "`json:\"name\"`" + `}
  type AuditResponse = models.Response[AuditBody]
- func(c *AuditController)create(ctx context.Context,a *AuditBody)(AuditResponse,error){return AuditResponse{Body:*a},nil}
+ func(c *AuditController)create(ctx spine.Ctx,a input.Body[AuditBody])(AuditResponse,error){return AuditResponse{Body:*a},nil}
  `
 	if err := os.WriteFile(filepath.Join(root, "src/controller/audit_handlers.go"), []byte(handlers), 0644); err != nil {
 		t.Fatal(err)
