@@ -24,7 +24,28 @@ permissions:
 env:
   GOWORK: 'off'
 jobs:
+  source:
+    name: Check for previously verified source
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      candidate: ${{ steps.promotion.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.base_ref == 'rc' || github.base_ref == 'main' || github.ref_name == 'rc' || github.ref_name == 'main'
+        with:
+          persist-credentials: false
+      - name: Verify the previous candidate
+        if: github.base_ref == 'rc' || github.base_ref == 'main' || github.ref_name == 'rc' || github.ref_name == 'main'
+        id: promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/release.py check-promotion-ci
   policy:
+    needs: source
+    if: needs.source.outputs.candidate == ''
     name: Release Policy
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +69,8 @@ jobs:
       - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - run: actionlint -shellcheck= -pyflakes=
   portable:
+    needs: source
+    if: needs.source.outputs.candidate == ''
     name: Portable CLI (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -68,6 +91,8 @@ jobs:
       - if: runner.os != 'Windows'
         run: go test ./internal/cli -run '^(TestRunAndDevGracefulShutdown|TestGeneratedHTTPShutdownDrainsRequests|TestDevRuntimeLifecycleEndToEnd)$' -count=1 -timeout=5m
   public-platforms:
+    needs: source
+    if: needs.source.outputs.candidate == ''
     name: Public Platforms and Full Regression
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -140,6 +165,8 @@ jobs:
         run: |
           echo "Extended public adapter regression: $REGRESSION_OUTCOME. Optional, see job log and artifact for details." >> "$GITHUB_STEP_SUMMARY"
   core-regression:
+    needs: source
+    if: needs.source.outputs.candidate == ''
     name: Required Core Regression
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -165,6 +192,8 @@ jobs:
           name: core-regression
           path: core-regression.jsonl
   live-composition:
+    needs: source
+    if: needs.source.outputs.candidate == ''
     name: Required channel composition (${{ matrix.layout }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -193,6 +222,8 @@ jobs:
           esac
           go test ./internal/cli -run '^TestChannelComposition$' -v -count=1 -timeout=20m
   optional-composition:
+    needs: source
+    if: needs.source.outputs.candidate == ''
     name: Optional channel composition (${{ matrix.layout }}, ${{ matrix.case }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -236,19 +267,24 @@ jobs:
     name: ${{ github.event_name == 'pull_request' && format('Verified Source / {0}', github.base_ref) || 'Verified Source' }}
     runs-on: ubuntu-latest
     if: ${{ always() }}
-    needs: [policy, portable, core-regression, public-platforms, live-composition, optional-composition]
+    needs: [source, policy, portable, core-regression, public-platforms, live-composition, optional-composition]
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
       - id: source
         env:
           RESULTS: ${{ toJSON(needs) }}
+          VERIFIED_CANDIDATE: ${{ needs.source.outputs.candidate }}
           SOURCE_SHA: ${{ inputs.ref || github.sha }}
         run: |
           python3 - <<'PY'
           import json, os
-          if any(j['result'] != 'success' for j in json.loads(os.environ['RESULTS']).values()):
-              raise SystemExit('필수 검사가 모두 성공해야 합니다')
+          jobs = json.loads(os.environ['RESULTS'])
+          candidate = os.environ['VERIFIED_CANDIDATE']
+          for name, job in jobs.items():
+              expected = 'skipped' if candidate and name != 'source' else 'success'
+              if job['result'] != expected:
+                  raise SystemExit(f'검사 {name}의 결과가 예상과 다릅니다: {job["result"]}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('sha=' + os.environ['SOURCE_SHA'] + '\n')
           PY

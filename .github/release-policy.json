@@ -10,8 +10,8 @@
   "recipe": {
     "id": "platform-contracts-preview",
     "modules": {
-      "github.com/NARUBROWN/spine": "v0.7.1",
-      "github.com/NARUBROWN/spine-echo-platform": "v0.2.0",
+      "github.com/NARUBROWN/spine": "v0.7.5",
+      "github.com/NARUBROWN/spine-echo-platform": "v0.2.1",
       "github.com/labstack/echo/v5": "v5.4.4"
     }
   },
@@ -26,8 +26,8 @@
     "stable": "main"
   },
   "rc_cohort": {
-    "github.com/NARUBROWN/spine": "v0.7.2-rc.1",
-    "github.com/NARUBROWN/spine-echo-platform": "v0.2.1-rc.1",
+    "github.com/NARUBROWN/spine": "v0.7.5",
+    "github.com/NARUBROWN/spine-echo-platform": "v0.2.1",
     "github.com/NARUBROWN/spine-gorilla-platform": "v0.2.0",
     "github.com/NARUBROWN/spine-kafka-platform": "v0.2.0",
     "github.com/NARUBROWN/spine-nats-platform": "v0.1.0",

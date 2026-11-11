@@ -138,9 +138,11 @@ class ReleasePolicyTests(unittest.TestCase):
         for goos in POLICY["required_public_os"]:
             path = Path(directory.name) / goos
             path.mkdir()
-            (path/"release-validation.json").write_text(json.dumps({
-                "os": goos, "result": "passed", "source_sha": plan["source_sha"],
-                "query": query, "components": plan["components"], "entrypoints": ["spine", "spine-cli"]}), encoding="utf-8")
+            report = {"os": goos, "result": "passed", "source_sha": plan["source_sha"], "query": query,
+                      "components": plan["components"], "entrypoints": ["spine", "spine-cli"]}
+            if plan.get("public_validation_scope") == "tag-install":
+                report.update(scope="tag-install", resolved_cli_version=query)
+            (path/"release-validation.json").write_text(json.dumps(report), encoding="utf-8")
         return directory.name
 
     def plan(self, channel="preview", version=None, source=SOURCE, reason=""):
@@ -149,6 +151,7 @@ class ReleasePolicyTests(unittest.TestCase):
     def test_preview_requires_immutable_preview_head(self):
         plan = self.plan()
         self.assertEqual(plan["source_sha"], SOURCE)
+        self.assertIsNone(plan["source_evidence"])
         for source in ["main", "HEAD", "--help", SOURCE[:12]]:
             with self.subTest(source=source), self.assertRaises(release.ReleaseError):
                 self.plan(source=source)
@@ -164,14 +167,16 @@ class ReleasePolicyTests(unittest.TestCase):
         policy = copy.deepcopy(POLICY)
         branch = f"release/{self.base}-hotfix-preview"
         cohort = dict.fromkeys(release.UPSTREAM_MODULES, "v0.1.0")
-        cohort[release.CORE_MODULE] = "v0.1.0-rc.1"
         policy.update(hotfix_preview_branch=branch, rc_cohort=cohort)
         self.github.policy = policy
         self.github.heads[branch] = SOURCE
-        plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
-        self.assertEqual(plan["branch"], branch)
-        self.assertEqual(plan["approval_environment"], "release-hotfix-preview")
-        self.assertEqual(plan["rc_cohort"], cohort)
+        for core_version in ("v0.1.0", "v0.1.0-rc.1"):
+            with self.subTest(core_version=core_version):
+                cohort[release.CORE_MODULE] = core_version
+                plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
+                self.assertEqual(plan["branch"], branch)
+                self.assertEqual(plan["approval_environment"], "release-hotfix-preview")
+                self.assertEqual(plan["rc_cohort"], cohort)
 
         source = self.github.candidate()
         self.github.run_branch = branch
@@ -181,9 +186,16 @@ class ReleasePolicyTests(unittest.TestCase):
         manifest.update(branch=branch, rc_cohort=cohort)
         for report in manifest["validation"]["reports"]:
             report.update(rc_cohort=cohort, rc_combination_checks=["echo-full", "nethttp-full"])
-        promoted = release.make_plan(self.github, policy, "rc", self.base+"-rc.1", source, now=NOW)
+        pull = {"base": {"ref": "rc"},
+                "head": {"ref": branch, "sha": SOURCE, "repo": {"full_name": self.github.repository}}}
+        self.assertEqual(release.promotion_ci_candidate(self.github, policy, "pull_request", "rc", RC_SOURCE, pull)[0], source)
+        self.assertEqual(release.promotion_ci_candidate(self.github, policy, "push", "rc", RC_SOURCE)[0], source)
+        with patch.object(release, "verify_hotfix_dependencies") as verify_dependencies:
+            promoted = release.make_plan(self.github, policy, "rc", self.base+"-rc.1", source, now=NOW)
+        verify_dependencies.assert_called_once_with(policy)
         self.assertEqual(promoted["promotion_pr"]["head"], branch)
         self.assertEqual(promoted["approval_environment"], "release-rc")
+        self.assertEqual(promoted["public_validation_scope"], "tag-install")
 
         self.github.run_branch = "preview"
         with self.assertRaisesRegex(release.ReleaseError, "artifact"):
@@ -192,6 +204,35 @@ class ReleasePolicyTests(unittest.TestCase):
         manifest["rc_cohort"] = {}
         with self.assertRaisesRegex(release.ReleaseError, "RC 조합"):
             release.make_plan(self.github, policy, "rc", self.base+"-rc.1", source, now=NOW)
+        manifest["rc_cohort"] = cohort
+
+        rc = self.github.candidate("rc", age=25)
+        self.github.pull_direction = ("rc", "main")
+        rc_manifest = self.github.manifests[rc]
+        rc_manifest.update(rc_cohort=cohort, source_evidence=promoted["source_evidence"],
+                           public_validation_scope="tag-install")
+        for report in rc_manifest["validation"]["reports"]:
+            report.update(scope="tag-install", resolved_cli_version=rc)
+        self.assertEqual(release.promotion_ci_candidate(self.github, policy, "push", "main", MAIN_SOURCE)[0], rc)
+        with patch.object(release, "verify_hotfix_dependencies"):
+            stable = release.make_plan(self.github, policy, "stable", self.base, rc, now=NOW)
+        self.assertEqual(stable["public_validation_scope"], "tag-install")
+        rc_manifest["rc_cohort"] = {}
+        with self.assertRaisesRegex(release.ReleaseError, "RC 조합"):
+            release.make_plan(self.github, policy, "stable", self.base, rc, now=NOW)
+
+    def test_hotfix_dependency_drift_stops_reuse(self):
+        module = release.CORE_MODULE
+        policy = {"recipe": {"modules": {module: "v0.7.5"}}, "rc_cohort": {module: "v0.7.5"}}
+        listing = f"{module} v0.7.2-rc.1 v0.7.5-rc.2 v0.7.5 v0.8.0-preview.1"
+        with patch.object(release, "run", side_effect=["https://proxy.golang.org,direct", listing]) as go:
+            release.verify_hotfix_dependencies(policy)
+        self.assertEqual(go.call_args.kwargs["env"]["GOPROXY"], "direct")
+        for new_tag, channel in (("v0.7.6", "stable"), ("v0.7.6-rc.1", "rc")):
+            with self.subTest(new_tag=new_tag), patch.object(
+                    release, "run", side_effect=["direct", f"{listing} {new_tag}"]):
+                with self.assertRaisesRegex(release.ReleaseError, f"{channel} 선택"):
+                    release.verify_hotfix_dependencies(policy)
 
     def test_core_candidate_is_allowed_before_stable_but_cannot_ship_as_stable_default(self):
         policy = copy.deepcopy(POLICY)
@@ -231,8 +272,8 @@ class ReleasePolicyTests(unittest.TestCase):
     def test_repository_release_recipe_uses_stable_dependencies(self):
         release.validate_policy(REPOSITORY_POLICY)
         modules = REPOSITORY_POLICY["recipe"]["modules"]
-        self.assertEqual(modules["github.com/NARUBROWN/spine"], "v0.7.1")
-        self.assertEqual(modules["github.com/NARUBROWN/spine-echo-platform"], "v0.2.0")
+        self.assertEqual(modules["github.com/NARUBROWN/spine"], "v0.7.5")
+        self.assertEqual(modules["github.com/NARUBROWN/spine-echo-platform"], "v0.2.1")
 
     def test_preview_query_rejects_wrong_paths_and_noncanonical_versions(self):
         path = "github.com/NARUBROWN/spine"
@@ -286,6 +327,7 @@ class ReleasePolicyTests(unittest.TestCase):
         plan = self.plan("rc", self.base+"-rc.1", source)
         self.assertEqual(plan["source_sha"], RC_SOURCE)
         self.assertEqual(plan["upstream_source_sha"], SOURCE)
+        self.assertEqual(plan["source_evidence"]["artifact_id"], self.github.artifacts[source]["id"])
         self.github.manifests[source]["components"] = {"wrong": "versions"}
         with self.assertRaises(release.ReleaseError):
             self.plan("rc", self.base+"-rc.1", source)
@@ -301,6 +343,44 @@ class ReleasePolicyTests(unittest.TestCase):
                 if condition == "wrong_workflow_branch": github.run_branch = "main"
                 with self.assertRaises(release.ReleaseError):
                     release.make_plan(github, POLICY, "rc", self.base+"-rc.1", source, now=NOW)
+
+    def test_promotion_ci_requires_identical_source_and_verified_predecessor(self):
+        source = self.github.candidate()
+        pull = {"base": {"ref": "rc"},
+                "head": {"ref": "preview", "sha": SOURCE, "repo": {"full_name": self.github.repository}}}
+        self.assertEqual(release.promotion_ci_candidate(self.github, POLICY, "pull_request", "rc", RC_SOURCE, pull)[0], source)
+        self.assertEqual(release.promotion_ci_candidate(self.github, POLICY, "push", "rc", RC_SOURCE)[0], source)
+        for change in ("tree", "parent", "fork", "branch", "untagged", "dependency"):
+            with self.subTest(change=change):
+                github, event_pull = copy.deepcopy(self.github), copy.deepcopy(pull)
+                if change == "tree":
+                    github.changed_tree = True
+                elif change == "parent":
+                    github.promotion_head = "f" * 40
+                elif change == "fork":
+                    event_pull["head"]["repo"]["full_name"] = "fork/spine-cli"
+                elif change == "branch":
+                    event_pull["head"]["ref"] = "feature"
+                elif change == "untagged":
+                    github.tags.clear()
+                elif change == "dependency":
+                    github.manifests[source]["components"] = {"recipe": "changed"}
+                    github.manifests[source]["validation"]["components"] = {"recipe": "changed"}
+                    for report in github.manifests[source]["validation"]["reports"]:
+                        report["components"] = {"recipe": "changed"}
+                self.assertIsNone(release.promotion_ci_candidate(github, POLICY, "pull_request", "rc", RC_SOURCE, event_pull))
+        self.github.run_conclusion = "failure"
+        with self.assertRaises(release.ReleaseError):
+            release.promotion_ci_candidate(self.github, POLICY, "push", "rc", RC_SOURCE)
+
+    def test_promotion_writes_tag_after_revalidating_source_without_pre_tag_reports(self):
+        source = self.github.candidate()
+        plan = self.plan("rc", self.base + "-rc.1", source)
+        self.assertEqual(plan["public_validation_scope"], "tag-install")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"GITHUB_REF": "refs/heads/rc"}), patch.object(release.dt, "datetime", wraps=dt.datetime) as clock:
+            clock.now.return_value = NOW
+            release.publish(self.github, POLICY, plan, RC_SOURCE, directory)
+        self.assertEqual(self.github.writes, [("git/refs", {"ref": "refs/tags/" + plan["version"], "sha": RC_SOURCE})])
 
     def test_branch_movement_or_wrong_dispatch_branch_stops_tag_creation(self):
         plan = self.plan()
@@ -386,6 +466,26 @@ class ReleasePolicyTests(unittest.TestCase):
             self.github.policy = copy.deepcopy(POLICY)
             release.publish(self.github, POLICY, plan, SOURCE, self.reports(plan, plan["source_sha"]))
             self.assertEqual(self.github.writes, [("git/refs", {"ref": "refs/tags/"+plan["version"], "sha": SOURCE})])
+
+    def test_reused_preview_ci_must_still_match_at_tag_creation(self):
+        plan = self.plan()
+        plan["preview_ci_evidence"] = {"id": 42, "run_attempt": 1}
+        successful_run = {"id": 42, "run_attempt": 1, "status": "completed", "conclusion": "success",
+                          "event": "push", "head_branch": "preview", "head_sha": SOURCE,
+                          "head_repository": {"full_name": self.github.repository}, "path": ".github/workflows/ci.yml"}
+        self.assertTrue(release.matches_preview_ci(self.github, successful_run, SOURCE))
+        reports = self.reports(plan, SOURCE)
+        original_api = self.github.api
+
+        for invalid in ({"run_attempt": 2}, {"head_sha": RC_SOURCE}, {"event": "pull_request"}, {"conclusion": "failure"}):
+            with self.subTest(invalid=invalid):
+                run = dict(successful_run, **invalid)
+                with patch.dict(os.environ, {"GITHUB_REF": "refs/heads/preview"}), patch.object(
+                        self.github, "api", side_effect=lambda path, **options:
+                        run if path == "actions/runs/42" else original_api(path, **options)):
+                    with self.assertRaisesRegex(release.ReleaseError, "Preview CI"):
+                        release.publish(self.github, POLICY, plan, SOURCE, reports)
+        self.assertEqual(self.github.writes, [])
 
     def test_public_installation_failure_never_creates_release(self):
         plan = self.plan()

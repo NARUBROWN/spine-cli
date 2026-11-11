@@ -1,8 +1,8 @@
 package application
-import("github.com/NARUBROWN/spine";"context";"net/http/httptest";"strings";"testing";"github.com/NARUBROWN/spine/pkg/httpx")
+import("github.com/NARUBROWN/spine";"context";"net/http/httptest";"strings";"testing";"github.com/NARUBROWN/spine/pkg/httpx";"github.com/NARUBROWN/spine/pkg/input")
 type omittedInput struct { Email string `json:"email" validate:"required,email"` }
 type omittedController struct{}
-func (*omittedController) Post(input *omittedInput) httpx.Response[string] {return httpx.Response[string]{Body:input.Email}}
+func (*omittedController) Post(dto input.Body[omittedInput]) httpx.Response[string] {return httpx.Response[string]{Body:dto.Email}}
 func TestValidatorIsOmitted(t *testing.T) {
  app,options,err:=BuildApplication();if err!=nil {t.Fatal(err)}
  app.Constructor(func()*omittedController{return &omittedController{}})

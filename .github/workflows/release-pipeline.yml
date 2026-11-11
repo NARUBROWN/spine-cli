@@ -33,6 +33,8 @@ jobs:
       sha: ${{ steps.plan.outputs.sha }}
       version: ${{ steps.plan.outputs.version }}
       approval_environment: ${{ steps.plan.outputs.approval_environment }}
+      tag_only: ${{ steps.plan.outputs.tag_only }}
+      reuse_ci: ${{ steps.plan.outputs.reuse_ci }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,12 +64,14 @@ jobs:
           if-no-files-found: error
   ci:
     needs: plan
+    if: needs.plan.outputs.reuse_ci == 'false'
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.plan.outputs.sha }}
-      channel: ${{ inputs.channel }}
+      channel: ${{ needs.plan.outputs.approval_environment == 'release-hotfix-preview' && 'rc' || inputs.channel }}
   public-before-tag:
     needs: plan
+    if: needs.plan.outputs.tag_only == 'false'
     uses: ./.github/workflows/release-public-check.yml
     with:
       source_sha: ${{ needs.plan.outputs.sha }}
@@ -75,6 +79,12 @@ jobs:
       artifact: public-before-tag
   tag:
     needs: [plan, ci, public-before-tag]
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success' &&
+      ((needs.plan.outputs.reuse_ci == 'true' && needs.ci.result == 'skipped') ||
+      (needs.plan.outputs.reuse_ci == 'false' && needs.ci.result == 'success')) &&
+      ((needs.plan.outputs.tag_only == 'true' && needs.public-before-tag.result == 'skipped') ||
+      (needs.plan.outputs.tag_only == 'false' && needs.public-before-tag.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,6 +103,7 @@ jobs:
         with:
           name: release-plan
       - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.tag_only == 'false'
         with:
           pattern: public-before-tag-*
           path: public-reports
@@ -100,7 +111,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_EVIDENCE_TOKEN: ${{ secrets.RELEASE_EVIDENCE_TOKEN }}
-          VERIFIED_SHA: ${{ needs.ci.outputs.verified_sha }}
+          VERIFIED_SHA: ${{ needs.plan.outputs.reuse_ci == 'true' && needs.plan.outputs.sha || needs.ci.outputs.verified_sha }}
         run: python3 scripts/release/release.py tag
       - name: Notify Discord of the new tag
         uses: NARUBROWN/spine/.github/actions/discord-tag@b55c182f4d0722fca5aaf3b963bca20cf0dcc4d4

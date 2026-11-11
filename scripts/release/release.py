@@ -222,8 +222,8 @@ def verify_source_candidate(github, source, expected_channel, policy):
         raise ReleaseError("출처 태그의 검증 workflow와 artifact가 일치하지 않거나 성공하지 않았습니다")
     if manifest.get("required_public_os") != policy["required_public_os"]:
         raise ReleaseError("출처 후보의 공개 설치 OS가 현재 정책과 다릅니다")
-    if channel == "preview" and "hotfix_preview_branch" in policy and manifest.get("rc_cohort") != policy["rc_cohort"]:
-        raise ReleaseError("핫픽스 Preview에서 검증한 RC 조합이 현재 정책과 다릅니다")
+    if "hotfix_preview_branch" in policy and manifest.get("rc_cohort") != policy["rc_cohort"]:
+        raise ReleaseError("핫픽스 후보에서 검증한 RC 조합이 현재 정책과 다릅니다")
     validate_reports(manifest["validation"].get("reports", []), manifest, source)
     return artifact, manifest
 
@@ -244,6 +244,49 @@ def promotion(github, source_sha, upstream_sha, branch, upstream_branch):
         raise ReleaseError(f"{upstream_branch} → {branch} 방향의 병합된 PR이 필요합니다")
     return {"number": matches[0]["number"], "head": upstream_branch, "base": branch,
             "merge_sha": source_sha, "head_sha": upstream_sha}
+
+
+def matches_preview_ci(github, workflow_run, source_sha):
+    return (workflow_run.get("status") == "completed" and workflow_run.get("conclusion") == "success" and
+            workflow_run.get("event") == "push" and workflow_run.get("head_branch") == "preview" and
+            workflow_run.get("head_sha") == source_sha and
+            (workflow_run.get("head_repository") or {}).get("full_name") == github.repository and
+            workflow_run.get("path") == ".github/workflows/ci.yml")
+
+
+def promotion_ci_candidate(github, policy, event_name, branch, source_sha, pull=None):
+    upstream_channel = {"rc": "preview", "main": "rc"}.get(branch)
+    if not upstream_channel or event_name not in ("pull_request", "push"):
+        return None
+    upstream_branch = release_branch(policy, upstream_channel)
+    if event_name == "pull_request" and (
+            pull["base"]["ref"] != branch or pull["head"]["ref"] != upstream_branch or
+            (pull["head"].get("repo") or {}).get("full_name") != github.repository):
+        return None
+
+    commit = github.api(f"git/commits/{source_sha}")
+    parents = commit.get("parents", [])
+    if len(parents) != 2:
+        return None
+    upstream_sha = parents[1]["sha"]
+    if pull is not None and upstream_sha != pull["head"]["sha"]:
+        return None
+    if commit["tree"]["sha"] != github.api(f"git/commits/{upstream_sha}")["tree"]["sha"]:
+        return None
+
+    prefix = f"{policy['next_version']}-{upstream_channel}."
+    refs = github.api(f"git/matching-refs/tags/{prefix}")
+    tags = [ref["ref"].removeprefix("refs/tags/") for ref in refs]
+    for tag in sorted((tag for tag in tags if TAG.fullmatch(tag)), key=parse_tag, reverse=True):
+        if github.tag_sha(tag) != upstream_sha:
+            continue
+        artifact, manifest = verify_source_candidate(github, tag, upstream_channel, policy)
+        if manifest["components"] != components(policy):
+            return None
+        if event_name == "push":
+            promotion(github, source_sha, upstream_sha, branch, upstream_branch)
+        return tag, artifact
+    return None
 
 
 def approval_environment(github, policy, channel="stable"):
@@ -408,17 +451,48 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
             "approval_environment": environment_name(policy, channel),
             "repository": github.repository}
     plan["required_public_os"] = policy["required_public_os"]
+    if source_evidence is not None:
+        plan["public_validation_scope"] = "tag-install"
     hotfix_preview = channel == "preview" and "hotfix_preview_branch" in policy
     if (channel == "rc" or hotfix_preview) and policy.get("rc_cohort"):
         cohort = policy["rc_cohort"]
-        if (set(cohort) != set(UPSTREAM_MODULES) or parse_tag(cohort[CORE_MODULE])[1] != "rc" or
+        if (set(cohort) != set(UPSTREAM_MODULES) or
                 any(parse_tag(version)[1] not in {"rc", "stable"} for version in cohort.values())):
-            raise ReleaseError("RC 조합에는 코어 RC와 일곱 플랫폼의 정확한 RC 또는 정식 태그가 필요합니다")
+            raise ReleaseError("RC 조합에는 코어와 일곱 플랫폼의 정확한 RC 또는 정식 태그가 필요합니다")
         plan["rc_cohort"] = cohort
+    if source_evidence is not None and "hotfix_preview_branch" in policy:
+        verify_hotfix_dependencies(policy)
     if channel == "preview" and not hotfix_preview and policy["recipe"]["id"] == "platform-contracts-preview":
         plan["upstream_evidence"] = upstream_evidence(plan["components"]["recipe"])
     plan["notes_sha256"] = hashlib.sha256(notes(plan, policy).encode()).hexdigest()
     return plan
+
+
+def verify_hotfix_dependencies(policy):
+    stable = {path: version for path, version in policy["recipe"]["modules"].items() if path in UPSTREAM_MODULES}
+    candidates = policy["rc_cohort"]
+    modules = sorted(set(stable) | set(candidates))
+    with tempfile.TemporaryDirectory(prefix="spine-cli-promoted-dependencies-") as directory:
+        env = dict(os.environ, GOWORK="off", GOFLAGS=" ", GOTOOLCHAIN="local")
+        proxy = run("go", "env", "GOPROXY", cwd=directory, env=env)
+        if proxy in ("", "https://proxy.golang.org,direct"):
+            env["GOPROXY"] = "direct"
+        versions = {}
+        result = run("go", "list", "-m", "-versions", "-f", "{{.Path}} {{range .Versions}}{{.}} {{end}}",
+                     *(path + "@latest" for path in modules), cwd=directory, env=env)
+        for line in result.splitlines():
+            path, *tags = line.split()
+            matches = (TAG.fullmatch(tag) for tag in tags)
+            versions[path] = [match.groups() for match in matches if match is not None]
+    for channel, expected in (("stable", stable), ("rc", candidates)):
+        for path, version in expected.items():
+            eligible = [(int(major), int(minor), int(patch), stage is None, int(number or 0))
+                        for major, minor, patch, stage, number in versions.get(path, [])
+                        if stage is None or (channel == "rc" and stage == "rc")]
+            base, stage, number = parse_tag(version)
+            planned = (*map(int, base[1:].split(".")), stage == "stable", number)
+            if not eligible or max(eligible) != planned:
+                raise ReleaseError(f"검증한 핫픽스 의존성과 현재 {channel} 선택이 다릅니다: {path} {version}")
 
 
 def resolve_module_query(path, query):
@@ -476,13 +550,21 @@ def collect_reports(directory, plan, query):
 
 def validate_reports(reports, plan, query):
     required = plan["required_public_os"]
+    scope = plan.get("public_validation_scope")
+    if scope == "tag-install" and (query != plan["version"] or not plan.get("source_evidence")):
+        raise ReleaseError("태그 설치 검증에는 승격 근거와 정확한 새 태그가 필요합니다")
     if sorted(r.get("os") for r in reports) != sorted(required):
         raise ReleaseError("공개 설치 결과의 OS가 누락되거나 중복됐습니다")
     for report in reports:
         if (report.get("result") != "passed" or report.get("source_sha") != plan["source_sha"] or
                 report.get("query") != query or report.get("components") != plan["components"] or
+                report.get("scope") != scope or
                 set(report.get("entrypoints", [])) != {"spine", "spine-cli"}):
             raise ReleaseError("공개 설치 결과가 발행 계획과 다릅니다")
+        if scope == "tag-install":
+            if report.get("resolved_cli_version") != query:
+                raise ReleaseError("공개 설치가 발행한 태그를 확인하지 못했습니다")
+            continue
         if plan.get("upstream_evidence") is not None and (
                 report.get("upstream_evidence") != plan["upstream_evidence"] or
                 report.get("combination_checks") != ["echo-full", "nethttp-full"]):
@@ -496,7 +578,13 @@ def validate_reports(reports, plan, query):
 
 
 def publish(github, policy, plan, verified_sha, reports_directory):
-    collect_reports(reports_directory, plan, plan["source_sha"])
+    if plan.get("public_validation_scope") != "tag-install":
+        collect_reports(reports_directory, plan, plan["source_sha"])
+    if evidence := plan.get("preview_ci_evidence"):
+        workflow_run = github.api(f"actions/runs/{int(evidence['id'])}")
+        if (plan["channel"] != "preview" or not matches_preview_ci(github, workflow_run, plan["source_sha"]) or
+                workflow_run.get("id") != evidence["id"] or workflow_run.get("run_attempt") != evidence["run_attempt"]):
+            raise ReleaseError("Preview CI의 실행 기록이 발행 계획과 다릅니다")
     if verified_sha != plan["source_sha"]:
         raise ReleaseError("검증한 커밋과 발행 대상이 다릅니다")
     if os.environ.get("GITHUB_REF") != "refs/heads/" + plan["branch"]:
@@ -507,7 +595,9 @@ def publish(github, policy, plan, verified_sha, reports_directory):
     # 승인 대기 중 태그, 정책, 관찰 기간이 바뀌었는지 쓰기 직전에 다시 검사합니다.
     fresh = make_plan(github, policy, plan["channel"], plan["version"],
                       plan["source_tag"] or plan["source_sha"], plan["observation_override_reason"])
-    for key in ("source_sha", "source_tree", "branch", "promotion_pr", "source_evidence", "channel", "version", "components", "notes_sha256", "required_public_os", "upstream_evidence", "rc_cohort", "approval_environment"):
+    for key in ("source_sha", "source_tree", "branch", "promotion_pr", "source_evidence", "channel", "version",
+                "components", "notes_sha256", "required_public_os", "upstream_evidence", "rc_cohort",
+                "approval_environment", "public_validation_scope"):
         if fresh.get(key) != plan.get(key):
             raise ReleaseError("승인한 계획이 바뀌었습니다. 새 실행이 필요합니다")
     github.api("git/refs", method="POST", data={"ref": f"refs/tags/{plan['version']}", "sha": verified_sha})
@@ -536,7 +626,7 @@ def finish(github, policy, plan, reports_directory, manifest_path="release-manif
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["plan", "tag", "finish", "validate-policy", "check-environment"])
+    parser.add_argument("command", choices=["plan", "tag", "finish", "validate-policy", "check-environment", "check-promotion-ci"])
     parser.add_argument("--policy", default=".github/release-policy.json")
     parser.add_argument("--plan", default="release-plan.json")
     parser.add_argument("--reports", default="public-reports")
@@ -553,6 +643,25 @@ def main():
         print("릴리스 정책 형식 확인 완료")
         return
     github = GitHub(os.environ["GITHUB_REPOSITORY"])
+    if args.command == "check-promotion-ci":
+        event = os.environ["GITHUB_EVENT_NAME"]
+        pull = None
+        branch = os.environ["GITHUB_REF_NAME"]
+        if event == "pull_request":
+            payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+            pull = payload["pull_request"]
+            branch = pull["base"]["ref"]
+        try:
+            evidence = promotion_ci_candidate(github, policy, event, branch, os.environ["GITHUB_SHA"], pull)
+        except ReleaseError as exc:
+            print(f"이전 검증을 재사용할 수 없어 전체 CI를 실행합니다. {exc}")
+            return
+        if evidence:
+            candidate, artifact = evidence
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+                stream.write(f"candidate={candidate}\n")
+            print(f"{candidate}의 검증 artifact {artifact['id']}를 재사용합니다.")
+        return
     if args.command == "check-environment":
         for channel in WORKFLOWS:
             approval_environment(github, policy, channel)
@@ -565,16 +674,35 @@ def main():
         source = os.environ["RELEASE_SOURCE"]
         version = parse_tag(source)[0] if channel == "stable" else os.environ["RELEASE_VERSION"]
         plan = make_plan(github, policy, channel, version, source, os.environ.get("RELEASE_OVERRIDE_REASON", ""))
+        if channel == "preview" and plan["branch"] == "preview":
+            sha = plan["source_sha"]
+            try:
+                runs = github.api(f"actions/workflows/ci.yml/runs?branch=preview&head_sha={sha}&event=push&status=success")
+            except ReleaseError as exc:
+                print(f"이전 Preview CI를 조회하지 못해 전체 CI를 실행합니다. {exc}")
+                runs = {"workflow_runs": []}
+            for workflow_run in runs["workflow_runs"]:
+                if matches_preview_ci(github, workflow_run, sha):
+                    plan["preview_ci_evidence"] = {key: workflow_run[key] for key in ("id", "run_attempt")}
+                    break
         review_files(plan, policy, ".")
         Path(args.plan).write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         if output := os.environ.get("GITHUB_OUTPUT"):
             with open(output, "a") as stream:
                 stream.write(f"sha={plan['source_sha']}\nversion={plan['version']}\n"
                              f"approval_environment={plan['approval_environment']}\n")
+                tag_only = "true" if plan.get("public_validation_scope") == "tag-install" else "false"
+                reuse_ci = "true" if tag_only == "true" or plan.get("preview_ci_evidence") else "false"
+                stream.write(f"tag_only={tag_only}\nreuse_ci={reuse_ci}\n")
         if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(summary, "a") as stream:
                 stream.write(f"출시 계획: `{plan['version']}` / `{plan['source_sha']}`\n\n"
                              f"관찰 기간 단축 사유: {plan['observation_override_reason'] or '없음'}\n")
+                if evidence := plan.get("preview_ci_evidence"):
+                    stream.write(f"같은 커밋의 Preview CI 실행 `{evidence['id']}`를 재사용합니다.\n")
+                if evidence := plan["source_evidence"]:
+                    stream.write(f"공통 CI 재사용 근거는 `{plan['source_tag']}`의 Actions 실행 "
+                                 f"`{evidence['workflow_run_id']}`입니다.\n")
     else:
         plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
         if args.command == "tag":
