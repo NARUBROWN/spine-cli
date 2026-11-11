@@ -164,14 +164,16 @@ class ReleasePolicyTests(unittest.TestCase):
         policy = copy.deepcopy(POLICY)
         branch = f"release/{self.base}-hotfix-preview"
         cohort = dict.fromkeys(release.UPSTREAM_MODULES, "v0.1.0")
-        cohort[release.CORE_MODULE] = "v0.1.0-rc.1"
         policy.update(hotfix_preview_branch=branch, rc_cohort=cohort)
         self.github.policy = policy
         self.github.heads[branch] = SOURCE
-        plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
-        self.assertEqual(plan["branch"], branch)
-        self.assertEqual(plan["approval_environment"], "release-hotfix-preview")
-        self.assertEqual(plan["rc_cohort"], cohort)
+        for core_version in ("v0.1.0", "v0.1.0-rc.1"):
+            with self.subTest(core_version=core_version):
+                cohort[release.CORE_MODULE] = core_version
+                plan = release.make_plan(self.github, policy, "preview", self.base+"-preview.1", SOURCE, now=NOW)
+                self.assertEqual(plan["branch"], branch)
+                self.assertEqual(plan["approval_environment"], "release-hotfix-preview")
+                self.assertEqual(plan["rc_cohort"], cohort)
 
         source = self.github.candidate()
         self.github.run_branch = branch
@@ -231,8 +233,8 @@ class ReleasePolicyTests(unittest.TestCase):
     def test_repository_release_recipe_uses_stable_dependencies(self):
         release.validate_policy(REPOSITORY_POLICY)
         modules = REPOSITORY_POLICY["recipe"]["modules"]
-        self.assertEqual(modules["github.com/NARUBROWN/spine"], "v0.7.1")
-        self.assertEqual(modules["github.com/NARUBROWN/spine-echo-platform"], "v0.2.0")
+        self.assertEqual(modules["github.com/NARUBROWN/spine"], "v0.7.5")
+        self.assertEqual(modules["github.com/NARUBROWN/spine-echo-platform"], "v0.2.1")
 
     def test_preview_query_rejects_wrong_paths_and_noncanonical_versions(self):
         path = "github.com/NARUBROWN/spine"

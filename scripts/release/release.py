@@ -411,9 +411,9 @@ def make_plan(github, policy, channel, version, source, reason="", now=None):
     hotfix_preview = channel == "preview" and "hotfix_preview_branch" in policy
     if (channel == "rc" or hotfix_preview) and policy.get("rc_cohort"):
         cohort = policy["rc_cohort"]
-        if (set(cohort) != set(UPSTREAM_MODULES) or parse_tag(cohort[CORE_MODULE])[1] != "rc" or
+        if (set(cohort) != set(UPSTREAM_MODULES) or
                 any(parse_tag(version)[1] not in {"rc", "stable"} for version in cohort.values())):
-            raise ReleaseError("RC 조합에는 코어 RC와 일곱 플랫폼의 정확한 RC 또는 정식 태그가 필요합니다")
+            raise ReleaseError("RC 조합에는 코어와 일곱 플랫폼의 정확한 RC 또는 정식 태그가 필요합니다")
         plan["rc_cohort"] = cohort
     if channel == "preview" and not hotfix_preview and policy["recipe"]["id"] == "platform-contracts-preview":
         plan["upstream_evidence"] = upstream_evidence(plan["components"]["recipe"])
