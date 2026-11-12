@@ -14,6 +14,7 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 	formatName := ""
 	outputPath := ""
 	force := false
+	prepare := false
 	source := ""
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
@@ -33,6 +34,8 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 			outputPath = args[index]
 		case "--force":
 			force = true
+		case "--prepare":
+			prepare = true
 		case "--source":
 			if index+1 >= len(args) {
 				fmt.Fprintln(errOut, "--source requires runtime or static")
@@ -56,8 +59,12 @@ func runContractExport(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "--source supports runtime or static for OpenAPI; AsyncAPI uses static")
 		return 1
 	}
+	if prepare && source != "runtime" {
+		fmt.Fprintln(errOut, "--prepare requires --format openapi --source runtime")
+		return 1
+	}
 	if source == "runtime" {
-		contents, err := executeRuntimeOpenAPI()
+		contents, err := executeRuntimeOpenAPIWithPreparation(prepare)
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
@@ -115,6 +122,7 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
+	catalog.bindings.instances = contract.httpInstances
 	paths := map[string]any{}
 	for _, route := range contract.HTTP {
 		openAPIPath := openAPIPath(route.Path)
@@ -186,15 +194,19 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 				}
 				content := map[string]any{"application/json": map[string]any{"schema": catalog.schema(payload, source)}}
 				requestBody := map[string]any{"content": content}
-				if parameter.Payload == "" {
-					form, ok, unresolved := catalog.staticFormContent(payload, source)
-					if ok {
-						requestBody["content"] = form
-					}
-					if unresolved {
-						requestBody["content"] = map[string]any{}
-						requestBody["x-spine-unresolved-content"] = true
-					}
+				playground := contract.Validator.Provider == "playground" && contract.Validator.Resolution == "static-source"
+				form, ok, unresolved := catalog.staticFormContent(payload, source, playground)
+				if ok {
+					requestBody["content"] = form
+				}
+				if unresolved {
+					requestBody["content"] = map[string]any{}
+					requestBody["x-spine-unresolved-content"] = true
+				}
+				if !ok && !unresolved {
+					media := requestBody["content"].(map[string]any)
+					xml := map[string]any{"schema": catalog.xmlSchema(payload, source)}
+					media["application/xml"], media["text/xml"] = xml, xml
 				}
 				operation["requestBody"] = requestBody
 
@@ -208,11 +220,11 @@ func buildOpenAPIDocument(contract applicationContract) (map[string]any, error) 
 		if len(unresolved) > 0 {
 			operation["x-spine-unresolved-parameters"] = unresolved
 		}
-		if responseSchema, ok := catalog.response(route.Returns, route.schemaSource); ok {
+		if media, responseSchema, ok := catalog.response(route.Returns, route.schemaSource); ok {
 			responses := operation["responses"].(map[string]any)
 			responses["default"] = map[string]any{
 				"description": "Response status is determined by httpx.ResponseOptions at runtime.",
-				"content":     map[string]any{"application/json": map[string]any{"schema": responseSchema}},
+				"content":     map[string]any{media: map[string]any{"schema": responseSchema}},
 			}
 		}
 		pathItem[strings.ToLower(route.Method)] = operation

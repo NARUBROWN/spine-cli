@@ -164,7 +164,7 @@ func (s *%sService) Get(id int64) (%s, bool) {
 }
 
 func sliceControllerTemplate(name resourceName) string {
-	return previewHTTPPathTemplate(fmt.Sprintf(`package %[1]s
+	return httpControllerInputTemplate(fmt.Sprintf(`package %[1]s
 
 import (
 	"net/http"

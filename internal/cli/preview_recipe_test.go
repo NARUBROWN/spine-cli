@@ -20,7 +20,7 @@ func TestPreviewCLIPreservesExistingPreview1AssemblyUpdate(t *testing.T) {
 	source := `import "github.com/NARUBROWN/spine/pkg/path"
 type SampleController struct{}
 func (*SampleController) Get(id path.Int) int64 { return id.Value }`
-	generated := previewHTTPPathTemplate(source, "Sample")
+	generated := httpControllerInputTemplate(source, "Sample")
 	if !strings.Contains(generated, "params *SamplePath") || !strings.Contains(generated, "params.ID") {
 		t.Fatalf("Preview 1 path DTO generation changed: %s", generated)
 	}

@@ -259,12 +259,19 @@ func TestCapabilitiesExposeImplementedAndBlockedBoundaries(t *testing.T) {
 }
 
 func TestRuntimeProbeSourceAndComparison(t *testing.T) {
-	source := runtimeProbeSource("example.com/demo/internal/application")
+	source := runtimeProbeSource("example.com/demo/internal/application", true)
 	if _, err := format.Source([]byte(source)); err != nil {
 		t.Fatalf("invalid runtime probe source: %v\n%s", err, source)
 	}
 	if !strings.Contains(source, `"%s\n"`) || strings.Contains(source, `"%s\\n"`) {
 		t.Fatalf("runtime probe marker must end with a real newline escape:\n%s", source)
+	}
+	if !strings.Contains(source, "spine.DescribeRegistrations(app)") || strings.Contains(source, "core.HandlerMeta") {
+		t.Fatalf("runtime probe bypassed the public registration description:\n%s", source)
+	}
+	legacy := runtimeProbeSource("example.com/demo/internal/application", false)
+	if _, err := format.Source([]byte(legacy)); err != nil || !strings.Contains(legacy, "app.Consumers().Registrations()") {
+		t.Fatalf("runtime probe for older core is invalid: %v\n%s", err, legacy)
 	}
 	static := applicationContract{
 		Complete:   true,

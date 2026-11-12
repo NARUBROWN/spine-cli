@@ -19,6 +19,8 @@ import (
  event "github.com/NARUBROWN/spine/contract/event"
  "github.com/NARUBROWN/spine/pkg/event/publish"
  "github.com/NARUBROWN/spine/pkg/httpx"
+ "github.com/NARUBROWN/spine/pkg/input"
+ "github.com/NARUBROWN/spine/pkg/api"
  "github.com/NARUBROWN/spine/pkg/ws"
  "github.com/gorilla/websocket"
  amqp "github.com/rabbitmq/amqp091-go"
@@ -33,7 +35,8 @@ type brokerEvent struct { brokerDTO; topic string }
 func (e brokerEvent) Name() string {return e.topic}
 func (brokerEvent) OccurredAt() time.Time {return time.Now()}
 type brokerController struct {input,output string;sent,handled atomic.Int32}
-func (c *brokerController) Emit(ctx context.Context,input *brokerDTO) httpx.Response[string] {
+func(c *brokerController) RegisterRoutes(r *api.Registry) {r.POST("/events",c.Emit)}
+func (c *brokerController) Emit(ctx context.Context,input input.Body[brokerDTO]) httpx.Response[string] {
  c.sent.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:*input,topic:c.input});return httpx.Response[string]{Body:"accepted"}
 }
 func (c *brokerController) EmitWS(ctx context.Context,input brokerDTO) error {
@@ -89,7 +92,6 @@ func TestGeneratedRealBroker(t *testing.T) {
  address:=""
  if options.HTTP!=nil {
   listener,err:=net.Listen("tcp","127.0.0.1:0");if err!=nil{t.Fatal(err)};address=listener.Addr().String();listener.Close();options.Address=address
-  app.Route("POST","/events",(*brokerController).Emit)
  if useWebSocket {if err:=app.WebSocket().Register("/ws/events",(*brokerController).EmitWS);err!=nil{t.Fatal(err)}}
  }
  if err:=app.Validate(options);err!=nil{t.Fatal(err)}

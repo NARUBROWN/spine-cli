@@ -7,7 +7,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const developmentVersion = "0.4.4-dev"
+const developmentVersion = "0.4.5-dev"
 
 func installedVersion() string {
 	info, ok := debug.ReadBuildInfo()

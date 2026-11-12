@@ -98,7 +98,7 @@ func printGeneratorGuide(kind string, out io.Writer) {
 	case "domain":
 		examples = []string{"spine g domain user --field id:int64", "spine g domain account/user --field name:string"}
 	case "dto":
-		fmt.Fprintln(out, "DTO fields include JSON tags. Receive HTTP body arguments as pointers such as *CreateUserRequest.")
+		fmt.Fprintln(out, "DTO fields include JSON tags. On current Spine, receive HTTP body arguments as input.Body[CreateUserRequest].")
 		examples = []string{"spine g dto create-user-request --field name:string", "spine g dto account/create-user-request --field name:string"}
 	case "repository":
 		examples = []string{"spine g repository user", "spine g repository account/user"}
@@ -111,7 +111,7 @@ func printGeneratorGuide(kind string, out io.Writer) {
 		fmt.Fprintln(out, "In layered-v1, this generates domain, repository, service, and controller types in the same group and registers them with DI. Add DTOs and HTTP paths separately.")
 		examples = []string{"spine g resource user", "spine g resource account/user --no-register"}
 	case "route":
-		fmt.Fprintln(out, "In layered-v1, core v0.7.0-preview.5 or later registers routes in the controller's RegisterRoutes method. Older cores use src/route/route.go. Implement the handler method first.\n--handler uses module-relative package/path:Type.Method syntax. With a supporting Preview core, declare one scalar input.Path argument for each route key in route order. Use separate DTO pointers for body, query, and header inputs.\nSuccessful returns: httpx.Response[T], httpx.Binary, or httpx.Redirect. Failure returns: error or (httpx.Response[T], error).\nWrap raw DTO, slice, and string values in httpx.Response[T].Body.")
+		fmt.Fprintln(out, "In layered-v1, core v0.7.0-preview.5 or later registers routes in the controller's RegisterRoutes method. Older cores use src/route/route.go. Implement the handler method first.\n--handler uses module-relative package/path:Type.Method syntax. With a supporting Preview core, declare one scalar input.Path argument for each route key in route order. Use input.Body[T], input.Query[T] and input.Header[T] for body, query and header DTOs; use input.Path[T] for path DTOs.\nSuccessful returns: httpx.Response[T], httpx.Binary, or httpx.Redirect. Failure returns: error or (httpx.Response[T], error).\nWrap raw DTO, slice, and string values in httpx.Response[T].Body.")
 		examples = []string{"spine g route create-user --method POST --path /users --handler src/controller:UserController.Create", "spine g route get-user --method GET --path /users/:id --handler src/controller/account:UserController.Get"}
 	case "consumer":
 		fmt.Fprintln(out, "Output: src/consumer/[group/]name. The generator registers the constructor and receive contract. Replace the unimplemented error with application logic before verification.")

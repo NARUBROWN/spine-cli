@@ -39,15 +39,17 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
  func (*Registry) POST(string,any,...Option){}
  func (*Registry) GET(string,any,...Option){}
  `)
-	write("core/pkg/input/input.go", "package input\ntype Body[T any] *T\ntype Query[T any] *T\ntype Path[T any] *T\n")
+	write("core/pkg/input/input.go", "package input\ntype Body[T any] *T\ntype Query[T any] *T\ntype Path[T any] *T\ntype Header[T any] *T\n")
 	write("core/pkg/httpx/httpx.go", "package httpx\ntype Response[T any] struct{Body T}\n")
 	write("controller.go", `package typed
  import (
+ "mime/multipart"
  "github.com/NARUBROWN/spine/pkg/api"
  "github.com/NARUBROWN/spine/pkg/input"
  "github.com/NARUBROWN/spine/pkg/httpx"
  )
  type DTO struct{Name string; UserID int}
+ type FixtureFileHeader = multipart.FileHeader
  type PathDTO struct{ID int `+"`path:\"id\"`"+`}
  type Payload = input.Body[DTO]
  type Result = httpx.Response[DTO]
@@ -68,9 +70,10 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
 
 func TestControllerRoutesResolveTypedContractAndHelpersWithoutExecution(t *testing.T) {
 	inspector := controllerFixture(t, `
+ type QueryDTO DTO
  func(c *UserController)RegisterRoutes(r *api.Registry){c.users(r)}
  func(c *UserController)users(r *api.Registry){
-  r.POST(endpoint,func(a Payload,p *PathDTO,q input.Query[DTO])(Result,error){return Result{Body:DTO{Name:a.Name}},nil})
+  r.POST(endpoint,func(a Payload,p *PathDTO,q input.Query[QueryDTO])(Result,error){return Result{Body:DTO{Name:a.Name}},nil})
  }
  `)
 	inspector.inspectControllerRoutes()
@@ -279,10 +282,10 @@ func TestStaticGroupForwardingWithCoreCandidate(t *testing.T) {
 	}
 	inspector := controllerFixture(t, `
  type auth struct{}
- func(*auth)PreHandle(core.ExecutionContext,core.HandlerMeta)error{return nil}
- func(*auth)PostHandle(core.ExecutionContext,core.HandlerMeta){}
- func(*auth)BeforeResponse(core.ExecutionContext,core.HandlerMeta,error)error{return nil}
- func(*auth)AfterCompletion(core.ExecutionContext,core.HandlerMeta,error){}
+ func(*auth)PreHandle(spine.Ctx,core.HandlerMeta)error{return nil}
+ func(*auth)PostHandle(spine.Ctx,core.HandlerMeta){}
+ func(*auth)BeforeResponse(spine.Ctx,core.HandlerMeta,error)error{return nil}
+ func(*auth)AfterCompletion(spine.Ctx,core.HandlerMeta,error){}
  var outer,inner,local = &auth{},&auth{},&auth{}
  func(c *UserController)RegisterRoutes(r *api.Registry){ var users=r.Group("/users",api.Tags("Users"),api.Interceptors(outer)); register(users) }
 	func register(g *api.Group){var alias=g;nested:=alias.Group("/admin",api.Interceptors(inner));nested.GET("/",func(q input.Query[DTO])(Result,error){return Result{},nil},route.WithInterceptors(local))}
@@ -291,7 +294,7 @@ func TestStaticGroupForwardingWithCoreCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source = []byte(strings.Replace(string(source), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api"`+"\n"+`"github.com/NARUBROWN/spine/core"`+"\n"+`"github.com/NARUBROWN/spine/pkg/route"`, 1))
+	source = []byte(strings.Replace(string(source), `"github.com/NARUBROWN/spine/pkg/api"`, `"github.com/NARUBROWN/spine/pkg/api"`+"\n"+`"github.com/NARUBROWN/spine/core"`+"\n"+`"github.com/NARUBROWN/spine/pkg/spine"`+"\n"+`"github.com/NARUBROWN/spine/pkg/route"`, 1))
 	if err = os.WriteFile("controller.go", source, 0644); err != nil {
 		t.Fatal(err)
 	}

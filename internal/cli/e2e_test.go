@@ -81,13 +81,29 @@ func TestCLIEndToEndAgentGenerationAndRuntimeCache(t *testing.T) {
 		assertProtocolOK(t, contract.stdout)
 
 		routeDirectory := filepath.Join(project, "src", "route")
+		routePath := filepath.Join(routeDirectory, "route.go")
+		_, routeErr := os.Stat(routePath)
+		modern := os.IsNotExist(routeErr)
+		if modern {
+			if err := os.MkdirAll(routeDirectory, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeE2EFile(t, routePath, "package route\n")
+		} else if routeErr != nil {
+			t.Fatal(routeErr)
+		}
 		localController := runE2E(binary, routeDirectory, nil, "generate", "controller", "local")
 		assertE2ESuccess(t, localController, "controller in route package")
-		routeSource, err := os.ReadFile(filepath.Join(routeDirectory, "route.go"))
+		want := "(*LocalController).Get"
+		if modern {
+			routePath = filepath.Join(routeDirectory, "local_controller.go")
+			want = `r.GET("/local/:id", c.Get)`
+		}
+		routeSource, err := os.ReadFile(routePath)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(routeSource), `"example.com/todo/src/route"`) || !strings.Contains(string(routeSource), "(*LocalController).Get") {
+		if strings.Contains(string(routeSource), `"example.com/todo/src/route"`) || !strings.Contains(string(routeSource), want) {
 			t.Fatalf("route package self-imported after E2E generation:\n%s", routeSource)
 		}
 		tidy := exec.Command("go", "mod", "tidy")

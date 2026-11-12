@@ -8,6 +8,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -38,6 +39,10 @@ func applicationBuildArgs(config projectConfig, output string, overlay *frontend
 }
 
 func createFrontendOverlay(projectRoot string, config projectConfig, settings *frontendSettings) (*frontendOverlay, error) {
+	return createFrontendServingOverlay(projectRoot, config, settings, false)
+}
+
+func createFrontendServingOverlay(projectRoot string, config projectConfig, settings *frontendSettings, embedAssets bool) (*frontendOverlay, error) {
 	if settings == nil {
 		return nil, nil
 	}
@@ -75,15 +80,18 @@ func createFrontendOverlay(projectRoot string, config projectConfig, settings *f
 	if !frontendPlatformAliasUsed(sourceFile, optionAlias) {
 		removeFrontendPlatformImport(sourceFile, optionAlias, optionKind)
 	}
-	defaultStaticRelative, err := filepath.Rel(filepath.Join(projectRoot, "bin"), settings.output)
-	if err != nil {
-		return nil, fmt.Errorf("could not resolve the frontend output path for application builds: %w", err)
+	var defaultStaticRelative string
+	if !embedAssets {
+		defaultStaticRelative, err = filepath.Rel(filepath.Join(projectRoot, "bin"), settings.output)
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve the frontend output path for application builds: %w", err)
+		}
 	}
 	var modified strings.Builder
 	if err := format.Node(&modified, fset, sourceFile); err != nil {
 		return nil, fmt.Errorf("could not format frontend composition overlay: %w", err)
 	}
-	helper, err := frontendOverlaySource(optionKind, sourceFile.Name.Name, defaultStaticRelative, settings.apiPrefix)
+	helper, err := frontendOverlaySource(optionKind, sourceFile.Name.Name, defaultStaticRelative, settings.apiPrefix, embedAssets)
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +119,12 @@ func createFrontendOverlay(projectRoot string, config projectConfig, settings *f
 		return nil, err
 	}
 	replacements := map[string]string{sourcePath: modifiedPath, virtualHelperPath: helperPath}
+	if embedAssets {
+		if err := overlayFrontendAssets(replacements, composition, settings.output); err != nil {
+			cleanup()
+			return nil, err
+		}
+	}
 	overlayBytes, err := json.Marshal(struct {
 		Replace map[string]string `json:"Replace"`
 	}{Replace: replacements})
@@ -124,6 +138,34 @@ func createFrontendOverlay(projectRoot string, config projectConfig, settings *f
 		return nil, err
 	}
 	return &frontendOverlay{path: overlayPath, cleanup: cleanup}, nil
+}
+
+const frontendEmbedDir = "spine_frontend_assets"
+
+// overlayFrontendAssets makes the build output available to go:embed without writing into the project.
+func overlayFrontendAssets(replacements map[string]string, composition, output string) error {
+	virtualRoot := filepath.Join(composition, frontendEmbedDir)
+	if _, err := os.Lstat(virtualRoot); err == nil {
+		return fmt.Errorf("composition package already contains reserved path %q", frontendEmbedDir)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("could not inspect reserved frontend path: %w", err)
+	}
+	return filepath.WalkDir(output, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		relative, err := filepath.Rel(output, path)
+		if err != nil {
+			return err
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("cannot embed non-regular frontend file %q", relative)
+		}
+		if relative != frontendOutputMarker {
+			replacements[filepath.Join(virtualRoot, relative)] = path
+		}
+		return nil
+	})
 }
 
 func supportsFrontendServingPlatform(platform string) bool {
@@ -171,7 +213,7 @@ func frontendOverlayFingerprint(projectRoot string, config projectConfig, settin
 	if err != nil {
 		return overlayCacheVersion + "\n" + installedVersion() + "\nerror:" + err.Error()
 	}
-	source, err := frontendOverlaySource(kind, packageName, defaultStaticRelative, settings.apiPrefix)
+	source, err := frontendOverlaySource(kind, packageName, defaultStaticRelative, settings.apiPrefix, false)
 	if err != nil {
 		return overlayCacheVersion + "\n" + installedVersion() + "\nerror:" + err.Error()
 	}
@@ -337,7 +379,7 @@ func replaceFrontendPlatformCall(file *ast.File, alias, kind string) error {
 	return nil
 }
 
-func frontendOverlaySource(kind, packageName, defaultStaticRelative, apiPrefix string) ([]byte, error) {
+func frontendOverlaySource(kind, packageName, defaultStaticRelative, apiPrefix string, embedAssets bool) ([]byte, error) {
 	var aliases, constructors string
 	switch kind {
 	case "echo":
@@ -361,8 +403,8 @@ func spineCLIFrontendEchoFactory(options ...echoplatform.EchoOption) adapter.Fac
 	}))
 	return echoplatform.NewFactory(options...)
 }
-func frontendEchoStaticFallback(root, apiPrefix string) echo.MiddlewareFunc {
-	if root == "" {
+func frontendEchoStaticFallback(root http.FileSystem, apiPrefix string) echo.MiddlewareFunc {
+	if root == nil {
 		return func(next echo.HandlerFunc) echo.HandlerFunc { return next }
 	}
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -453,11 +495,19 @@ func spineCLIFrontendNethttpFactory(options ...nethttpplatform.NetHTTPOption) ad
 	}
 	var source strings.Builder
 	source.WriteString("package " + packageName + "\n\nimport (\n\"bufio\"\n\"bytes\"\n\"net\"\n\"net/http\"\n\"os\"\n\"path/filepath\"\n\"strings\"\n")
+	if embedAssets {
+		source.WriteString("\"embed\"\n\"io/fs\"\n")
+	}
 	source.WriteString(aliases)
 	source.WriteString(")\n")
-	serverHelpers := strings.Replace(frontendServerHelpers, `const frontendStaticOutput = "frontend"`, "const frontendStaticOutput = "+strconv.Quote(filepath.ToSlash(defaultStaticRelative)), 1)
-	serverHelpers = strings.Replace(serverHelpers, `const frontendDefaultAPIPrefix = "/api"`, "const frontendDefaultAPIPrefix = "+strconv.Quote(apiPrefix), 1)
+	serverHelpers := strings.Replace(frontendServerHelpers, `const frontendDefaultAPIPrefix = "/api"`, "const frontendDefaultAPIPrefix = "+strconv.Quote(apiPrefix), 1)
 	source.WriteString(serverHelpers)
+	if embedAssets {
+		source.WriteString(frontendEmbeddedRoot)
+	} else {
+		source.WriteString("\nconst frontendStaticOutput = " + strconv.Quote(filepath.ToSlash(defaultStaticRelative)) + "\n")
+		source.WriteString(frontendDiskRoot)
+	}
 	source.WriteString(constructors)
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {

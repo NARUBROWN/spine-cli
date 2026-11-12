@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/mod/module"
 )
 
 const layeredLayout = "layered-v1"
@@ -61,6 +63,12 @@ func parseGenerationName(value string) (generationName, error) {
 			return generationName{}, fmt.Errorf("invalid Go package name %q", part)
 		}
 		parts[index] = n.Package
+	}
+	// 역할 생성의 leaf는 파일과 타입 이름이며, 그룹만 import 경로에 들어갑니다.
+	if len(parts) > 1 {
+		if err := module.CheckImportPath(strings.Join(parts[:len(parts)-1], "/")); err != nil {
+			return generationName{}, fmt.Errorf("invalid Go import path for generation %q: %w", value, err)
+		}
 	}
 	name, err := parseResourceName(parts[len(parts)-1])
 	if err == nil && !ast.IsExported(name.Type) {

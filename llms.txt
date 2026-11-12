@@ -16,8 +16,8 @@
 - 프로젝트와 제품 이름: `spine-cli`
 - 공식 설치 진입점: `github.com/NARUBROWN/spine-cli/cmd/spine`
 - 실행 파일과 호출 명령: `spine`
-- 로컬 빌드의 CLI 버전: `0.4.4-dev`
-- 공개 설치는 실제 모듈 버전을 표시하고 로컬 빌드의 `spine version`은 `spine-cli 0.4.4-dev`를 표시한다.
+- 로컬 빌드의 CLI 버전: `0.4.5-dev`
+- 공개 설치는 실제 모듈 버전을 표시하고 로컬 빌드의 `spine version`은 `spine-cli 0.4.5-dev`를 표시한다.
 - Go module: `github.com/NARUBROWN/spine-cli`
 - CLI와 검증기 없는 생성 앱: Go `1.25.5` 이상. playground 선택 앱: Go `1.26.0` 이상 (go-playground v10.30.6)
 - 이번 로컬 검증 Go 버전: `1.26.0`
@@ -681,7 +681,7 @@ Message 계약 불확실성/충돌:
 
 HTTP 정적 binding:
 
-- `context.Context`, `core.ControllerContext`, `pkg/spine.Ctx`와 확인 가능한 Get 전용 context interface: context
+- `context.Context`, `pkg/spine.Ctx`와 확인 가능한 Get 전용 인터페이스를 컨텍스트로 분류한다. 이전 코어의 `core.ControllerContext`를 사용하던 핸들러는 새 코어에서 `pkg/spine.Ctx`로 바꾼다.
 - 실제 Spine `path.Int`, `path.String`, `path.Boolean` 타입: route path parameter에 순서대로 binding
 - 실제 Spine `query.Values`, `query.Pagination`: query. Preview 코어에서는 Deprecated 경고를 표시한다.
 - 실제 Spine `header.Values`: header. Preview 코어에서는 Deprecated 경고를 표시한다.
@@ -774,7 +774,7 @@ spine contract diff --against contracts/api.json --json
 
 ```sh
 spine contract export --format openapi --output openapi.json
-spine contract export --format openapi --source runtime --output runtime-openapi.json
+spine contract export --format openapi --source runtime --prepare --output runtime-openapi.json
 spine contract export --format asyncapi --output asyncapi.json
 ```
 
@@ -782,15 +782,15 @@ spine contract export --format asyncapi --output asyncapi.json
 `--force`가 필요하다. error diagnostic이 있는 contract는 export하지 않는다.
 
 source 기본값은 static이다. --source runtime은 import 가능한 composition의 BuildApplication을 실행하고
-공개 코어의 DescribeHTTP와 openapi.Generate를 호출한다. 리스너, DI 생성자와 요청 핸들러는 시작하지
-않지만 composition 사용자 코드와 Go 도구는 실행한다. 실패하면 static으로 자동 전환하지 않는다.
+공개 코어의 DescribeHTTP와 openapi.Generate를 호출한다. Registry 라우트에는 --prepare를 추가한다.
+이 옵션은 리스너 없이 앱을 준비하고 명세를 읽은 뒤 닫는다. DI 생성자와 설정된 DB, 브로커 초기화가 실행될 수 있다.
 검증기를 등록하지 않은 앱의 런타임 명세는 경로 중심 정보만 제공한다. OpenAPI HTTP 리소스는
 기본 비활성화이며 boot.HTTPOptions.OpenAPI.Enabled로 켠다. AsyncAPI는 static만 지원한다.
 
 기존 static OpenAPI 3.1 export:
 
 - 확인 가능한 HTTP path와 path parameter
-- pointer request DTO와 source에서 찾은 struct schema
+- input.Body[T]의 JSON, XML 및 해당되는 폼 스키마
 - `httpx.Response[T]`의 body type과 해당 import 별칭
 - 스키마 타입은 패키지 경로와 타입 이름으로 구분하고, 동명 타입의 component ID에는 안정적인 구분자를 사용
 - JSON 태그가 없으면 Go 필드 이름을 유지하고 `json:"-"`와 선택적 필드 태그를 반영
@@ -936,6 +936,20 @@ JSON Lines parser로 읽을 수 있다. 주요 event:
 - `run`, `test`, `check`, `build`의 `--help`와 `-h`는 앱이나 Go 검사를 실행하지 않는다.
   그 밖의 명령별 인자는 지원하지 않으며 오류로 처리한다. `spine test -run`을 조용히 무시하지 않는다.
   테스트 필터는 `go test ./... -run <이름>`으로 직접 실행한다.
+
+### 15.3 프론트 환경 변수
+
+- React CSR 빌드는 `spine.toml`이 있는 프로젝트 루트의 `.env`를 읽는다. `frontend_root`가
+  다른 경로여도 같으며, 프론트 폴더의 `.env`와 모드별 `.env.*`는 읽지 않는다.
+- `.env`에 선언한 모든 변수를 이름 그대로 `import.meta.env.API_URL` 같은 접근과
+  `import.meta.env` 객체에 제공한다. 접두사 규칙이나 변수 이름별 필터는 없다.
+  선언한 이름과 같은 프로세스 환경 변수가 있으면 그 값을 우선하며, 빈 문자열도 유효한 재정의다.
+- 값은 문자열이다. 없는 키는 undefined다. `.env`에 넣은 값은 프론트 번들에 포함되어
+  브라우저에 공개된다. `.env`에 선언하지 않은 프로세스 환경 변수는 추가하지 않는다.
+- dev는 루트 `.env`의 생성, 수정, 삭제를 감지해 재빌드한다. 반영하려면 페이지를 새로고침한다.
+  dotenv 구문 오류로 빌드가 실패하면 이전 프론트 출력을 유지하며 원문 값은 진단에 출력하지 않는다.
+- run, build, deploy는 빌드 시점의 값을 번들에 넣는다. 배포 후 환경 변수만 바꿔서는 갱신되지 않는다.
+- 프론트 환경 변수를 읽어도 CLI 프로세스의 환경을 수정하지 않는다. 서버의 dotenv 로딩은 앱에서 관리한다.
 
 ## 16. 저장소를 수정하는 Agent용 source map
 

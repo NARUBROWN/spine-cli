@@ -266,7 +266,7 @@ func BuildApplication() { _ = echoplatform.Option() }
 func TestGeneratedFrontendFallbackSupportsStreamingResponseWriters(t *testing.T) {
 	for _, kind := range []string{"echo", "nethttp"} {
 		t.Run(kind, func(t *testing.T) {
-			source, err := frontendOverlaySource(kind, "application", "frontend", "/api")
+			source, err := frontendOverlaySource(kind, "application", "frontend", "/api", false)
 			if err != nil {
 				t.Fatal(err)
 			}

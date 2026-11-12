@@ -26,7 +26,7 @@ func TestStaticOpenAPIInputDTOAndMultipartAgainstRuntime(t *testing.T) {
 	}
 	writeE2EFile(t, application, updated)
 	writeE2EFile(t, filepath.Join(project, "internal/application/input_probe.go"), `package application
-import ("mime/multipart"; "os"; clock "time")
+import ("mime/multipart"; "os"; clock "time"; "github.com/NARUBROWN/spine/pkg/input")
 func init() { _ = os.WriteFile("ran-user-code", []byte("yes"), 0600) }
 type PathInput struct { ID int64 `+"`path:\"id\"`"+` }
 type QueryInput struct { Limit *int `+"`query:\"limit\" validate:\"omitempty,min=1\"`"+` }
@@ -36,12 +36,16 @@ type Date = clock.Time
 type JSONInput struct { Created clock.Time `+"`json:\"created\"`"+`; Modified Date `+"`json:\"modified\"`"+` }
 type InputProbe struct{}
 func NewInputProbe() *InputProbe { return &InputProbe{} }
-func (*InputProbe) Post(path *PathInput, query *QueryInput, header *HeaderInput, body *UploadInput) error { return nil }
-func (*InputProbe) JSON(body *JSONInput) error { return nil }
+func (*InputProbe) Post(path input.Path[PathInput], query input.Query[QueryInput], header input.Header[HeaderInput], body input.Body[UploadInput]) error { return nil }
+func (*InputProbe) JSON(body input.Body[JSONInput]) error { return nil }
 `)
 	var docs []map[string]any
 	for _, mode := range []string{"static", "runtime"} {
-		result := runE2E(binary, project, nil, "contract", "export", "--format", "openapi", "--source", mode)
+		args := []string{"contract", "export", "--format", "openapi", "--source", mode}
+		if mode == "runtime" && strings.Contains(string(source), "func (c *HealthController) RegisterRoutes(") {
+			args = append(args, "--prepare")
+		}
+		result := runE2E(binary, project, nil, args...)
 		assertE2ESuccess(t, result, mode)
 		_, err := os.Stat(filepath.Join(project, "ran-user-code"))
 		if mode == "static" && !os.IsNotExist(err) {

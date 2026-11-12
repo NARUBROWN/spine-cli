@@ -1,7 +1,6 @@
 package cli
 
 const frontendServerHelpers = `
-const frontendStaticOutput = "frontend"
 const frontendOutputMarker = ".spine-frontend-output"
 const frontendDefaultAPIPrefix = "/api"
 
@@ -60,19 +59,13 @@ func replaceFrontendHeaderMap(target, source http.Header) {
  for key, values := range source { target[key] = append([]string(nil), values...) }
 }
 
-func frontendStaticRoot() string {
- if configured := strings.TrimSpace(os.Getenv("SPINE_STATIC_DIR")); configured != "" { return configured }
- executable, err := os.Executable()
- if err != nil { return "" }
- return filepath.Join(filepath.Dir(executable), frontendStaticOutput)
-}
 func frontendAPIPrefix() string {
  prefix := strings.TrimSpace(os.Getenv("SPINE_FRONTEND_API_PREFIX"))
 	if !strings.HasPrefix(prefix, "/") || prefix == "/" { return frontendDefaultAPIPrefix }
  return strings.TrimSuffix(prefix, "/")
 }
-func frontendStaticFallback(root, apiPrefix string) func(http.Handler) http.Handler {
- if root == "" { return func(next http.Handler) http.Handler { return next } }
+func frontendStaticFallback(root http.FileSystem, apiPrefix string) func(http.Handler) http.Handler {
+ if root == nil { return func(next http.Handler) http.Handler { return next } }
  return func(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
    if request.Method != http.MethodGet && request.Method != http.MethodHead { next.ServeHTTP(w, request); return }
@@ -103,8 +96,8 @@ func frontendRelativePath(requestPath string) (string, bool) {
  if clean == frontendOutputMarker { return "", false }
  return filepath.ToSlash(clean), true
 }
-func serveFrontendFile(w http.ResponseWriter, request *http.Request, root, name string) bool {
- file, err := http.Dir(root).Open(name)
+func serveFrontendFile(w http.ResponseWriter, request *http.Request, root http.FileSystem, name string) bool {
+ file, err := root.Open(name)
  if err != nil { return false }
  defer file.Close()
  info, err := file.Stat()
@@ -120,5 +113,25 @@ func copyFrontendResponse(w http.ResponseWriter, captured *frontendResponseCaptu
 }
 func replaceFrontendHeaders(w http.ResponseWriter, captured *frontendResponseCapture) {
 	replaceFrontendHeaderMap(w.Header(), captured.header)
+}
+`
+
+const frontendDiskRoot = `
+func frontendStaticRoot() http.FileSystem {
+ if configured := strings.TrimSpace(os.Getenv("SPINE_STATIC_DIR")); configured != "" { return http.Dir(configured) }
+ executable, err := os.Executable()
+ if err != nil { return nil }
+ return http.Dir(filepath.Join(filepath.Dir(executable), frontendStaticOutput))
+}
+`
+
+const frontendEmbeddedRoot = `
+//go:embed all:` + frontendEmbedDir + `
+var frontendAssets embed.FS
+
+func frontendStaticRoot() http.FileSystem {
+ root, err := fs.Sub(frontendAssets, "` + frontendEmbedDir + `")
+ if err != nil { return nil }
+ return http.FS(root)
 }
 `

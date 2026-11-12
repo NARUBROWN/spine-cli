@@ -170,6 +170,12 @@ func frontendSourceState(projectRoot string, config projectConfig) (string, bool
 		_, _ = digest.Write(contents)
 		_, _ = digest.Write([]byte{'\n'})
 	}
+	environment, err := readFrontendEnvFile(projectRoot)
+	if err != nil {
+		return "", true, err
+	}
+	fmt.Fprintf(digest, "\nproject.env:%d:", len(environment))
+	_, _ = digest.Write(environment)
 	return fmt.Sprintf("%x", digest.Sum(nil)), true, nil
 }
 
@@ -178,6 +184,11 @@ func newFrontendBuilder(projectRoot string, config projectConfig, production boo
 	if err != nil || settings == nil {
 		return nil, settings != nil, err
 	}
+	builder, err := newFrontendBuilderForSettings(projectRoot, *settings, production)
+	return builder, true, err
+}
+
+func newFrontendBuilderForSettings(projectRoot string, settings frontendSettings, production bool) (*frontendBuilder, error) {
 	options := api.BuildOptions{
 		AbsWorkingDir:     settings.root,
 		EntryPoints:       []string{settings.entry},
@@ -198,6 +209,9 @@ func newFrontendBuilder(projectRoot string, config projectConfig, production boo
 		MinifyIdentifiers: production,
 		MinifySyntax:      production,
 		LegalComments:     api.LegalCommentsLinked,
+		Define:            map[string]string{"import.meta.env": "__spine_frontend_env"},
+		Inject:            []string{frontendEnvModule},
+		Plugins:           []api.Plugin{frontendEnvPlugin(projectRoot)},
 	}
 	switch settings.descriptor.JSX {
 	case "automatic":
@@ -219,9 +233,9 @@ func newFrontendBuilder(projectRoot string, config projectConfig, production boo
 	}
 	ctx, contextErr := api.Context(options)
 	if contextErr != nil {
-		return nil, true, formatEsbuildMessages(contextErr.Errors)
+		return nil, formatEsbuildMessages(contextErr.Errors)
 	}
-	return &frontendBuilder{settings: *settings, context: ctx}, true, nil
+	return &frontendBuilder{settings: settings, context: ctx}, nil
 }
 
 func frontendEsbuildLoader(name string) api.Loader {
