@@ -55,9 +55,15 @@ func TestBuildCloudArtifactEmbedsFrontend(t *testing.T) {
 		t.Fatal(err)
 	}
 	const scriptMarker = "cloud-frontend-compiled-script"
+	const envMarker = "cloud-frontend-root-env"
 	const publicMarker = "cloud-frontend-public-file"
 	// npm 설치 없이 실제 정적 빌드와 실행 파일 내장을 검증합니다.
-	files["web/src/main.tsx"] = `document.body.textContent = "` + scriptMarker + `";`
+	files["web/src/main.tsx"] = `document.body.textContent = "` + scriptMarker + `" + import.meta.env.CLOUD_FRONTEND_TEST;`
+	files[".env"] = "CLOUD_FRONTEND_TEST=" + envMarker + "\n"
+	t.Setenv("CLOUD_FRONTEND_TEST", "")
+	if err := os.Unsetenv("CLOUD_FRONTEND_TEST"); err != nil {
+		t.Fatal(err)
+	}
 	files["web/public/.well-known/cloud.txt"] = publicMarker
 	files["bin/frontend/keep.txt"] = "local frontend output"
 	for path, contents := range files {
@@ -76,7 +82,7 @@ func TestBuildCloudArtifactEmbedsFrontend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cloud build: %v\n%s\n%s", err, out.String(), errOut.String())
 	}
-	for _, expected := range []string{scriptMarker, publicMarker, "/assets/app.js"} {
+	for _, expected := range []string{scriptMarker, envMarker, publicMarker, "/assets/app.js"} {
 		if !bytes.Contains(artifact.Binary, []byte(expected)) {
 			t.Errorf("missing frontend output %q in the artifact", expected)
 		}

@@ -50,7 +50,7 @@ func buildCloudArtifact(ctx context.Context, out, errOut io.Writer) (cloudArtifa
 		}
 		defer os.RemoveAll(dir)
 		frontend.output = filepath.Join(dir, "frontend")
-		builder, err := newFrontendBuilderForSettings(*frontend, true)
+		builder, err := newFrontendBuilderForSettings(root, *frontend, true)
 		if err != nil {
 			return empty, fmt.Errorf("could not initialize frontend build: %w", err)
 		}

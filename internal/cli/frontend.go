@@ -184,11 +184,11 @@ func newFrontendBuilder(projectRoot string, config projectConfig, production boo
 	if err != nil || settings == nil {
 		return nil, settings != nil, err
 	}
-	builder, err := newFrontendBuilderForSettings(*settings, production)
+	builder, err := newFrontendBuilderForSettings(projectRoot, *settings, production)
 	return builder, true, err
 }
 
-func newFrontendBuilderForSettings(settings frontendSettings, production bool) (*frontendBuilder, error) {
+func newFrontendBuilderForSettings(projectRoot string, settings frontendSettings, production bool) (*frontendBuilder, error) {
 	options := api.BuildOptions{
 		AbsWorkingDir:     settings.root,
 		EntryPoints:       []string{settings.entry},
