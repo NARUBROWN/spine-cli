@@ -148,6 +148,11 @@ func submitCloudArtifact(ctx context.Context, client *http.Client, api, appID, r
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
+	if adapters, adapterErr := cloudAdapterSignal(api); adapterErr != nil {
+		return empty, adapterErr
+	} else if adapters != "" {
+		req.Header.Set(cloudAdapterHeader, adapters)
+	}
 	c := *client
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	res, err := c.Do(req)
@@ -184,7 +189,7 @@ func runDeploy(args []string, out, errOut io.Writer) int {
 	}
 	appID, api, requestID := "", strings.TrimRight(os.Getenv("SPINE_CLOUD_API_URL"), "/"), ""
 	if api == "" {
-		api = "https://api.spinecloud.dev"
+		api = cloudOfficialAPI
 	}
 	for i := 0; i < len(args); i++ {
 		if i+1 >= len(args) {
