@@ -297,7 +297,7 @@ def latest_preview_tag(github):
     return max(versions)[2]
 
 
-def readme_only_preview_head(github, tagged_sha, selected_version):
+def release_compatible_preview_head(github, tagged_sha, selected_version, module):
     suffix = re.search(r"[.-]\d{14}-([0-9a-f]{12})\Z", selected_version)
     if not suffix:
         return None
@@ -305,12 +305,24 @@ def readme_only_preview_head(github, tagged_sha, selected_version):
     if not SHA.fullmatch(head) or not head.startswith(suffix[1]):
         return None
     comparison = github.api(f"compare/{tagged_sha}...{head}")
-    readmes = {"README.md", "README.en.md", "README.ja.md", "README.zh-Hans.md", "README.zh-Hant.md"}
+    allowed_files = {"README.md", "README.en.md", "README.ja.md", "README.zh-Hans.md", "README.zh-Hant.md"}
+    if module == CORE_MODULE:
+        allowed_files.update({
+            "scripts/release/release.py",
+            "scripts/release/test_release.py",
+            "scripts/release/verify_public.py",
+        })
     files = comparison.get("files") or []
-    # 검증된 태그 이후 기존 채널별 README만 수정됐는지 확인합니다.
+    if module == "github.com/NARUBROWN/spine-echo-platform":
+        allowed_files.update({
+            "scripts/release/release.py",
+            "scripts/release/verify_public.py",
+            "test/release/test_release.py",
+        })
+    # 검증된 태그 이후 기존 문서와 지정한 발행 도구의 수정만 허용합니다.
     if (comparison.get("status") == "ahead" and comparison.get("merge_base_commit", {}).get("sha") == tagged_sha
-            and 0 < len(files) <= len(readmes)
-            and all(file.get("status") == "modified" and file.get("filename") in readmes for file in files)):
+            and 0 < len(files) <= len(allowed_files)
+            and all(file.get("status") == "modified" and file.get("filename") in allowed_files for file in files)):
         return head
     return None
 
@@ -380,7 +392,7 @@ def upstream_evidence(recipe, github_factory=None):
         if snapshot["version"] == version:
             continue
         dependency = github_factory(module.removeprefix("github.com/"))
-        selected_sha = readme_only_preview_head(dependency, snapshot["source_sha"], version)
+        selected_sha = release_compatible_preview_head(dependency, snapshot["source_sha"], version, module)
         if selected_sha is None:
             raise ReleaseError("CLI 생성 레시피와 선행 태그가 다릅니다: " + module)
         snapshot["selected_source_sha"] = selected_sha
