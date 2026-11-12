@@ -117,11 +117,10 @@ class UpstreamEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "레시피"):
             self.check()
 
-    def set_readme_only_head(self):
-        module = release.CORE_MODULE
+    def set_readme_only_head(self, module=release.CORE_MODULE):
         item = Dependency.data[module]
         item["head"] = "c" * 40
-        item["selected_version"] = CORE + ".0.20261108124442-" + item["head"][:12]
+        item["selected_version"] = item["tag"] + ".0.20261108124442-" + item["head"][:12]
         self.recipe["modules"][module] = item["selected_version"]
         item["comparison"] = {"status": "ahead", "merge_base_commit": {"sha": SHA},
                               "files": [{"status": "modified", "filename": "README.zh-Hans.md"}]}
@@ -133,6 +132,31 @@ class UpstreamEvidenceTests(unittest.TestCase):
         self.assertEqual(snapshot["source_sha"], SHA)
         self.assertEqual(snapshot["selected_source_sha"], item["head"])
         self.assertEqual(snapshot["selected_version"], item["selected_version"])
+
+    def test_accepts_only_listed_core_release_script_modifications(self):
+        item = self.set_readme_only_head()
+        files = item["comparison"]["files"]
+        files[:] = [{"status": "modified", "filename": "scripts/release/" + name}
+                    for name in ("release.py", "test_release.py", "verify_public.py")]
+        snapshot = self.check()[release.CORE_MODULE]
+        self.assertEqual(snapshot["selected_source_sha"], item["head"])
+        files.append({"status": "modified", "filename": "scripts/release/other.py"})
+        with self.assertRaisesRegex(release.ReleaseError, "레시피"):
+            self.check()
+
+    def test_accepts_only_listed_echo_release_script_modifications(self):
+        module = "github.com/NARUBROWN/spine-echo-platform"
+        item = self.set_readme_only_head(module)
+        files = item["comparison"]["files"]
+        files[:] = [{"status": "modified", "filename": path} for path in (
+            "scripts/release/release.py",
+            "scripts/release/verify_public.py",
+            "test/release/test_release.py",
+        )]
+        self.assertEqual(self.check()[module]["selected_source_sha"], item["head"])
+        files.append({"status": "modified", "filename": "scripts/release/test_release.py"})
+        with self.assertRaisesRegex(release.ReleaseError, "레시피"):
+            self.check()
 
     def test_rejects_a_source_change_even_with_readme_changes(self):
         item = self.set_readme_only_head()
