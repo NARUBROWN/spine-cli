@@ -183,11 +183,14 @@ func (i *contractInspector) inspectControllerRoutes() {
 		}
 		outputs[index] = output
 		signatures[index] = signature
-		if provider.object || provider.Role != "" {
+		provider.typedResolved = true
+		if i.qualified || provider.object || provider.Role != "" {
 			provider.Dependencies = []string{}
 			for n := 0; n < signature.Params().Len(); n++ {
 				provider.Dependencies = append(provider.Dependencies, componentTypeName(signature.Params().At(n).Type()))
 			}
+		}
+		if provider.object || provider.Role != "" {
 			provider.Output = componentTypeName(output)
 			required := types.Type(nil)
 			switch provider.Role {

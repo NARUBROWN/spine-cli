@@ -78,7 +78,7 @@ func (i *contractInspector) resolveLayeredConstructors() {
 		}
 		if matches := signatures[ctor.Target]; len(matches) == 1 && matches[0].Output != "" {
 			ctor.Dependencies = matches[0].Dependencies
-		} else {
+		} else if !ctor.typedResolved {
 			i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "CONSTRUCTOR_SIGNATURE_UNRESOLVED", Message: fmt.Sprintf("could not resolve %s from project source", ctor.Target), Source: ctor.Source})
 		}
 	}
