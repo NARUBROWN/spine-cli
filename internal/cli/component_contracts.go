@@ -132,8 +132,8 @@ func typedComponentConstructor(provider contractRegistration, all map[string]*pa
 	}
 	if !provider.object {
 		signature, ok := object.Type().(*types.Signature)
-		if !ok || signature.Results().Len() != 1 {
-			return nil, nil, "component factory must return exactly one value: " + target
+		if !ok || !validComponentConstructorResults(signature) {
+			return nil, nil, "component factory must be non-variadic and return a value or a value and error: " + target
 		}
 		return types.Unalias(signature.Results().At(0).Type()), signature, ""
 	}
@@ -146,11 +146,20 @@ func typedComponentConstructor(provider contractRegistration, all map[string]*pa
 		return nil, nil, "missing Constructor method: " + target
 	}
 	signature, ok := selection.Obj().Type().(*types.Signature)
-	if !ok || signature.Variadic() || signature.Results().Len() != 1 || !types.Identical(types.Unalias(signature.Results().At(0).Type()), owner) {
-		return nil, nil, "Constructor must be non-variadic and return exactly " + types.TypeString(owner, nil)
+	if !ok || !validComponentConstructorResults(signature) || !types.Identical(types.Unalias(signature.Results().At(0).Type()), owner) {
+		return nil, nil, "Constructor must be non-variadic and return " + types.TypeString(owner, nil) + " or that type and error"
 	}
 	return owner, signature, ""
 }
+func validComponentConstructorResults(signature *types.Signature) bool {
+	results := signature.Results()
+	errorType := types.Universe.Lookup("error").Type()
+	if signature.Variadic() || results.Len() == 0 || results.Len() > 2 || types.Identical(results.At(0).Type(), errorType) {
+		return false
+	}
+	return results.Len() == 1 || types.Identical(results.At(1).Type(), errorType)
+}
+
 func componentTypeName(t types.Type) string {
 	return strings.ReplaceAll(types.TypeString(t, func(p *types.Package) string { return p.Path() + ":" }), ":.", ":")
 }

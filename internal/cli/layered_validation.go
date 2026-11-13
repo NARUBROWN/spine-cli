@@ -44,7 +44,7 @@ func (p *layeredPlanner) validateGraphs() error {
 	for _, constructor := range inspector.contract.Constructors {
 		matches := signatures[constructor.Target]
 		if len(matches) != 1 || matches[0].Output == "" {
-			return fmt.Errorf("constructor %s must resolve to one non-generic function returning exactly one value", constructor.Target)
+			return fmt.Errorf("constructor %s must resolve to one non-variadic, non-generic function returning a value or a value and error", constructor.Target)
 		}
 		signature := matches[0]
 		if old, exists := providers[signature.Output]; exists && old != constructor.Target {
