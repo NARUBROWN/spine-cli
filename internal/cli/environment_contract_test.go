@@ -146,3 +146,39 @@ func BuildApplication() spine.App {
 		t.Fatalf("imported handlers were not resolved: %#v", contract)
 	}
 }
+
+func TestRegistrationResolvesImportedStringConstant(t *testing.T) {
+	inTempDir(t)
+	t.Setenv("SPINE_TEST_TOPIC_PREFIX", "test.")
+	source := strings.Replace(environmentContractSource, `environment "os"`, "environment \"os\"\n names \"example.com/environment/destinations\"", 1)
+	source = strings.Replace(source, `+"order.created"`, `+(names.OrderCreated)`, 1)
+	if err := os.Mkdir("destinations", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("destinations/names.go", []byte(`package destinations
+const OrderCreated = "order." + "created"
+var RuntimeName = OrderCreated
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeEnvironmentContract(t, source)
+	contract, err := inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contract.Complete || len(contract.Consumers) != 1 || contract.Consumers[0].Name != "test.order.created" {
+		t.Fatalf("imported constant was not resolved: %+v", contract.Consumers)
+	}
+
+	writeEnvironmentContract(t, strings.Replace(source, "names.OrderCreated", "names.RuntimeName", 1))
+	contract, err = inspectApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diagnostic := range contract.Diagnostics {
+		if diagnostic.Code == "CONSUMER_REGISTRATION_DYNAMIC" && !contract.Complete {
+			return
+		}
+	}
+	t.Fatal("an imported variable was accepted as a constant")
+}
