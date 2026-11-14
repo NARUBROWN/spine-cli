@@ -14,7 +14,8 @@ func TestLegacyFactoryParticipatesInTypedDependencyGraph(t *testing.T) {
 	for _, tc := range []struct{ name, factory, registration, code string }{
 		{"registered", `func NewDTO()*DTO{panic("must not run")}`, `app.Constructor(NewDTO,&UserController{})`, ""},
 		{"wrong dependency", `func NewDTO()*PathDTO{panic("must not run")}`, `app.Constructor(NewDTO,&UserController{})`, "COMPONENT_DEPENDENCIES_INVALID"},
-		{"invalid factory", `func NewDTO()(*DTO,error){panic("must not run")}`, `app.Constructor(NewDTO,&UserController{})`, "CONSTRUCTOR_SIGNATURE_UNRESOLVED"},
+		{"fallible factory", `func NewDTO()(*DTO,error){panic("must not run")}`, `app.Constructor(NewDTO,&UserController{})`, ""},
+		{"invalid factory", `func NewDTO()(*DTO,bool){panic("must not run")}`, `app.Constructor(NewDTO,&UserController{})`, "CONSTRUCTOR_SIGNATURE_UNRESOLVED"},
 		{"shadowed factory", `func NewDTO()*DTO{panic("must not run")}`, `NewDTO:=func()*PathDTO{panic("must not run")};app.Constructor(NewDTO,&UserController{})`, "CONSTRUCTOR_SIGNATURE_UNRESOLVED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,6 +106,9 @@ func TestComponentMethodConstructorsStaticContracts(t *testing.T) {
 	base := `func(c *UserController)RegisterRoutes(r *api.Registry){r.POST(endpoint,func(a input.Body[DTO])httpx.Response[DTO]{return httpx.Response[DTO]{Body:DTO{Name:a.Name}}})}`
 	for _, tc := range []struct{ name, constructor, role, target, code string }{
 		{"valid", `func(*UserController)Constructor()*UserController{panic("must never run")}`, "Controller", "UserController", ""},
+		{"fallible", `func(*UserController)Constructor()(*UserController,error){panic("must never run")}`, "Controller", "UserController", ""},
+		{"error alias", `type Failure=error;func(*UserController)Constructor()(*UserController,Failure){panic("must never run")}`, "Controller", "UserController", ""},
+		{"defined error interface", `type Failure interface{Error() string};func(*UserController)Constructor()(*UserController,Failure){panic("must never run")}`, "Controller", "UserController", "COMPONENT_CONSTRUCTOR_INVALID"},
 		{"alias", `type Alias=UserController;func(*UserController)Constructor()*Alias{panic("must never run")}`, "Controller", "Alias", ""},
 		{"service is not HTTP", `func(*UserController)Constructor()*UserController{return nil}`, "Service", "UserController", ""},
 		{"missing", ``, "Controller", "UserController", "COMPONENT_CONSTRUCTOR_INVALID"},
@@ -173,7 +177,8 @@ func TestCustomFactoryRoleContracts(t *testing.T) {
 	for _, tc := range []struct{ name, body, factory, code string }{
 		{"custom is not HTTP", "", "NewUserController", ""},
 		{"missing dependency", `func NewBroken(*DTO)*UserController{panic("must not run")}`, "NewBroken", "COMPONENT_DEPENDENCIES_INVALID"},
-		{"invalid result", `func NewBroken()(*UserController,error){panic("must not run")}`, "NewBroken", "COMPONENT_CONSTRUCTOR_INVALID"},
+		{"fallible", `func NewFallible()(*UserController,error){panic("must not run")}`, "NewFallible", ""},
+		{"invalid result", `func NewBroken()(*UserController,bool){panic("must not run")}`, "NewBroken", "COMPONENT_CONSTRUCTOR_INVALID"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			inspector := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){r.POST(endpoint,func(a input.Body[DTO])httpx.Response[DTO]{return httpx.Response[DTO]{Body:DTO{Name:a.Name}}})}`+"\n"+tc.body)

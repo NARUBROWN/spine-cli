@@ -46,9 +46,55 @@ type layoutConstructor struct {
 	Dependencies []string
 }
 
+// layoutErrorAliases는 소스에 있는 내장 error의 별칭과 패키지 선언을 구분합니다.
+type layoutErrorAliases struct {
+	aliases map[string]ast.Expr
+	locals  map[string]bool
+}
+
+func (sources layoutSources) errorAliasesByPackage() map[string]layoutErrorAliases {
+	result := map[string]layoutErrorAliases{}
+	for _, source := range sources.sortedFiles() {
+		known, exists := result[source.Package]
+		if !exists {
+			known = layoutErrorAliases{aliases: map[string]ast.Expr{}, locals: map[string]bool{}}
+			result[source.Package] = known
+		}
+		for name, object := range source.File.Scope.Objects {
+			known.locals[name] = true
+			if spec, ok := object.Decl.(*ast.TypeSpec); ok && spec.Assign.IsValid() {
+				known.aliases[name] = spec.Type
+			}
+		}
+	}
+	return result
+}
+
+func (known layoutErrorAliases) isError(expression ast.Expr) bool {
+	visited := map[string]bool{}
+	for {
+		switch value := expression.(type) {
+		case *ast.ParenExpr:
+			expression = value.X
+		case *ast.Ident:
+			if !known.locals[value.Name] {
+				return value.Name == "error"
+			}
+			if visited[value.Name] {
+				return false
+			}
+			visited[value.Name] = true
+			expression = known.aliases[value.Name]
+		default:
+			return false
+		}
+	}
+}
+
 // constructorSignatures는 생성 계획과 계약 검사가 공유하는 패키지 기준 생성자 목록입니다.
 func (sources layoutSources) constructorSignatures(module string) map[string][]layoutConstructor {
 	result := map[string][]layoutConstructor{}
+	aliases := sources.errorAliasesByPackage()
 	for _, source := range sources.sortedFiles() {
 		for _, declaration := range source.File.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
@@ -56,7 +102,11 @@ func (sources layoutSources) constructorSignatures(module string) map[string][]l
 				continue
 			}
 			signature := layoutConstructor{Dependencies: []string{}}
-			if len(fieldTypes(source.Fset, function.Type.Results)) == 1 && function.Type.TypeParams == nil {
+			results := fieldTypes(source.Fset, function.Type.Results)
+			known := aliases[source.Package]
+			validResult := len(results) == 1 || len(results) == 2 && len(function.Type.Results.List) == 2 &&
+				known.isError(function.Type.Results.List[1].Type)
+			if validResult && !known.isError(function.Type.Results.List[0].Type) && function.Type.TypeParams == nil {
 				signature.Output = canonicalType(source, function.Type.Results.List[0].Type, module)
 			}
 			if function.Type.Params != nil {
@@ -71,16 +121,16 @@ func (sources layoutSources) constructorSignatures(module string) map[string][]l
 				}
 			}
 			key := modulePackage(module, source.Package) + "." + function.Name.Name
+			for _, field := range function.Type.Params.List {
+				if _, variadic := field.Type.(*ast.Ellipsis); variadic {
+					signature.Output = ""
+				}
+			}
 			if function.Recv != nil {
 				owner := strings.TrimPrefix(expressionText(source.Fset, function.Recv.List[0].Type), "*")
 				key = modulePackage(module, source.Package) + "." + owner + ".Constructor"
 				if signature.Output != "*"+modulePackage(module, source.Package)+":"+owner {
 					signature.Output = ""
-				}
-				for _, field := range function.Type.Params.List {
-					if _, variadic := field.Type.(*ast.Ellipsis); variadic {
-						signature.Output = ""
-					}
 				}
 			}
 			result[key] = append(result[key], signature)

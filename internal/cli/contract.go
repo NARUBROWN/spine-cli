@@ -50,14 +50,15 @@ type applicationContract struct {
 }
 
 type contractRegistration struct {
-	Role         string `json:"role,omitempty"`
-	Output       string `json:"output,omitempty"`
-	object       bool
-	typedTarget  string
-	Target       string   `json:"target"`
-	Scope        string   `json:"scope,omitempty"`
-	Dependencies []string `json:"dependencies,omitempty"`
-	Source       string   `json:"source"`
+	Role          string `json:"role,omitempty"`
+	Output        string `json:"output,omitempty"`
+	object        bool
+	typedTarget   string
+	typedResolved bool
+	Target        string   `json:"target"`
+	Scope         string   `json:"scope,omitempty"`
+	Dependencies  []string `json:"dependencies,omitempty"`
+	Source        string   `json:"source"`
 }
 
 type httpRegistration struct {
@@ -172,9 +173,9 @@ func inspectApplication() (applicationContract, error) {
 		inspector.addDuplicateDiagnostics()
 		inspector.inspectHTTPAdapter(config, file, fset, function, index)
 	}
-	inspector.resolveConstructorDependencies()
 	priorRoutes := len(inspector.contract.HTTP)
 	inspector.inspectControllerRoutes()
+	inspector.resolveConstructorDependencies()
 	inspector.resolveHandlerSignatures()
 	if len(inspector.contract.HTTP) > priorRoutes {
 		diagnostics := inspector.contract.Diagnostics[:0]

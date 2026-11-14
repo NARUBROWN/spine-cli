@@ -183,11 +183,14 @@ func (i *contractInspector) inspectControllerRoutes() {
 		}
 		outputs[index] = output
 		signatures[index] = signature
-		if provider.object || provider.Role != "" {
+		provider.typedResolved = true
+		if i.qualified || provider.object || provider.Role != "" {
 			provider.Dependencies = []string{}
 			for n := 0; n < signature.Params().Len(); n++ {
 				provider.Dependencies = append(provider.Dependencies, componentTypeName(signature.Params().At(n).Type()))
 			}
+		}
+		if provider.object || provider.Role != "" {
 			provider.Output = componentTypeName(output)
 			required := types.Type(nil)
 			switch provider.Role {
@@ -246,9 +249,9 @@ func (i *contractInspector) inspectControllerRoutes() {
 func (i *contractInspector) controllerDiagnostic(code, message, source string) {
 	hint := "Use statically resolved Registry calls and typed callbacks; inspect installed project dependencies. User code is never executed to infer routes."
 	if strings.HasPrefix(code, "COMPONENT_") {
-		hint = "Implement Constructor(dependencies...) *Self, satisfy the selected role contract and register unique dependencies. User code is never executed for inspection."
+		hint = "Implement Constructor(dependencies...) *Self or (*Self, error), satisfy the selected role contract and register unique dependencies. User code is never executed for inspection."
 	} else if strings.HasPrefix(code, "CONSTRUCTOR_") {
-		hint = "Register a statically resolved constructor function with one return value. User code is never executed for inspection."
+		hint = "Register a statically resolved constructor function returning a value or a value and error. User code is never executed for inspection."
 	}
 	i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: code, Message: message, Source: source, Hint: hint})
 }
