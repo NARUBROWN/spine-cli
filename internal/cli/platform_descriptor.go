@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	goversion "go/version"
 	"io"
@@ -24,16 +26,17 @@ var providerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$
 var envSuffixPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 type platformDescriptor struct {
-	SchemaVersion   string                `json:"schema_version"`
-	Kind            string                `json:"kind"`
-	Provider        string                `json:"provider"`
-	ContractVersion string                `json:"contract_version"`
-	Package         string                `json:"package"`
-	Factory         string                `json:"factory"`
-	ConfigType      string                `json:"config_type,omitempty"`
-	MinimumGo       string                `json:"minimum_go"`
-	Fields          []platformConfigField `json:"fields,omitempty"`
-	SHA256          string                `json:"-"`
+	SchemaVersion       string                `json:"schema_version"`
+	Kind                string                `json:"kind"`
+	Provider            string                `json:"provider"`
+	ContractVersion     string                `json:"contract_version"`
+	Package             string                `json:"package"`
+	Factory             string                `json:"factory"`
+	ConfigType          string                `json:"config_type,omitempty"`
+	MinimumGo           string                `json:"minimum_go"`
+	Fields              []platformConfigField `json:"fields,omitempty"`
+	PublishDestinations bool                  `json:"-"`
+	SHA256              string                `json:"-"`
 }
 
 type platformConfigField struct {
@@ -262,14 +265,59 @@ func resolvePlatformDescriptor(ctx context.Context, kind, provider string, modul
 	descriptor, err := readPlatformDescriptor(root, kind, provider)
 	if os.IsNotExist(err) {
 		if legacy := legacyPlatformDescriptor(kind, provider); legacy != nil {
-			return legacy, nil
+			descriptor, err = legacy, nil
+		} else {
+			return nil, fmt.Errorf("%s@%s does not provide %s for %s", module.Path, module.Version, platformDescriptorFile, kind)
 		}
-		return nil, fmt.Errorf("%s@%s does not provide %s for %s", module.Path, module.Version, platformDescriptorFile, kind)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s@%s: %w", module.Path, module.Version, err)
 	}
+	if kind == "event" {
+		descriptor.PublishDestinations = hasPublishDestinations(root, descriptor.ConfigType)
+	}
 	return descriptor, nil
+}
+
+// 기존 어댑터와 새 계약을 쓰는 어댑터가 함께 설치될 수 있어 선택한 모듈의 설정 타입을 확인합니다.
+func hasPublishDestinations(root, configType string) bool {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, entry.Name()), nil, parser.SkipObjectResolution)
+		if err != nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			group, ok := decl.(*ast.GenDecl)
+			if !ok || group.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range group.Specs {
+				typed := spec.(*ast.TypeSpec)
+				if typed.Name.Name != configType {
+					continue
+				}
+				structure, ok := typed.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				for _, field := range structure.Fields.List {
+					for _, name := range field.Names {
+						if name.Name == "PublishDestinations" {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func resolveProjectDescriptors(ctx context.Context, options *newProjectOptions) error {

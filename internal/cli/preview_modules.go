@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/semver"
 )
@@ -125,7 +126,24 @@ func resolvePreviewModules(ctx context.Context, targets []selectedModule) ([]sel
 	if err != nil {
 		return nil, fmt.Errorf("resolve Preview branches: %w", err)
 	}
-	output, err := platformGoWithEnv(ctx, root, previewQueryEnvironment(strings.TrimSpace(string(proxy))), args...)
+	environment := previewQueryEnvironment(strings.TrimSpace(string(proxy)))
+	var output []byte
+	// 여러 Go 프로세스가 Git 캐시의 shallow 정보를 갱신하면 조회가 일시적으로 실패할 수 있습니다.
+	for attempt := 0; ; attempt++ {
+		output, err = platformGoWithEnv(ctx, root, environment, args...)
+		message := string(output)
+		if err != nil {
+			message += err.Error()
+		}
+		if attempt == 2 || !strings.Contains(message, "shallow file has changed since we read it") {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve Preview branches: %w", err)
 	}

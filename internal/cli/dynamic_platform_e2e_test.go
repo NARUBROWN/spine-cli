@@ -90,7 +90,7 @@ func TestGeneratedDynamicPlatformE2E(t *testing.T) {
 					}
 				}
 				before, _ := os.ReadFile(filepath.Join(project, "internal/application/application.go"))
-				addGeneratedTest(t, project, "dynamic_runtime_test.go", fixture)
+				addGeneratedTest(t, project, "dynamic_runtime_test.go", brokerPublishFixture(t, project, fixture))
 				generatedGo(t, project, "mod", "tidy")
 				output := generatedGo(t, project, "test", "-race", "-v", "./...", "-count=1", "-timeout=2m")
 				if strings.Contains(output, "--- SKIP") {
