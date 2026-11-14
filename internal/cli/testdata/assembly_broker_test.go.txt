@@ -66,6 +66,7 @@ func TestGeneratedRealBroker(t *testing.T) {
  name:=fmt.Sprintf("spine-cli-%d",time.Now().UnixNano());input,output:=name+".input",name+".output"
  broker,url:=os.Getenv("SPINE_TEST_KAFKA_BROKER"),os.Getenv("SPINE_TEST_RABBITMQ_URL")
  if broker=="" || url==""{t.Fatal("both actual broker endpoints are required")}
+ t.Setenv("SPINE_EVENTS_PUBLISH_DESTINATIONS",input+","+output)
  t.Setenv("SPINE_EVENTS_BROKERS",broker);t.Setenv("SPINE_EVENTS_GROUP_ID",name+".worker")
  t.Setenv("SPINE_EVENTS_URL",url);t.Setenv("SPINE_EVENTS_EXCHANGE",name)
  t.Setenv("SPINE_EVENTS_ALLOW_INSECURE","true");t.Setenv("SPINE_EVENTS_TOPIC_PREFIX","");t.Setenv("SPINE_EVENTS_QUEUE_PREFIX","")

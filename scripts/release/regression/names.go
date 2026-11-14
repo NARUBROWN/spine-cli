@@ -1,0 +1,38 @@
+package main
+
+var optional = map[string]struct{}{
+	"TestDynamicHTTPAndWebSocketComposition":     {},
+	"TestGeneratedAssemblyBrokerE2E":             {},
+	"TestGeneratedAssemblyMinimumToolchain":      {},
+	"TestGeneratedAssemblyPublicMatrix":          {},
+	"TestGeneratedDynamicPlatformE2E":            {},
+	"TestGeneratedNATSAssemblyE2E":               {},
+	"TestGeneratedProjectsHandleHTTPInputErrors": {},
+	"TestGeneratedWebSocketPublicAssembly":       {},
+	"TestLayeredGeneratedProjectEndToEnd":        {},
+	"TestResolvePreviewModulesIncludesNATS":      {},
+	"TestRuntimeOpenAPIGeneratedApplications":    {},
+}
+var required = map[string]struct{}{
+	"TestDynamicHTTPAndWebSocketComposition":            {},
+	"TestGeneratedAssemblyBrokerE2E":                    {},
+	"TestGeneratedAssemblyMinimumToolchain":             {},
+	"TestGeneratedAssemblyPublicMatrix":                 {},
+	"TestGeneratedDynamicPlatformE2E":                   {},
+	"TestGeneratedDynamicPlatformE2E/layered-v1/echo":   {},
+	"TestGeneratedDynamicPlatformE2E/layered-v1/none":   {},
+	"TestGeneratedDynamicPlatformE2E/legacy/echo":       {},
+	"TestGeneratedDynamicPlatformE2E/legacy/none":       {},
+	"TestGeneratedFirstAPIGuideRunsAndDetectsRawReturn": {},
+	"TestGeneratedHTTPShutdownDrainsRequests":           {},
+	"TestGeneratedNATSAssemblyE2E":                      {},
+	"TestGeneratedNATSAssemblyE2E/layered-v1/echo":      {},
+	"TestGeneratedNATSAssemblyE2E/layered-v1/none":      {},
+	"TestGeneratedNATSAssemblyE2E/legacy/echo":          {},
+	"TestGeneratedNATSAssemblyE2E/legacy/none":          {},
+	"TestGeneratedNATSAssemblyE2E/minimum-go":           {},
+	"TestGeneratedWebSocketPublicAssembly":              {},
+	"TestRunAndDevGracefulShutdown":                     {},
+	"TestRuntimeOpenAPIGeneratedApplications":           {},
+	"TestStructuredHTTPInputContracts":                  {},
+}

@@ -192,7 +192,7 @@ func TestGeneratedAssemblyBrokerE2E(t *testing.T) {
 					text = strings.ReplaceAll(text, "{{PLATFORM_PATH}}", module)
 					text = strings.ReplaceAll(text, "{{CONFIG_LOADER}}", loader)
 					text = strings.ReplaceAll(text, "{{GROUP_CONFIG}}", group)
-					addGeneratedTest(t, project, "broker_e2e_test.go", text)
+					addGeneratedTest(t, project, "broker_e2e_test.go", brokerPublishFixture(t, project, text))
 					generatedGo(t, project, "mod", "tidy")
 					output := generatedGo(t, project, "test", "-race", "-v", "./...", "-count=1", "-timeout=3m")
 					if strings.Contains(output, "--- SKIP") {

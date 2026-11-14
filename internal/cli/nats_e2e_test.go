@@ -58,7 +58,7 @@ func TestGeneratedNATSAssemblyE2E(t *testing.T) {
 				probeEnv := []string{"SPINE_EVENTS_URLS=" + os.Getenv("SPINE_TEST_NATS_URL"), "SPINE_EVENTS_STREAM=PROBE", "SPINE_EVENTS_CONSUMER_PREFIX=probe", "SPINE_EVENTS_ALLOW_INSECURE=true"}
 				assertE2ESuccess(t, runE2E(binary, project, probeEnv, "contract", "probe", "--json"), "NATS partial runtime probe")
 				source, _ := os.ReadFile(filepath.Join(project, "internal/application/application.go"))
-				addGeneratedTest(t, project, "nats_e2e_test.go", string(fixture))
+				addGeneratedTest(t, project, "nats_e2e_test.go", brokerPublishFixture(t, project, string(fixture)))
 				generatedGo(t, project, "mod", "tidy")
 				assertE2ESuccess(t, runE2E(binary, project, nil, "verify", "--warnings-as-errors", "--json"), "NATS generated verify")
 				output := generatedGo(t, project, "test", "-race", "-v", "./...", "-count=1", "-timeout=2m")

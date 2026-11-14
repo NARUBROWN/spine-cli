@@ -24,7 +24,7 @@ CLI Preview 발행 전에 코어 후보를 발행하고 Echo, net/http, Gorilla 
 
 CLI 저장소의 `RELEASE_EVIDENCE_TOKEN` secret에는 코어와 7개 플랫폼 저장소의 Actions 읽기 권한이 있는 자격 증명이 필요합니다. 이 값은 선행 저장소의 검증 artifact 조회에만 사용합니다. CLI 태그 생성은 기존 워크플로 토큰과 승인 환경을 사용합니다. secret이 없거나 읽기 권한이 부족하면 발행을 중단합니다.
 
-전체 Preview 발행은 `scripts/release/release_train.py --plan 계획.json`으로 먼저 확인합니다. JSON 객체에 코어, 위 7개 플랫폼과 CLI의 전체 모듈 경로를 키로 넣고, 각각 `version`과 `source_sha`를 지정합니다. 새로 발행할 후보는 Preview 브랜치에 미리 병합하고, 변경이 없는 플랫폼은 기존 태그와 그 태그의 커밋을 지정합니다. 실행 전 후보 번호, 진행 중인 발행과 기존 검증 기록을 확인합니다. 확인한 계획에 `--execute`를 추가하면 코어, 필요한 플랫폼, CLI 순서로 발행하고 앞 단계의 성공을 기다립니다. 이미 검증된 태그는 재발행하지 않습니다. 기존 승인 환경은 그대로 적용되므로 승인이 필요한 단계는 지정 리뷰어가 처리해야 합니다. GitHub CLI에는 각 저장소의 Actions 실행 권한이 필요합니다.
+전체 Preview 발행은 `go run ./scripts/release/train --plan 계획.json`으로 먼저 확인합니다. JSON 객체에 코어, 위 7개 플랫폼과 CLI의 전체 모듈 경로를 키로 넣고, 각각 `version`과 `source_sha`를 지정합니다. 새로 발행할 후보는 Preview 브랜치에 미리 병합하고, 변경이 없는 플랫폼은 기존 태그와 그 태그의 커밋을 지정합니다. 실행 전 후보 번호, 진행 중인 발행과 기존 검증 기록을 확인합니다. 확인한 계획에 `--execute`를 추가하면 코어, 필요한 플랫폼, CLI 순서로 발행하고 앞 단계의 성공을 기다립니다. 이미 검증된 태그는 재발행하지 않습니다. 기존 승인 환경은 그대로 적용되므로 승인이 필요한 단계는 지정 리뷰어가 처리해야 합니다. GitHub CLI에는 각 저장소의 Actions 실행 권한이 필요합니다.
 
 CLI는 태그 생성 전에 선행 발행 기록을 다시 확인하고, 태그 생성 후 기록이 달라지면 최종 manifest를 만들지 않습니다. 순차 실행은 다른 작업자의 동시 발행을 잠그지 않습니다. CLI의 발행 후 검증이 끝날 때까지 별도의 코어와 플랫폼 Preview 발행을 시작하지 마세요.
 
@@ -40,7 +40,7 @@ CLI는 태그 생성 전에 선행 발행 기록을 다시 확인하고, 태그 
 
 ```sh
 GITHUB_REPOSITORY=NARUBROWN/spine-cli \
-  python3 scripts/release/configure_branches.py --apply --bootstrap-sha <MAIN_FULL_SHA>
+  go run ./scripts/release/branches --apply --bootstrap-sha <MAIN_FULL_SHA>
 ```
 
 이 명령은 `main`에 제어기 파일이 있는지 확인하고 같은 커밋에서 `preview`, `rc`를 만듭니다. 기존 채널 브랜치가 다른 커밋을 가리키면 중단합니다. 브랜치 강제 이동이나 기존 main 보호 제거는 수행하지 않습니다. 채널별 PR과 필수 상태 규칙, 태그 변경과 삭제 방지, 승인 환경을 구성하고 기본 브랜치를 `preview`로 바꿉니다.
@@ -48,8 +48,8 @@ GITHUB_REPOSITORY=NARUBROWN/spine-cli \
 기존 환경에 다른 브랜치 규칙이 있거나 기존 main 보호가 있으면 별도 검토가 필요합니다. API 오류 중간에 일부 설정이 반영될 수 있으므로 결과를 확인한 뒤 같은 소스에서 재실행합니다. 기존 규칙을 자동 삭제하지 않습니다. 설정을 다시 적용할 때는 `--bootstrap-sha`를 생략합니다.
 
 ```sh
-GITHUB_REPOSITORY=NARUBROWN/spine-cli python3 scripts/release/configure_branches.py
-GITHUB_REPOSITORY=NARUBROWN/spine-cli python3 scripts/release/release.py check-environment
+GITHUB_REPOSITORY=NARUBROWN/spine-cli go run ./scripts/release/branches
+GITHUB_REPOSITORY=NARUBROWN/spine-cli go run ./scripts/release/publication check-environment
 ```
 
 두 명령은 읽기 전용입니다. 첫 명령은 브랜치, 태그와 승인 설정을 검사합니다. PR 방향 검사는 기본 브랜치가 `preview`로 바뀐 뒤 작업 → preview, preview → rc, rc → main만 허용합니다. rc와 main 승격은 merge commit을 사용합니다.
@@ -74,7 +74,7 @@ GITHUB_REPOSITORY=NARUBROWN/spine-cli python3 scripts/release/release.py check-e
 | 생성 앱 | 두 layout과 HTTP, WS, 복합 플랫폼, worker 조합의 생성, 버전, 계약, verify, update |
 | 실제 HTTP 종료 | 두 layout의 run과 dev에서 4초 요청 완료와 리스너 해제 |
 
-브로커와 최소 Go 환경이 없어 필수 E2E가 skip되면 `check_tests.py`가 검증 실패로 처리합니다. Windows는 전체 Unix 신호 회귀와 같은 범위를 제공하지 않습니다. 공개 설치 검사의 Windows 앱 종료는 강제 종료 fallback과 리스너 해제만 확인합니다.
+브로커와 최소 Go 환경이 없어 필수 E2E가 skip되면 Go 회귀 검증기가 검증 실패로 처리합니다. Windows는 전체 Unix 신호 회귀와 같은 범위를 제공하지 않습니다. 공개 설치 검사의 Windows 앱 종료는 강제 종료 fallback과 리스너 해제만 확인합니다.
 
 ## Preview 발행
 

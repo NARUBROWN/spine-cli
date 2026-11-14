@@ -53,7 +53,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_OVERRIDE_REASON: ${{ inputs.observation_override_reason }}
-        run: python3 scripts/release/release.py plan
+        run: go run ./scripts/release/publication plan
       - uses: actions/upload-artifact@v4
         with:
           name: release-plan
@@ -113,9 +113,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_EVIDENCE_TOKEN: ${{ secrets.RELEASE_EVIDENCE_TOKEN }}
           VERIFIED_SHA: ${{ needs.plan.outputs.reuse_ci == 'true' && needs.plan.outputs.sha || needs.ci.outputs.verified_sha }}
-        run: python3 scripts/release/release.py tag
+        run: go run ./scripts/release/publication tag
       - name: Notify Discord of the new tag
-        uses: NARUBROWN/spine/.github/actions/discord-tag@b55c182f4d0722fca5aaf3b963bca20cf0dcc4d4
+        uses: ./.github/actions/discord-tag
         continue-on-error: true
         timeout-minutes: 1
         with:
@@ -153,11 +153,15 @@ jobs:
         with:
           pattern: public-after-tag-*
           path: public-reports
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+          cache: false
       - name: Record verified tag and publish Production release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_EVIDENCE_TOKEN: ${{ secrets.RELEASE_EVIDENCE_TOKEN }}
-        run: python3 scripts/release/release.py finish
+        run: go run ./scripts/release/publication finish
       - uses: actions/upload-artifact@v4
         with:
           name: release-manifest-${{ needs.plan.outputs.version }}

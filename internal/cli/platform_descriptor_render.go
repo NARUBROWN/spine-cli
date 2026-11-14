@@ -57,6 +57,21 @@ func renderDescriptorConfig(d *platformDescriptor) string {
 		}
 		source.WriteString("}\n}\n")
 	}
+	if d.PublishDestinations {
+		source.WriteString(`// 목적지가 정해진 경우에만 발행기를 엽니다. 소비 전용 앱은 목록 없이 시작합니다.
+config.Publish = false
+if value := strings.TrimSpace(os.Getenv(prefix + "PUBLISH_DESTINATIONS")); value != "" {
+ destinations := publishDestinationList{}
+ for _, item := range strings.Split(value, ",") {
+  item = strings.TrimSpace(item)
+  if item == "" { return config, fmt.Errorf("%sPUBLISH_DESTINATIONS contains an empty item", prefix) }
+  destinations = append(destinations, item)
+ }
+ config.PublishDestinations = destinations
+ config.Publish = true
+}
+`)
+	}
 	source.WriteString("return config,nil\n}\n")
 	return source.String()
 }
@@ -64,7 +79,7 @@ func renderDescriptorConfig(d *platformDescriptor) string {
 func renderPlatformConfig(options newProjectOptions) string {
 	imports := map[string]string{}
 	descriptors := map[string]*platformDescriptor{}
-	needsTime := false
+	needsTime, needsDestinations := false, false
 	for _, binding := range platformBindings(options) {
 		d := binding.Descriptor
 		module := providerModule(d.Provider)
@@ -73,6 +88,7 @@ func renderPlatformConfig(options newProjectOptions) string {
 		}
 		imports[descriptorAlias(d)] = module
 		descriptors[module] = d
+		needsDestinations = needsDestinations || d.PublishDestinations
 		for _, field := range d.Fields {
 			needsTime = needsTime || (field.Type == "duration" && field.Env != "")
 		}
@@ -91,6 +107,9 @@ func renderPlatformConfig(options newProjectOptions) string {
 		fmt.Fprintf(&source, "%s %q\n", alias, imports[alias])
 	}
 	source.WriteString(")\n" + generatedConfigHelpers)
+	if needsDestinations {
+		source.WriteString("type publishDestinationList []string\nfunc (list publishDestinationList) PublishDestinations() []string { return list }\n")
+	}
 	modules := make([]string, 0, len(descriptors))
 	for module := range descriptors {
 		modules = append(modules, module)
@@ -167,6 +186,9 @@ func descriptorReadmeFields(d *platformDescriptor, prefix string) string {
 		} else {
 			optional = append(optional, key)
 		}
+	}
+	if d.PublishDestinations {
+		optional = append(optional, "`"+prefix+"PUBLISH_DESTINATIONS` (쉼표로 구분한 발행 목적지, 비어 있으면 소비만 활성화)")
 	}
 	return "필수 " + strings.Join(required, ", ") + "; 선택 " + strings.Join(optional, ", ") + "."
 }

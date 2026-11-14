@@ -51,6 +51,7 @@ func TestGeneratedNATSRuntime(t *testing.T) {
  stream:=fmt.Sprintf("SPINE_CLI_%d",time.Now().UnixNano())
  if _,err:=js.CreateStream(ctx,jetstream.StreamConfig{Name:stream,Subjects:[]string{stream+".>"}});err!=nil{t.Fatal(err)}
  defer js.DeleteStream(context.Background(),stream)
+ t.Setenv("SPINE_EVENTS_PUBLISH_DESTINATIONS","order.created,order.completed")
  t.Setenv("SPINE_EVENTS_URLS",address)
  t.Setenv("SPINE_EVENTS_STREAM",stream)
  t.Setenv("SPINE_EVENTS_CONSUMER_PREFIX","worker")
