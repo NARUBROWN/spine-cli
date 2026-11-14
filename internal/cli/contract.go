@@ -133,15 +133,16 @@ type contractDiagnostic struct {
 }
 
 type contractInspector struct {
-	contract            *applicationContract
-	module              string
-	seen                map[string]bool
-	qualified           bool
-	sources             layoutSources
-	controllerHandlers  map[string]staticHandlerSignature
-	controllerTypes     map[string]httpTypeDeclaration
-	controllerMethods   map[string]*types.Signature
-	controllerInstances map[httpTypeUse]types.Type
+	contract             *applicationContract
+	module               string
+	seen                 map[string]bool
+	qualified            bool
+	sources              layoutSources
+	controllerHandlers   map[string]staticHandlerSignature
+	controllerTypes      map[string]httpTypeDeclaration
+	controllerMethods    map[string]*types.Signature
+	controllerInstances  map[httpTypeUse]types.Type
+	registrationPackages map[string]*types.Package
 }
 
 func inspectApplication() (applicationContract, error) {
@@ -870,9 +871,9 @@ func (i *contractInspector) inspectRegistryCall(registry string, call *ast.CallE
 		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: strings.ToUpper(registry) + "_REGISTRATION_ARGUMENTS_INVALID", Message: registry + " registration requires a name and handler", Source: source})
 		return
 	}
-	name, ok := registrationString(call.Args[0], imports)
+	name, ok := registrationStringWithConstants(call.Args[0], imports, i.registrationConstant)
 	if !ok {
-		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: strings.ToUpper(registry) + "_REGISTRATION_DYNAMIC", Message: "static inspection cannot resolve this registration name; only string literals, concatenation, and direct os.Getenv calls are supported", Source: source})
+		i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: strings.ToUpper(registry) + "_REGISTRATION_DYNAMIC", Message: "static inspection cannot resolve this registration name; use a string literal, an imported string constant, concatenation, or a direct os.Getenv call", Source: source})
 	}
 	registration := namedRegistration{Name: name, Handler: i.registrationExpression(call.Args[1], file, fset), Source: source}
 	if registry == "consumer" {
@@ -885,19 +886,28 @@ func (i *contractInspector) inspectRegistryCall(registry string, call *ast.CallE
 // registrationString은 코드를 실행하지 않고 문자열과 명시적인 환경변수 입력만 해석합니다.
 // 지역 변수와 임의 함수 호출은 현재 값이 같아 보이더라도 추측하지 않습니다.
 func registrationString(expression ast.Expr, imports map[string]string) (string, bool) {
+	return registrationStringWithConstants(expression, imports, nil)
+}
+
+func registrationStringWithConstants(expression ast.Expr, imports map[string]string, resolve func(string, string) (string, bool)) (string, bool) {
 	if value, ok := stringLiteral(expression); ok {
 		return value, true
 	}
 	switch value := expression.(type) {
 	case *ast.ParenExpr:
-		return registrationString(value.X, imports)
+		return registrationStringWithConstants(value.X, imports, resolve)
 	case *ast.BinaryExpr:
 		if value.Op != token.ADD {
 			return "", false
 		}
-		left, leftOK := registrationString(value.X, imports)
-		right, rightOK := registrationString(value.Y, imports)
+		left, leftOK := registrationStringWithConstants(value.X, imports, resolve)
+		right, rightOK := registrationStringWithConstants(value.Y, imports, resolve)
 		return left + right, leftOK && rightOK
+	case *ast.SelectorExpr:
+		alias, ok := value.X.(*ast.Ident)
+		if resolve != nil && ok && alias.Obj == nil && ast.IsExported(value.Sel.Name) && imports[alias.Name] != "" {
+			return resolve(imports[alias.Name], value.Sel.Name)
+		}
 	case *ast.CallExpr:
 		selector, ok := value.Fun.(*ast.SelectorExpr)
 		if !ok || selector.Sel.Name != "Getenv" || len(value.Args) != 1 {
