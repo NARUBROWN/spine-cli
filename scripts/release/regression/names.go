@@ -1,6 +1,7 @@
 package main
 
 var optional = map[string]struct{}{
+	"TestPreviewEventDestinationConfiguration":   {},
 	"TestDynamicHTTPAndWebSocketComposition":     {},
 	"TestGeneratedAssemblyBrokerE2E":             {},
 	"TestGeneratedAssemblyMinimumToolchain":      {},
@@ -14,6 +15,9 @@ var optional = map[string]struct{}{
 	"TestRuntimeOpenAPIGeneratedApplications":    {},
 }
 var required = map[string]struct{}{
+	"TestPreviewEventDestinationConfiguration":          {},
+	"TestShutdownHookDoesNotChangeAdapterSelection":     {},
+	"TestRegistrationResolvesImportedStringConstant":    {},
 	"TestDynamicHTTPAndWebSocketComposition":            {},
 	"TestGeneratedAssemblyBrokerE2E":                    {},
 	"TestGeneratedAssemblyMinimumToolchain":             {},
