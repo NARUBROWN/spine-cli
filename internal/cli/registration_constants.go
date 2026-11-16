@@ -45,8 +45,10 @@ func (i *contractInspector) loadRegistrationPackage(importPath string) *types.Pa
 		}
 		overlay[path] = content.Bytes()
 	}
+	// Load source and dependencies as in controller inspection, avoiding export-data
+	// decoding by an older x/tools when the project uses a newer Go toolchain.
 	config := &packages.Config{
-		Mode:       packages.NeedName | packages.NeedTypes,
+		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax,
 		Overlay:    overlay,
 		Env:        os.Environ(),
 		BuildFlags: []string{"-mod=readonly"},
