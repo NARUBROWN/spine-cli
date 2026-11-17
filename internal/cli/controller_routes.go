@@ -243,12 +243,14 @@ func (i *contractInspector) inspectControllerRoutes() {
 		}
 		scan.walk(method, types.TypeString(output, func(p *types.Package) string { return p.Path() }), nil, nil)
 	}
-	validateTypedComponentGraph(i, outputs, signatures)
+	validateTypedComponentGraph(i, outputs, signatures, applicationPublisherType(all))
 }
 
 func (i *contractInspector) controllerDiagnostic(code, message, source string) {
 	hint := "Use statically resolved Registry calls and typed callbacks; inspect installed project dependencies. User code is never executed to infer routes."
-	if strings.HasPrefix(code, "COMPONENT_") {
+	if code == "EVENT_PUBLISHER_RESERVED" {
+		hint = "Remove the publisher constructor and register platforms with WithEventAdapter. The app provides publish.Publisher even when publishing is disabled."
+	} else if strings.HasPrefix(code, "COMPONENT_") {
 		hint = "Implement Constructor(dependencies...) *Self or (*Self, error), satisfy the selected role contract and register unique dependencies. User code is never executed for inspection."
 	} else if strings.HasPrefix(code, "CONSTRUCTOR_") {
 		hint = "Register a statically resolved constructor function returning a value or a value and error. User code is never executed for inspection."

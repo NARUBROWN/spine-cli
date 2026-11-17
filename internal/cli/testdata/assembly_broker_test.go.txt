@@ -34,16 +34,25 @@ type brokerDTO struct {
 type brokerEvent struct { brokerDTO; topic string }
 func (e brokerEvent) Name() string {return e.topic}
 func (brokerEvent) OccurredAt() time.Time {return time.Now()}
-type brokerController struct {input,output string;sent,handled atomic.Int32}
-func(c *brokerController) RegisterRoutes(r *api.Registry) {r.POST("/events",c.Emit)}
-func (c *brokerController) Emit(ctx context.Context,input input.Body[brokerDTO]) httpx.Response[string] {
- c.sent.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:*input,topic:c.input});return httpx.Response[string]{Body:"accepted"}
+type brokerController struct {publisher publish.Publisher;input,output string;sent,handled atomic.Int32}
+func(c *brokerController) RegisterRoutes(r *api.Registry) {
+
+ r.POST("/events",func(ctx context.Context,input input.Body[brokerDTO])(httpx.Response[string],error){
+  c.sent.Add(1)
+  if err:=c.publisher.Event(ctx,c.input,publish.Fields{"email":input.Email,"age":input.Age});err!=nil{return httpx.Response[string]{},err}
+  return httpx.Response[string]{Body:"accepted"},nil
+ })
+
 }
 func (c *brokerController) EmitWS(ctx context.Context,input brokerDTO) error {
- c.sent.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:input,topic:c.input});return ws.Send(ctx,ws.TextMessage,[]byte("accepted"))
+ c.sent.Add(1)
+ if err:=c.publisher.Event(ctx,c.input,publish.Fields{"email":input.Email,"age":input.Age});err!=nil{return err}
+ return ws.Send(ctx,ws.TextMessage,[]byte("accepted"))
 }
-func (c *brokerController) Handle(ctx context.Context,input brokerDTO) {
- c.handled.Add(1);publish.Event(ctx,brokerEvent{brokerDTO:input,topic:c.output})
+func (c *brokerController) Handle(ctx context.Context,input brokerDTO) error {
+ c.handled.Add(1)
+ if err:=c.publisher.Event(ctx,c.output,publish.Fields{"email":input.Email,"age":input.Age});err!=nil{return err}
+ return nil
 }
 type brokerLog struct{mu sync.Mutex;data strings.Builder}
 func (l *brokerLog) Write(data []byte)(int,error){l.mu.Lock();defer l.mu.Unlock();return l.data.Write(data)}
@@ -65,7 +74,7 @@ func TestGeneratedRealBroker(t *testing.T) {
  ctx,cancel:=context.WithTimeout(context.Background(),75*time.Second);defer cancel()
  name:=fmt.Sprintf("spine-cli-%d",time.Now().UnixNano());input,output:=name+".input",name+".output"
  broker,url:=os.Getenv("SPINE_TEST_KAFKA_BROKER"),os.Getenv("SPINE_TEST_RABBITMQ_URL")
- if broker=="" || url==""{t.Fatal("both actual broker endpoints are required")}
+ if (kind=="kafka"&&broker=="")||(kind=="rabbitmq"&&url==""){t.Fatal("the selected broker endpoint is required")}
  t.Setenv("SPINE_EVENTS_PUBLISH_DESTINATIONS",input+","+output)
  t.Setenv("SPINE_EVENTS_BROKERS",broker);t.Setenv("SPINE_EVENTS_GROUP_ID",name+".worker")
  t.Setenv("SPINE_EVENTS_URL",url);t.Setenv("SPINE_EVENTS_EXCHANGE",name)
@@ -88,7 +97,7 @@ func TestGeneratedRealBroker(t *testing.T) {
  app,options,err:=BuildApplication();if err!=nil{t.Fatal(err)}
  if (options.HTTP!=nil)!=(httpPlatform=="echo"){t.Fatal("generated HTTP selection does not match options")}
  controller:=&brokerController{input:input,output:output}
- app.Constructor(func()*brokerController{return controller})
+ app.Constructor(func(publisher publish.Publisher)*brokerController{controller.publisher=publisher;return controller})
  if err:=app.Consumers().Register(input,(*brokerController).Handle);err!=nil{t.Fatal(err)}
  address:=""
  if options.HTTP!=nil {

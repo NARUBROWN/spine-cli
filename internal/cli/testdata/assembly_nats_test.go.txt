@@ -31,15 +31,19 @@ type natsDTO struct {
 type natsEvent struct { natsDTO; topic string }
 func(e natsEvent) Name() string {return e.topic}
 func(e natsEvent) OccurredAt() time.Time {return time.Now()}
-type natsController struct{handled atomic.Int32}
-func(c *natsController) RegisterRoutes(r *api.Registry) {r.POST("/orders",c.Emit)}
-func(c *natsController) Emit(ctx context.Context,input input.Body[natsDTO]) httpx.Response[string] {
- publish.Event(ctx,natsEvent{natsDTO:*input,topic:"order.created"})
- return httpx.Response[string]{Body:"accepted"}
+type natsController struct{publisher publish.Publisher;handled atomic.Int32}
+func(c *natsController) RegisterRoutes(r *api.Registry) {
+
+ r.POST("/orders",func(ctx context.Context,input input.Body[natsDTO])(httpx.Response[string],error){
+  if err:=c.publisher.Event(ctx,"order.created",publish.Fields{"email":input.Email,"age":input.Age});err!=nil{return httpx.Response[string]{},err}
+  return httpx.Response[string]{Body:"accepted"},nil
+ })
+
 }
-func(c *natsController) Handle(ctx context.Context,input natsDTO) {
+func(c *natsController) Handle(ctx context.Context,input natsDTO) error {
  c.handled.Add(1)
- publish.Event(ctx,natsEvent{natsDTO:input,topic:"order.completed"})
+ if err:=c.publisher.Event(ctx,"order.completed",publish.Fields{"email":input.Email,"age":input.Age});err!=nil{return err}
+ return nil
 }
 
 func TestGeneratedNATSRuntime(t *testing.T) {
@@ -65,7 +69,7 @@ func TestGeneratedNATSRuntime(t *testing.T) {
  publisher,err:=factory.NewPublisher(ctx);if err!=nil{t.Fatal(err)};defer publisher.Close(context.Background())
  app,options,err:=BuildApplication();if err!=nil{t.Fatal(err)}
  controller:=&natsController{}
- app.Constructor(func()*natsController{return controller})
+ app.Constructor(func(publisher publish.Publisher)*natsController{controller.publisher=publisher;return controller})
  if err:=app.Consumers().Register("order.created",(*natsController).Handle);err!=nil{t.Fatal(err)}
  endpoint:=""
  if options.HTTP!=nil {

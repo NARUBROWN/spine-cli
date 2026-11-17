@@ -26,7 +26,22 @@ func localNATSModuleProxy(t *testing.T) {
 	t.Log("using an isolated local NATS module proxy; this is not public installation evidence")
 }
 
-func TestGeneratedNATSAssemblyE2E(t *testing.T) {
+func TestGeneratedNATSAssemblyE2E(t *testing.T) { generatedNATSAssemblyE2E(t, "") }
+
+func TestPublisherCandidateNATSE2E(t *testing.T) {
+	core := os.Getenv("SPINE_CONTROLLER_CORE_SOURCE")
+	if core == "" {
+		t.Skip("SPINE_CONTROLLER_CORE_SOURCE is required for DI publisher source E2E")
+	}
+	absolute, err := filepath.Abs(core)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generatedNATSAssemblyE2E(t, absolute)
+}
+
+func generatedNATSAssemblyE2E(t *testing.T, core string) {
+	t.Helper()
 	if os.Getenv("SPINE_TEST_NATS_URL") == "" {
 		t.Skip("set SPINE_TEST_NATS_URL to run generated JetStream applications")
 	}
@@ -41,11 +56,20 @@ func TestGeneratedNATSAssemblyE2E(t *testing.T) {
 		for _, platform := range []string{"echo", "none"} {
 			t.Run(layout+"/"+platform, func(t *testing.T) {
 				workspace := t.TempDir()
-				applyAssemblyPlan(t, binary, workspace, "new", "sample", "--module", "example.com/sample", "--layout", layout, "--platform", platform, "--event-platform", "events:nats", "--validator", "playground")
+				args := []string{"new", "sample", "--module", "example.com/sample", "--layout", layout, "--platform", platform, "--event-platform", "events:nats", "--validator", "playground"}
+				if core != "" {
+					args = append(args, "--channel", "preview")
+				}
+				applyAssemblyPlan(t, binary, workspace, args...)
 				project := filepath.Join(workspace, "sample")
 				mod, err := os.ReadFile(filepath.Join(project, "go.mod"))
 				if err != nil || strings.Contains(string(mod), "replace") || !strings.Contains(string(mod), natsPlatformPath) || !strings.Contains(string(mod), "go 1.26.0") {
 					t.Fatalf("invalid NATS module selection: %s %v", mod, err)
+				}
+				if core != "" {
+					generatedGo(t, project, "mod", "edit", "-replace="+spineImportPath+"="+core)
+					generatedGo(t, project, "mod", "tidy")
+					t.Log("using explicit DI publisher source candidate; this is not public installation evidence")
 				}
 				// 정적 검사는 잘못된 런타임 환경에서도 helper를 실행하지 않습니다.
 				staticEnv := []string{"SPINE_EVENTS_ALLOW_INSECURE=invalid"}
@@ -66,7 +90,9 @@ func TestGeneratedNATSAssemblyE2E(t *testing.T) {
 					t.Fatalf("NATS fixture was skipped: %s", output)
 				}
 				t.Log(output)
-				applyAssemblyPlan(t, binary, project, "update")
+				if core == "" {
+					applyAssemblyPlan(t, binary, project, "update")
+				}
 				after, _ := os.ReadFile(filepath.Join(project, "internal/application/application.go"))
 				if !bytes.Equal(source, after) {
 					t.Fatal("NATS E2E or update changed generated composition")

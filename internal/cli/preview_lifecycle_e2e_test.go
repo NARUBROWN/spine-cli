@@ -71,22 +71,21 @@ app.Route("POST", "/conditional", (*conditionalController).Create)
 }
 
 const previewLifecycleSource = `package application
-import "context"
-type lifecycleService struct{closed bool}
-func newService()(*lifecycleService,error){return &lifecycleService{},nil}
+import("context";"github.com/NARUBROWN/spine/pkg/event/publish")
+type lifecycleService struct{closed bool;publisher publish.Publisher}
+func newService(publisher publish.Publisher)(*lifecycleService,error){return &lifecycleService{publisher:publisher},nil}
 func stopService(_ context.Context,s *lifecycleService)error{s.closed=true;return nil}
 `
 
 const previewLifecycleTest = `package application
 import(
  "context"
- "encoding/json"
  "errors"
  "testing"
- "time"
  "github.com/NARUBROWN/spine"
  "github.com/NARUBROWN/spine/pkg/boot"
  "github.com/NARUBROWN/spine/pkg/event/publish"
+ event "github.com/NARUBROWN/spine/contract/event"
 )
 func TestHookUsesFallibleConstructorDependency(t *testing.T){
  service:=&lifecycleService{}
@@ -104,24 +103,47 @@ func TestConstructorErrorPropagates(t *testing.T){
  prepared,err:=app.Prepare(context.Background(),boot.Options{})
  if prepared!=nil||!errors.Is(err,failure){t.Fatalf("%v %v",prepared,err)}
 }
-type recordedPublisher struct{events []publish.DomainEvent}
-func(p *recordedPublisher)Publish(events ...publish.DomainEvent){p.events=append(p.events,events...)}
-type legacyEvent struct{}
-func(legacyEvent)Name()string{return "legacy.created"}
-func(legacyEvent)OccurredAt()time.Time{return time.Time{}}
-func TestFieldsAndDomainEvents(t *testing.T){
- recorder:=&recordedPublisher{};ctx:=publish.WithPublisher(context.Background(),recorder)
- if err:=publish.Event(ctx,"order.created",publish.Fields{"id":"42"});err!=nil{t.Fatal(err)}
- publish.DomainEvents(ctx,legacyEvent{})
- if len(recorder.events)!=2||recorder.events[0].Name()!="order.created"||recorder.events[1].Name()!="legacy.created"{t.Fatal(recorder.events)}
- data,err:=json.Marshal(recorder.events[0]);if err!=nil||string(data)!=` + "`" + `{"id":"42"}` + "`" + `{t.Fatalf("%s %v",data,err)}
+type recordedPublisher struct{message event.Message;err error;started,release chan struct{}}
+func(p *recordedPublisher)Publish(ctx context.Context,m event.Message)error{
+ p.message=m
+ if p.started!=nil{close(p.started);select{case<-p.release:case<-ctx.Done():return ctx.Err()}}
+ return p.err
 }
+func(*recordedPublisher)Close(context.Context)error{return nil}
+type publisherFactory struct{first,next *recordedPublisher;creates int}
+func(*publisherFactory)Capabilities()event.Capabilities{return event.Capabilities{ContractVersion:event.ContractVersion,Publish:true}}
+func(*publisherFactory)NewReader(context.Context,event.Subscription)(event.Reader,error){return nil,event.ErrUnsupportedCapability}
+func(f *publisherFactory)NewPublisher(context.Context)(event.Publisher,error){f.creates++;if f.creates==1{return f.first,nil};return f.next,nil}
+func TestDIPublisherWaitsAndPreservesOutboxMetadata(t *testing.T){
+ failure:=errors.New("broker failed")
+ first:=&recordedPublisher{err:failure,started:make(chan struct{}),release:make(chan struct{})}
+ next:=&recordedPublisher{}
+ factory:=&publisherFactory{first:first,next:next}
+ service:=&lifecycleService{}
+ app:=spine.New(spine.WithEventAdapter("events",factory),spine.WithShutdownHook(stopService))
+ app.Constructor(func(p publish.Publisher)*lifecycleService{service.publisher=p;return service})
+ prepared,err:=app.Prepare(t.Context(),boot.Options{});if err!=nil{t.Fatal(err)};defer prepared.Close(context.Background())
+ options:=[]publish.Option{publish.WithMessageID("outbox-42"),publish.WithMetadata(map[string]string{"trace":"same"})}
+ done:=make(chan error,1)
+ go func(){done<-service.publisher.Event(t.Context(),"order.created",publish.Fields{"id":"42"},options...)}()
+ <-first.started
+ select{case err:=<-done:t.Fatalf("returned before transmission result: %v",err);default:}
+ close(first.release)
+ if err:=<-done;!errors.Is(err,failure){t.Fatal(err)}
+ if err:=service.publisher.Event(t.Context(),"order.created",publish.Fields{"id":"42"},options...);err!=nil{t.Fatal(err)}
+ for _,message:=range []event.Message{first.message,next.message}{
+  if message.EventName!="order.created"||string(message.Payload)!=` + "`" + `{"id":"42"}` + "`" + `||message.Metadata["message_id"]!="outbox-42"||message.Metadata["trace"]!="same"{t.Fatalf("%+v",message)}
+ }
+ if err:=prepared.Close(t.Context());err!=nil{t.Fatal(err)}
+ if err:=service.publisher.Event(t.Context(),"order.created",nil);!errors.Is(err,event.ErrInvalidState){t.Fatal(err)}
+}
+
 `
 
 const previewConditionalSource = `package application
 import(
- "context"
  "encoding/json"
+ "context"
  "reflect"
  "github.com/NARUBROWN/spine/pkg/input"
  "github.com/NARUBROWN/spine/pkg/httpx"
