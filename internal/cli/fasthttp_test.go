@@ -8,20 +8,24 @@ import (
 )
 
 func TestFastHTTPWizardSelection(t *testing.T) {
-	options, err := parseNewOptions([]string{"fast-api"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var output bytes.Buffer
-	options, err = promptNewProjectOptions([]string{"fast-api"}, options, strings.NewReader("\nfasthttp\n\n\n"), &output)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if options.Platform != "fasthttp" || options.WebSocketPlatform != "none" || options.Frontend != "none" {
-		t.Fatalf("wizard selection: %+v", options)
-	}
-	if !strings.Contains(output.String(), "fasthttp") || strings.Contains(output.String(), "Gorilla WebSocket") || strings.Contains(output.String(), "Enable a frontend?") {
-		t.Fatalf("unsupported integrations were offered: %s", output.String())
+	for _, choice := range []string{"3", "fasthttp"} {
+		t.Run(choice, func(t *testing.T) {
+			options, err := parseNewOptions([]string{"fast-api"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			options, err = promptNewProjectOptions([]string{"fast-api"}, options, strings.NewReader("\n"+choice+"\n\n\n"), &output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if options.Platform != "fasthttp" || options.WebSocketPlatform != "none" || options.Frontend != "none" {
+				t.Fatalf("wizard selection: %+v", options)
+			}
+			if !strings.Contains(output.String(), "  3. fasthttp\n") || strings.Contains(output.String(), "Gorilla WebSocket") || strings.Contains(output.String(), "Enable a frontend?") {
+				t.Fatalf("missing numbered choice or unsupported integrations offered: %s", output.String())
+			}
+		})
 	}
 }
 

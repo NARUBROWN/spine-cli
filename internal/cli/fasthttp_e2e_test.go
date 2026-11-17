@@ -3,6 +3,7 @@ package cli
 import (
 	goversion "go/version"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -15,6 +16,34 @@ func requireFastHTTPToolchain(t *testing.T) {
 	if goversion.Compare(runtime.Version(), "go1.26.0") < 0 {
 		t.Skip("fasthttp requires Go 1.26.0+")
 	}
+}
+
+func TestGeneratedFastHTTPInteractiveEndToEnd(t *testing.T) {
+	requireFastHTTPToolchain(t)
+	binary := buildUpdateCLI(t)
+	workspace := t.TempDir()
+	command := exec.CommandContext(t.Context(), binary, "new", "wizard-api", "--module", "example.com/wizard-api", "--interactive")
+	command.Dir = workspace
+	command.Env = mergeE2EEnvironment([]string{"GOWORK=off"})
+	command.Stdin = strings.NewReader("\n3\n\n\n")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("interactive fasthttp generation: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "  3. fasthttp\n") {
+		t.Fatalf("fasthttp was not offered as a numbered HTTP choice: %s", output)
+	}
+	project := filepath.Join(workspace, "wizard-api")
+	config, err := os.ReadFile(filepath.Join(project, "spine.toml"))
+	if err != nil || !strings.Contains(string(config), `platform = "fasthttp"`) {
+		t.Fatalf("interactive selection was not applied: %s %v", config, err)
+	}
+	mod, err := os.ReadFile(filepath.Join(project, "go.mod"))
+	if err != nil || !strings.Contains(string(mod), "go 1.26.0") || !strings.Contains(string(mod), providerModule("fasthttp")) {
+		t.Fatalf("interactive project dependencies: %s %v", mod, err)
+	}
+	assertE2ESuccess(t, runE2E(binary, project, nil, "contract", "check", "--warnings-as-errors", "--json"), "interactive fasthttp static contract")
+	generatedGo(t, project, "test", "./...", "-count=1")
 }
 
 func TestGeneratedFastHTTPPublicEndToEnd(t *testing.T) {

@@ -14,6 +14,7 @@ var optional = map[string]struct{}{
 	"TestRuntimeOpenAPIGeneratedApplications":    {},
 }
 var required = map[string]struct{}{
+	"TestGeneratedFastHTTPInteractiveEndToEnd":                  {},
 	"TestGeneratedFastHTTPShutdownDrainsRequests":               {},
 	"TestGeneratedFastHTTPPublicEndToEnd":                       {},
 	"TestGeneratedFastHTTPPublicEndToEnd/layered-v1/none":       {},
