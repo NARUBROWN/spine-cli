@@ -79,7 +79,7 @@ func compatible(c upstreamClient, tagged, version, module string) (string, error
 	if err := get(c, "compare/"+tagged+"..."+head, &comparison); err != nil {
 		return "", err
 	}
-	allowed := map[string]bool{"README.md": true, "README.en.md": true, "README.ja.md": true, "README.zh-Hans.md": true, "README.zh-Hant.md": true}
+	allowed := map[string]bool{"README.md": true, "README.ko.md": true, "README.en.md": true, "README.ja.md": true, "README.zh-Hans.md": true, "README.zh-Hant.md": true}
 	switch module {
 	case core, core + "-echo-platform":
 		allowed["scripts/release/release.py"] = true
@@ -94,7 +94,8 @@ func compatible(c upstreamClient, tagged, version, module string) (string, error
 		return "", nil
 	}
 	for _, file := range comparison.Files {
-		if file.Status != "modified" || !allowed[file.Filename] {
+		translatedReadme := file.Filename == "README.ko.md" && file.Status == "added"
+		if !allowed[file.Filename] || (file.Status != "modified" && !translatedReadme) {
 			return "", nil
 		}
 	}

@@ -35,6 +35,7 @@ func TestCollectUpstreamEvidence(t *testing.T) {
 		{"failed workflow", "공개 검증 기록"}, {"mismatched core selection", "코어 검증 기록"},
 		{"recipe drift", "레시피"}, {"expired adapter", ""},
 		{"readme only", ""}, {"core tooling only", ""}, {"echo tooling only", ""},
+		{"translated readme", ""}, {"added source", "레시피"}, {"deleted translation", "레시피"},
 		{"other core tooling", "레시피"}, {"other echo tooling", "레시피"},
 		{"source changed", "레시피"}, {"head moved", "레시피"}, {"diverged", "레시피"},
 	} {
@@ -97,6 +98,10 @@ func TestCollectUpstreamEvidence(t *testing.T) {
 			files := []string{"README.zh-Hans.md"}
 			status, mergeBase := "ahead", source
 			switch tc.name {
+			case "translated readme", "deleted translation":
+				files = []string{"README.md", "README.ko.md"}
+			case "added source":
+				files = []string{"application.go"}
 			case "core tooling only", "other core tooling":
 				files = []string{"scripts/release/release.py", "scripts/release/test_release.py", "scripts/release/verify_public.py"}
 				if tc.name == "other core tooling" {
@@ -126,7 +131,14 @@ func TestCollectUpstreamEvidence(t *testing.T) {
 				fixture.entries["git/ref/heads/preview"] = doc{"object": doc{"sha": headSHA}}
 				changes := make([]doc, 0, len(files))
 				for _, path := range files {
-					changes = append(changes, doc{"status": "modified", "filename": path})
+					fileStatus := "modified"
+					if tc.name == "added source" || (tc.name == "translated readme" && path == "README.ko.md") {
+						fileStatus = "added"
+					}
+					if tc.name == "deleted translation" && path == "README.ko.md" {
+						fileStatus = "removed"
+					}
+					changes = append(changes, doc{"status": fileStatus, "filename": path})
 				}
 				fixture.entries["compare/"+source+"..."+headSHA] = doc{"status": status, "merge_base_commit": doc{"sha": mergeBase}, "files": changes}
 			}
