@@ -35,3 +35,28 @@ func TestWebSocketSenderAutomaticDependencyRequiresNewContract(t *testing.T) {
 		})
 	}
 }
+
+func TestWebSocketMethodExpressionRejectsSpineContext(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, typeName string
+		wantError            bool
+	}{
+		{"standard", "context", "Context", false},
+		{"framework", spineImportPath + "/pkg/spine", "Ctx", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := types.NewPackage(tc.path, "context")
+			parameter := types.NewNamed(types.NewTypeName(token.NoPos, pkg, tc.typeName, nil), types.NewInterfaceType(nil, nil).Complete(), nil)
+			method := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "ctx", parameter)), types.NewTuple(), false)
+			inspector := &contractInspector{contract: &applicationContract{}, controllerMethods: map[string]*types.Signature{"Socket.Handle": method}}
+			inspector.checkWebSocketSignature(&namedRegistration{Handler: "Socket.Handle"}, staticHandlerSignature{}, nil)
+			rejected := false
+			for _, d := range inspector.contract.Diagnostics {
+				rejected = rejected || d.Code == "WEBSOCKET_PARAMETER_UNSUPPORTED"
+			}
+			if rejected != tc.wantError {
+				t.Fatal(inspector.contract.Diagnostics)
+			}
+		})
+	}
+}

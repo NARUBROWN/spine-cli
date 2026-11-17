@@ -101,7 +101,7 @@ func modulesExportSpineContext(modules []selectedModule) bool {
 
 func messageHandlerTemplate(kind string, name resourceName, publicContext bool) string {
 	contextImport, contextType := "context", "context.Context"
-	if publicContext {
+	if publicContext && kind == "consumer" {
 		contextImport, contextType = spineImportPath+"/pkg/spine", "spine.Ctx"
 	}
 	if kind == "consumer" {
@@ -136,7 +136,7 @@ type %sSocket struct{}
 func New%sSocket() *%sSocket { return &%sSocket{} }
 
 func (s *%sSocket) Handle(ctx %s, connectionID ws.ConnectionID, message %sMessage) error {
-	// TODO: 메시지를 처리하고 필요하면 ws.Send로 응답한 뒤 이 오류를 제거합니다.
+	// TODO: 메시지를 처리하고 필요하면 주입받은 ws.Sender로 응답한 뒤 이 오류를 제거합니다.
 	return errors.New("%s websocket handler is not implemented")
 }
 `, name.Package, contextImport, name.Type, name.Type, name.Type, name.Type, name.Type, contextType, name.Type, name.Package)

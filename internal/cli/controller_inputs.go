@@ -274,7 +274,7 @@ func checkRouteCallbackInputs(method string, signature *types.Signature, version
 			return fmt.Errorf("WebSocket callback parameter %d must declare an explicit input.Message or context", index)
 		}
 		path, name := n.Obj().Pkg().Path(), n.Obj().Name()
-		if path == "context" && name == "Context" || path == spineImportPath+"/pkg/spine" && name == "Ctx" || path == spineImportPath+"/pkg/ws" && name == "ConnectionID" {
+		if path == "context" && name == "Context" || path == spineImportPath+"/pkg/ws" && name == "ConnectionID" {
 			continue
 		}
 		if path == spineImportPath+"/pkg/input" && name == "Message" && n.TypeArgs().Len() == 1 {
@@ -286,7 +286,7 @@ func checkRouteCallbackInputs(method string, signature *types.Signature, version
 				continue
 			}
 		}
-		return fmt.Errorf("WebSocket callback parameter %d requires spine.Ctx, context.Context, ws.ConnectionID or input.Message[struct or []byte]", index)
+		return fmt.Errorf("WebSocket callback parameter %d requires context.Context, ws.ConnectionID or input.Message[struct or []byte]", index)
 	}
 	return nil
 }

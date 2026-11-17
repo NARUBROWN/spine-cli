@@ -42,15 +42,20 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
  func (*Group) WS(string,any,...Option){}
  `)
 	write("core/pkg/input/input.go", "package input\ntype Body[T any] *T\ntype Query[T any] *T\ntype Path[T any] *T\ntype Header[T any] *T\ntype Message[T any] struct{Value T}\n")
+	write("core/pkg/spine/types.go", "package spine;type Ctx interface{Get(string)(any,bool)}")
 	write("core/pkg/httpx/httpx.go", "package httpx\ntype Response[T any] struct{Body T}\n")
 	write("controller.go", `package typed
  import (
  "mime/multipart"
+ "context"
+ "github.com/NARUBROWN/spine/pkg/spine"
  "github.com/NARUBROWN/spine/pkg/api"
  "github.com/NARUBROWN/spine/pkg/input"
  "github.com/NARUBROWN/spine/pkg/httpx"
  )
  type DTO struct{Name string; UserID int}
+ type FixtureContext = context.Context
+ type FixtureSpineContext = spine.Ctx
  type FixtureFileHeader = multipart.FileHeader
  type PathDTO struct{ID int `+"`path:\"id\"`"+`}
  type Payload = input.Body[DTO]
@@ -387,7 +392,7 @@ func TestControllerWebSocketCallbacksAreSeparateFromHTTP(t *testing.T) {
 	}
 }
 func TestControllerWebSocketRejectsUnwrappedOrWrongPayload(t *testing.T) {
-	for _, typ := range []string{"DTO", "input.Message[int]"} {
+	for _, typ := range []string{"DTO", "input.Message[int]", "spine.Ctx"} {
 		t.Run(typ, func(t *testing.T) {
 			i := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){r.WS("/ws",func(m `+typ+`)error{return nil})}`)
 			i.inspectControllerRoutes()
@@ -402,5 +407,22 @@ func TestControllerWebSocketRejectsUnwrappedOrWrongPayload(t *testing.T) {
 				t.Fatal(i.contract.Diagnostics)
 			}
 		})
+	}
+}
+
+func TestControllerWebSocketAcceptsStandardContext(t *testing.T) {
+	i := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){r.WS("/ws",func(ctx context.Context,m input.Message[DTO])error{return ctx.Err()})}`)
+	i.inspectControllerRoutes()
+	i.resolveHandlerSignatures()
+	if len(i.contract.WebSockets) != 1 {
+		t.Fatal(i.contract.Diagnostics)
+	}
+	for _, d := range i.contract.Diagnostics {
+		if d.Severity == "error" {
+			t.Fatal(d)
+		}
+	}
+	if i.contract.WebSockets[0].Parameters[0].Binding != "context" {
+		t.Fatal(i.contract.WebSockets[0].Parameters)
 	}
 }

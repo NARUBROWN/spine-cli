@@ -38,10 +38,10 @@ func TestMessageGeneratorsUseSelectedCoreContext(t *testing.T) {
 							t.Fatal(err)
 						}
 						source := planner.Changes["src/"+kind+"/audit/audit_handler.go"].Contents
-						assertMessageContext(t, source, hasPublic)
+						assertMessageContext(t, source, hasPublic && kind == "consumer")
 					} else {
 						files := messageModuleFiles(kind, name, "audit", nil, public)
-						assertMessageContext(t, files[filepath.Join("src", kind, "audit", "audit_handler.go")], hasPublic)
+						assertMessageContext(t, files[filepath.Join("src", kind, "audit", "audit_handler.go")], hasPublic && kind == "consumer")
 					}
 				}
 			})

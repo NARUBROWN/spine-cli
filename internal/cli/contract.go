@@ -751,6 +751,12 @@ func (i *contractInspector) checkWebSocketSignature(registration *namedRegistrat
 		add("WEBSOCKET_RETURN_UNSUPPORTED", fmt.Sprintf("WebSocket handler %s must return only error values.", registration.Handler))
 	}
 	if method := i.controllerMethods[registration.Handler]; method != nil {
+		for index := 0; index < method.Params().Len(); index++ {
+			n, ok := types.Unalias(method.Params().At(index).Type()).(*types.Named)
+			if ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == spineImportPath+"/pkg/spine" && n.Obj().Name() == "Ctx" {
+				add("WEBSOCKET_PARAMETER_UNSUPPORTED", "WebSocket handlers receive context.Context; spine.Ctx is not a WebSocket context.")
+			}
+		}
 		errorType := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 		for index := 0; index < method.Results().Len(); index++ {
 			if !types.Implements(method.Results().At(index).Type(), errorType) {
@@ -853,7 +859,7 @@ func bindMessageParameters(parameters []handlerParameter, transport string, impo
 		alias, name, _ := strings.Cut(parameter.Type, ".")
 		spineContext := name == "Ctx" && imports[alias] == spineImportPath+"/pkg/spine"
 		switch {
-		case spineContext || parameter.Type == "context.Context" || strings.HasSuffix(parameter.Type, "ExecutionContext"):
+		case spineContext || name == "Context" && imports[alias] == "context" || strings.HasSuffix(parameter.Type, "ExecutionContext"):
 			parameter.Binding = "context"
 		case transport == "websocket" && strings.HasSuffix(parameter.Type, "ConnectionID"):
 			parameter.Binding = "connection"
