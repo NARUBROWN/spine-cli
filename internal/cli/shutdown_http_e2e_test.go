@@ -16,6 +16,16 @@ import (
 )
 
 func TestGeneratedHTTPShutdownDrainsRequests(t *testing.T) {
+	generatedHTTPShutdownDrainsRequests(t, "echo")
+}
+
+func TestGeneratedFastHTTPShutdownDrainsRequests(t *testing.T) {
+	requireFastHTTPToolchain(t)
+	generatedHTTPShutdownDrainsRequests(t, "fasthttp")
+}
+
+func generatedHTTPShutdownDrainsRequests(t *testing.T, platform string) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix signal drain; Windows uses kill fallback")
 	}
@@ -24,7 +34,7 @@ func TestGeneratedHTTPShutdownDrainsRequests(t *testing.T) {
 		for _, mode := range []string{"run", "dev"} {
 			t.Run(layout+"/"+mode, func(t *testing.T) {
 				workspace := t.TempDir()
-				applyAssemblyPlan(t, binary, workspace, "new", "sample", "--module", "example.com/sample", "--layout", layout)
+				applyAssemblyPlan(t, binary, workspace, "new", "sample", "--module", "example.com/sample", "--layout", layout, "--platform", platform)
 				project := filepath.Join(workspace, "sample")
 				mainPath := filepath.Join(project, "main.go")
 				source, _ := os.ReadFile(mainPath)

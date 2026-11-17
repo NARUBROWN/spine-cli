@@ -12,7 +12,7 @@ Other channels: [RC](https://github.com/NARUBROWN/spine-cli/tree/rc) | [Stable](
 
 ## Quick start
 
-Requires Go 1.25.5 or later. Applications using `--validator playground` require Go 1.26.0 or later.
+Requires Go 1.25.5 or later. Applications using `--validator playground` or `--platform fasthttp` require Go 1.26.0 or later.
 
 ```sh
 go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.4-preview.5
@@ -29,6 +29,14 @@ curl http://localhost:8080/health
 `/health` returns HTTP 200 and `{"status":"ok"}`. `--channel preview` resolves development branches for the core and platforms. Check the generated `go.mod` for the versions actually selected.
 
 ## Common commands
+
+Generate an HTTP v3 project with fasthttp:
+
+```sh
+spine new fast-api --module github.com/acme/fast-api --platform fasthttp --channel preview --no-interactive
+```
+
+The project wizard also lists `fasthttp`. The generator reads the HTTP contract and minimum Go version from `spine-platform.json` and pins the resolved preview versions in `go.mod`. WebSocket upgrades and frontend static serving are unavailable with this platform.
 
 | Command | Purpose |
 | --- | --- |

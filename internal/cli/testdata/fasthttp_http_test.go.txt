@@ -1,0 +1,527 @@
+package application
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/NARUBROWN/spine"
+	httpcontract "github.com/NARUBROWN/spine/contract/http"
+	"github.com/NARUBROWN/spine/core"
+	"github.com/NARUBROWN/spine/interceptor/cors"
+	"github.com/NARUBROWN/spine/pkg/api"
+	"github.com/NARUBROWN/spine/pkg/boot"
+	"github.com/NARUBROWN/spine/pkg/constructor"
+	"github.com/NARUBROWN/spine/pkg/httperr"
+	"github.com/NARUBROWN/spine/pkg/httpx"
+	"github.com/NARUBROWN/spine/pkg/input"
+	contextapi "github.com/NARUBROWN/spine/pkg/spine"
+)
+
+const fastHasValidator = {{VALIDATOR}}
+
+type fastState struct {
+	pre, completed, failures, bound atomic.Int32
+	uploadPath                      chan string
+	entered                         chan context.Context
+	release                         chan struct{}
+	releaseOnce                     sync.Once
+}
+
+func (s *fastState) unblock() { s.releaseOnce.Do(func() { close(s.release) }) }
+
+type fastService struct{ state *fastState }
+
+func (*fastService) Constructor(s *fastState) *fastService { return &fastService{state: s} }
+
+type fastController struct{ service *fastService }
+
+func (*fastController) Constructor(s *fastService) *fastController { return &fastController{s} }
+
+type fastBody struct {
+	Name string `json:"name" xml:"name" form:"name" validate:"required"`
+	Age  int    `json:"age" xml:"age" form:"age" validate:"gte=18"`
+}
+type fastQuery struct {
+	Tags []string `query:"tag"`
+	Page *int     `query:"page"`
+}
+type fastHeaders struct {
+	Host   string   `header:"Host"`
+	Values []string `header:"X-E2E"`
+}
+type fastUpload struct {
+	Name string                `form:"name"`
+	File *multipart.FileHeader `form:"file"`
+}
+
+func (c *fastController) RegisterRoutes(r *api.Registry) {
+
+	r.POST("/e2e/bind/:id", func(body input.Body[fastBody], path input.Path[int], query input.Query[fastQuery], header input.Header[fastHeaders]) httpx.Response[map[string]any] {
+		c.service.state.bound.Add(1)
+		return httpx.Response[map[string]any]{Body: map[string]any{"name": body.Name, "age": body.Age, "id": *path, "tags": query.Tags, "page": query.Page, "host": header.Host, "headers": header.Values}}
+	})
+
+	r.POST("/e2e/upload", func(body input.Body[fastUpload]) (httpx.Response[string], error) {
+		if body.File == nil {
+			return httpx.Response[string]{}, httperr.BadRequest("missing upload")
+		}
+		file, err := body.File.Open()
+		if err != nil {
+			return httpx.Response[string]{}, err
+		}
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		if err != nil {
+			return httpx.Response[string]{}, err
+		}
+		if disk, ok := file.(*os.File); ok {
+			c.service.state.uploadPath <- disk.Name()
+		}
+		return httpx.Response[string]{Body: body.Name + ":" + body.File.Filename + ":" + string(data)}, nil
+	})
+
+	r.GET("/e2e/text", func() httpx.Response[string] { return httpx.Response[string]{Body: "안녕"} })
+
+	r.GET("/e2e/binary", func() httpx.Binary {
+		return httpx.Binary{ContentType: "application/octet-stream", Data: []byte{0, 1, 2}}
+	})
+
+	r.GET("/e2e/empty", func() httpx.Response[string] {
+		return httpx.Response[string]{Body: "discard", Options: httpx.ResponseOptions{Status: 204, Headers: map[string]string{"X-E2E-Empty": "preserved"}, Cookies: []httpx.Cookie{{Name: "first", Value: "one"}, {Name: "second", Value: "two"}}}}
+	})
+
+	r.GET("/e2e/redirect", func() httpx.Redirect { return httpx.Redirect{Location: "/health"} })
+
+	r.GET("/e2e/error", func() error { return httperr.NotFound("missing fixture") })
+
+	r.GET("/e2e/panic", func() httpx.Response[string] { panic("fixture panic") })
+
+	r.GET("/e2e/staged", func(sc contextapi.Ctx) httpx.Response[string] {
+		sc.ExecutionContext().Set("reject-staged", true)
+		return httpx.Response[string]{Body: "must-not-leak"}
+	})
+
+	r.OPTIONS("/e2e/cors", func() httpx.Response[string] {
+		return httpx.Response[string]{Options: httpx.ResponseOptions{Status: 204}}
+	})
+
+	r.GET("/e2e/slow", func(sc contextapi.Ctx) httpx.Response[string] {
+		c.service.state.entered <- sc.ExecutionContext().Context()
+		<-c.service.state.release
+		return httpx.Response[string]{Body: "completed"}
+	})
+
+}
+
+type fastInterceptor struct{ state *fastState }
+
+func (*fastInterceptor) Constructor(s *fastState) *fastInterceptor { return &fastInterceptor{s} }
+func (i *fastInterceptor) PreHandle(sc contextapi.Ctx, _ core.HandlerMeta) error {
+	i.state.pre.Add(1)
+	response, ok := sc.HTTPResponseContext()
+	if !ok {
+		return errors.New("missing HTTP response context")
+	}
+	response.SetHeader("X-E2E-Interceptor", "yes")
+	return nil
+}
+func (*fastInterceptor) PostHandle(contextapi.Ctx, core.HandlerMeta) {}
+func (*fastInterceptor) BeforeResponse(sc contextapi.Ctx, _ core.HandlerMeta, _ error) error {
+	if value, ok := sc.ExecutionContext().Get("reject-staged"); ok && value == true {
+		return httperr.BadRequest("staging rejected")
+	}
+	return nil
+}
+func (i *fastInterceptor) AfterCompletion(_ contextapi.Ctx, _ core.HandlerMeta, err error) {
+	i.state.completed.Add(1)
+	if err != nil {
+		i.state.failures.Add(1)
+	}
+}
+
+type fastServer struct {
+	prepared      spine.PreparedApplication
+	state         *fastState
+	base, address string
+	client        *http.Client
+	done          chan error
+}
+
+func startFastServer(t *testing.T, tlsConfig *tls.Config, roots *x509.CertPool) *fastServer {
+	t.Helper()
+	app, options, err := BuildApplication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &fastState{uploadPath: make(chan string, 2), entered: make(chan context.Context, 1), release: make(chan struct{})}
+	app.Constructor(
+		constructor.Custom(func() *fastState { return state }),
+		constructor.Service(&fastService{}), constructor.Controller(&fastController{}), constructor.Interceptor(&fastInterceptor{}),
+		constructor.Custom(func() *cors.CORSInterceptor {
+			return cors.New(cors.Config{AllowOrigins: []string{"https://client.test"}, AllowMethods: []string{"POST"}, AllowHeaders: []string{"X-E2E"}})
+		}),
+	)
+	app.InterceptorFor(boot.InterceptorHTTP, (*fastInterceptor)(nil), (*cors.CORSInterceptor)(nil))
+	options.HTTP.MaxBodyBytes = 8 << 10
+	options.HTTP.MultipartMemoryBytes = 32
+	options.HTTP.OpenAPI = boot.OpenAPIOptions{Enabled: true, Title: "FastHTTP E2E", Version: "preview"}
+	options.HTTP.TLS = tlsConfig
+	prepared, err := app.Prepare(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	scheme := "http"
+	if tlsConfig != nil {
+		scheme = "https"
+	}
+	s := &fastServer{prepared: prepared, state: state, address: listener.Addr().String(), base: scheme + "://" + listener.Addr().String(), client: client, done: make(chan error, 1)}
+	go func() { s.done <- prepared.HTTPAdapter().Serve(listener) }()
+	t.Cleanup(func() {
+		state.unblock()
+		transport.CloseIdleConnections()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := prepared.Close(ctx); err != nil {
+			t.Error(err)
+		}
+		select {
+		case err := <-s.done:
+			if !errors.Is(err, httpcontract.ErrServerClosed) {
+				t.Error(err)
+			}
+		case <-ctx.Done():
+			t.Error("Serve did not stop")
+		}
+	})
+	return s
+}
+
+func fastRequest(t *testing.T, s *fastServer, method, path, media, body string, status int) (*http.Response, []byte) {
+	t.Helper()
+	request, err := http.NewRequest(method, s.base+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if media != "" {
+		request.Header.Set("Content-Type", media)
+	}
+	request.Host = "tenant.test:8123"
+	request.Header.Add("X-E2E", "one")
+	request.Header.Add("X-E2E", "two")
+	response, err := s.client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != status {
+		t.Fatalf("%s %s: status=%d body=%q error=%v", method, path, response.StatusCode, data, err)
+	}
+	return response, data
+}
+
+func TestFastHTTPCoreInputsAndResponses(t *testing.T) {
+	s := startFastServer(t, nil, nil)
+	fastRequest(t, s, "GET", "/health", "", "", 200)
+	for _, tc := range []struct{ name, media, body string }{
+		{"json", "application/json", `{"name":"Alice","age":24}`},
+		{"xml", "application/xml", `<request><name>Alice</name><age>24</age></request>`},
+		{"form", "application/x-www-form-urlencoded", "name=Alice&age=24"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response, data := fastRequest(t, s, "POST", "/e2e/bind/%34%32?tag=two+words&tag=a%2Bb&page=3", tc.media, tc.body, 200)
+			var got struct {
+				Name    string
+				Age, ID int
+				Tags    []string
+				Page    *int
+				Host    string
+				Headers []string
+			}
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Name != "Alice" || got.Age != 24 || got.ID != 42 || got.Page == nil || *got.Page != 3 || got.Host != "tenant.test:8123" || strings.Join(got.Tags, ",") != "two words,a+b" || strings.Join(got.Headers, ",") != "one,two" || response.Header.Get("X-E2E-Interceptor") != "yes" {
+				t.Fatalf("binding or interceptor: %s %v", data, response.Header)
+			}
+		})
+	}
+	status := 200
+	if fastHasValidator {
+		status = 400
+	}
+	fastRequest(t, s, "POST", "/e2e/bind/42", "application/json", `{"name":"Alice","age":1}`, status)
+	fastRequest(t, s, "POST", "/e2e/bind/42", "application/json", "{", 400)
+	fastRequest(t, s, "POST", "/e2e/bind/not-an-int", "application/json", `{"name":"Alice","age":24}`, 400)
+	fastRequest(t, s, "POST", "/e2e/bind/42?page=bad", "application/json", `{"name":"Alice","age":24}`, 400)
+	for _, tc := range []struct {
+		path, body string
+		status     int
+	}{
+		{"/e2e/text", "안녕", 200}, {"/e2e/binary", string([]byte{0, 1, 2}), 200}, {"/e2e/empty", "", 204}, {"/e2e/redirect", "", 302},
+		{"/e2e/error", "", 404}, {"/e2e/panic", "", 500}, {"/e2e/staged", "", 400}, {"/missing", "", 404},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			response, data := fastRequest(t, s, "GET", tc.path, "", "", tc.status)
+			if tc.status < 400 && tc.path != "/e2e/redirect" && string(data) != tc.body {
+				t.Fatalf("body: %q", data)
+			}
+			if tc.path == "/e2e/empty" && (len(response.Cookies()) != 2 || response.Header.Get("X-E2E-Empty") != "preserved") {
+				t.Fatalf("empty response metadata: %v", response.Header)
+			}
+			if tc.path == "/e2e/redirect" && response.Header.Get("Location") != "/health" {
+				t.Fatal("redirect location missing")
+			}
+			if strings.Contains(string(data), "must-not-leak") {
+				t.Fatal("BeforeResponse failure committed the successful body")
+			}
+		})
+	}
+	if s.state.pre.Load() != s.state.completed.Load() || s.state.failures.Load() == 0 {
+		t.Fatalf("completion hooks: pre=%d completed=%d errors=%d", s.state.pre.Load(), s.state.completed.Load(), s.state.failures.Load())
+	}
+}
+
+func TestFastHTTPCoreConcurrentBindings(t *testing.T) {
+	s := startFastServer(t, nil, nil)
+	results := make(chan error, 32)
+	for id := range 32 {
+		go func() {
+			name := fmt.Sprintf("request-%d", id)
+			request, _ := http.NewRequest("POST", fmt.Sprintf("%s/e2e/bind/%d?tag=%s", s.base, id, name), strings.NewReader(fmt.Sprintf(`{"name":%q,"age":24}`, name)))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("X-E2E", name)
+			response, err := s.client.Do(request)
+			if err == nil {
+				var got struct {
+					Name          string
+					ID            int
+					Tags, Headers []string
+				}
+				err = json.NewDecoder(response.Body).Decode(&got)
+				response.Body.Close()
+				if err == nil && (response.StatusCode != 200 || got.Name != name || got.ID != id || strings.Join(got.Tags, ",") != name || strings.Join(got.Headers, ",") != name) {
+					err = fmt.Errorf("request %d mixed another request's state: %+v", id, got)
+				}
+			}
+			results <- err
+		}()
+	}
+	for range 32 {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("concurrent binding timed out")
+		}
+	}
+}
+
+func TestFastHTTPCoreMultipartCleanup(t *testing.T) {
+	s := startFastServer(t, nil, nil)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("name", "Alice"); err != nil {
+		t.Fatal(err)
+	}
+	file, err := writer.CreateFormFile("file", "hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Repeat("upload", 100)
+	if _, err := io.WriteString(file, content); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, data := fastRequest(t, s, "POST", "/e2e/upload", writer.FormDataContentType(), body.String(), 200)
+	if string(data) != "Alice:hello.txt:"+content {
+		t.Fatalf("upload: %q", data)
+	}
+	select {
+	case path := <-s.state.uploadPath:
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("multipart temporary file remained: %s %v", path, err)
+		}
+	default:
+		t.Fatal("multipart memory budget did not exercise a disk-backed upload")
+	}
+	fastRequest(t, s, "POST", "/e2e/upload", "multipart/form-data; boundary=broken", "--broken\r\ninvalid", 400)
+}
+
+func TestFastHTTPCoreBodyLimitsAndTruncation(t *testing.T) {
+	s := startFastServer(t, nil, nil)
+	for _, chunked := range []bool{false, true} {
+		payload := `{"name":"Alice","age":24}`
+		for _, size := range []int{8 << 10, (8 << 10) + 1} {
+			request, _ := http.NewRequest("POST", s.base+"/e2e/bind/42", strings.NewReader(payload+strings.Repeat(" ", size-len(payload))))
+			request.Header.Set("Content-Type", "application/json")
+			if chunked {
+				request.ContentLength = -1
+			}
+			response, err := s.client.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			want := 200
+			if size > 8<<10 {
+				want = 413
+			}
+			if response.StatusCode != want {
+				t.Fatalf("body limit chunked=%t size=%d: %d", chunked, size, response.StatusCode)
+			}
+		}
+	}
+	payload := `{"name":"Alice","age":24}`
+	chunk := fmt.Sprintf("%x\r\n%s\r\n", len(payload), payload)
+	for _, frame := range []string{
+		"Content-Length: 5000\r\n\r\n" + strings.Repeat(" ", 4096) + "{",
+		"Transfer-Encoding: chunked\r\n\r\n" + chunk,
+		"Transfer-Encoding: chunked\r\n\r\n" + chunk + "0\r\n",
+	} {
+		before := s.state.bound.Load()
+		conn, err := net.DialTimeout("tcp", s.address, time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := io.WriteString(conn, "POST /e2e/bind/42 HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nConnection: close\r\n"+frame); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err == nil {
+			io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			if response.StatusCode < 400 {
+				t.Fatalf("truncated stream was accepted: %d", response.StatusCode)
+			}
+		}
+		conn.Close()
+		if s.state.bound.Load() != before {
+			t.Fatal("truncated body reached the bound controller")
+		}
+	}
+}
+
+func TestFastHTTPCoreCORSAndOpenAPI(t *testing.T) {
+	s := startFastServer(t, nil, nil)
+	for _, origin := range []string{"https://client.test", "https://denied.test"} {
+		request, _ := http.NewRequest("OPTIONS", s.base+"/e2e/cors", nil)
+		request.Header.Set("Origin", origin)
+		request.Header.Set("Access-Control-Request-Method", "POST")
+		request.Header.Set("Access-Control-Request-Headers", "X-E2E")
+		response, err := s.client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+		want := 204
+		if origin == "https://denied.test" {
+			want = 403
+		}
+		if response.StatusCode != want {
+			t.Fatalf("CORS %s: %d", origin, response.StatusCode)
+		}
+		if want == 204 && response.Header.Get("Access-Control-Allow-Origin") != origin {
+			t.Fatal("allowed CORS origin missing")
+		}
+	}
+	_, document := fastRequest(t, s, "GET", "/openapi.json", "", "", 200)
+	if !bytes.Contains(document, []byte(`"/e2e/bind/{id}"`)) || !bytes.Contains(document, []byte(`"FastHTTP E2E"`)) {
+		t.Fatalf("OpenAPI: %s", document)
+	}
+	_, body := fastRequest(t, s, "HEAD", "/openapi.json", "", "", 200)
+	if len(body) != 0 {
+		t.Fatal("HEAD OpenAPI has a body")
+	}
+}
+
+func TestFastHTTPCoreTLS(t *testing.T) {
+	fixture := httptest.NewTLSServer(http.NotFoundHandler())
+	certificate := fixture.TLS.Certificates[0]
+	roots := x509.NewCertPool()
+	roots.AddCert(fixture.Certificate())
+	fixture.Close()
+	s := startFastServer(t, &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}, roots)
+	response, _ := fastRequest(t, s, "GET", "/health", "", "", 200)
+	if response.TLS == nil {
+		t.Fatal("TLS negotiation was missing")
+	}
+}
+
+func TestFastHTTPCoreShutdownDrainsRequest(t *testing.T) {
+	s := startFastServer(t, nil, nil)
+	result := make(chan error, 1)
+	go func() {
+		response, err := s.client.Get(s.base + "/e2e/slow")
+		if err == nil {
+			var data []byte
+			data, err = io.ReadAll(response.Body)
+			response.Body.Close()
+			if err == nil && (response.StatusCode != 200 || string(data) != "completed") {
+				err = fmt.Errorf("active response: %d %q", response.StatusCode, data)
+			}
+		}
+		result <- err
+	}()
+	var active context.Context
+	select {
+	case active = <-s.state.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow request did not enter")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := s.prepared.Close(ctx); !errors.Is(err, context.DeadlineExceeded) || active.Err() != nil {
+		t.Fatalf("shutdown wait did not preserve active request: %v %v", err, active.Err())
+	}
+	s.state.unblock()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("active request did not finish")
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	if err := s.prepared.Close(ctx2); err != nil {
+		t.Fatal(err)
+	}
+	if active.Err() != context.Canceled {
+		t.Fatalf("request context did not finish: %v", active.Err())
+	}
+}

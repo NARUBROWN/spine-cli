@@ -12,7 +12,7 @@
 
 ## 빠른 시작
 
-Go 1.25.5 이상이 필요합니다. `--validator playground`를 선택한 앱에는 Go 1.26.0 이상이 필요합니다.
+Go 1.25.5 이상이 필요합니다. `--validator playground` 또는 `--platform fasthttp`를 선택한 앱에는 Go 1.26.0 이상이 필요합니다.
 
 ```sh
 go install github.com/NARUBROWN/spine-cli/cmd/spine@v0.4.4-preview.5
@@ -29,6 +29,14 @@ curl http://localhost:8080/health
 `/health`에서 HTTP 200과 `{"status":"ok"}`가 반환됩니다. `--channel preview`는 코어와 플랫폼의 개발 브랜치를 조회합니다. 실제로 선택된 버전은 생성된 `go.mod`에서 확인하세요.
 
 ## 자주 쓰는 명령
+
+fasthttp 기반 HTTP v3 프로젝트는 다음 명령으로 생성합니다. 대화형 생성 화면에서도 `fasthttp`를 선택할 수 있습니다.
+
+```sh
+spine new fast-api --module github.com/acme/fast-api --platform fasthttp --channel preview --no-interactive
+```
+
+생성기는 플랫폼의 `spine-platform.json`에서 HTTP 계약과 최소 Go 버전을 읽고, 해석한 프리뷰 버전을 `go.mod`에 고정합니다. fasthttp에서는 WebSocket 업그레이드와 프런트엔드 정적 서버 통합을 지원하지 않습니다.
 
 | 명령 | 하는 일 |
 | --- | --- |
