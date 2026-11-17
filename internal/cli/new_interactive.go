@@ -82,6 +82,7 @@ func promptNewProjectOptions(args []string, options newProjectOptions, input io.
 		options.Platform, err = promptDynamicChoice(reader, output, "HTTP adapter", []promptChoice{
 			{value: "nethttp", label: "net/http"},
 			{value: "echo", label: "Echo"},
+			{value: "fasthttp", label: "fasthttp"},
 			{value: "none", label: "No HTTP, event worker"},
 		}, options.Platform, true, providerLookupHint("spine-<provider>-platform", options.DependencyChannel))
 		if err != nil {
@@ -94,7 +95,10 @@ func promptNewProjectOptions(args []string, options newProjectOptions, input io.
 			return options, err
 		}
 	}
-	if !present.websocket {
+	if !present.websocket && options.Platform == "fasthttp" {
+		fmt.Fprintln(output, "WebSocket integration is unavailable with the fasthttp HTTP adapter.")
+		options.WebSocketPlatform = "none"
+	} else if !present.websocket {
 		choices := []promptChoice{{value: "none", label: "Disabled"}}
 		if options.Platform != "none" {
 			choices = append(choices, promptChoice{value: "gorilla", label: "Gorilla WebSocket"})

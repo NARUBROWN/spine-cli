@@ -124,6 +124,9 @@ func validateNewProjectOptions(options newProjectOptions) (newProjectOptions, er
 	if options.WebSocketPlatform != "none" && options.Platform == "none" {
 		return options, fmt.Errorf("--websocket-platform requires an HTTP platform")
 	}
+	if options.Platform == "fasthttp" && options.WebSocketPlatform != "none" {
+		return options, fmt.Errorf("fasthttp does not support WebSocket upgrades; use --websocket-platform none")
+	}
 	if options.WebSocketPlatform != "none" && options.WebSocketPlatform == options.Platform {
 		return options, fmt.Errorf("HTTP and WebSocket providers must use different platform modules")
 	}
