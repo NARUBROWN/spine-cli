@@ -38,8 +38,10 @@ func controllerFixture(t *testing.T, body string) *contractInspector {
  func (*Group) POST(...any){}
  func (*Registry) POST(string,any,...Option){}
  func (*Registry) GET(string,any,...Option){}
+ func (*Registry) WS(string,any,...Option){}
+ func (*Group) WS(string,any,...Option){}
  `)
-	write("core/pkg/input/input.go", "package input\ntype Body[T any] *T\ntype Query[T any] *T\ntype Path[T any] *T\ntype Header[T any] *T\n")
+	write("core/pkg/input/input.go", "package input\ntype Body[T any] *T\ntype Query[T any] *T\ntype Path[T any] *T\ntype Header[T any] *T\ntype Message[T any] struct{Value T}\n")
 	write("core/pkg/httpx/httpx.go", "package httpx\ntype Response[T any] struct{Body T}\n")
 	write("controller.go", `package typed
  import (
@@ -365,4 +367,40 @@ func TestStaticGroupDynamicArgumentIsDiagnosed(t *testing.T) {
 		}
 	}
 	t.Fatalf("diagnostics=%+v", inspector.contract.Diagnostics)
+}
+
+func TestControllerWebSocketCallbacksAreSeparateFromHTTP(t *testing.T) {
+	i := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){r.WS("/ws",func(m input.Message[DTO])error{return nil})}`)
+	i.inspectControllerRoutes()
+	i.resolveHandlerSignatures()
+	if len(i.contract.HTTP) != 0 || len(i.contract.WebSockets) != 1 {
+		t.Fatalf("http=%+v ws=%+v diagnostics=%+v", i.contract.HTTP, i.contract.WebSockets, i.contract.Diagnostics)
+	}
+	for _, d := range i.contract.Diagnostics {
+		if d.Severity == "error" {
+			t.Fatal(d)
+		}
+	}
+	route := i.contract.WebSockets[0]
+	if route.Name != "/ws" || len(route.Parameters) != 1 || route.Parameters[0].Binding != "payload" {
+		t.Fatalf("%+v", route)
+	}
+}
+func TestControllerWebSocketRejectsUnwrappedOrWrongPayload(t *testing.T) {
+	for _, typ := range []string{"DTO", "input.Message[int]"} {
+		t.Run(typ, func(t *testing.T) {
+			i := controllerFixture(t, `func(c *UserController)RegisterRoutes(r *api.Registry){r.WS("/ws",func(m `+typ+`)error{return nil})}`)
+			i.inspectControllerRoutes()
+			if len(i.contract.WebSockets) != 0 {
+				t.Fatal("invalid message input accepted")
+			}
+			found := false
+			for _, d := range i.contract.Diagnostics {
+				found = found || strings.Contains(d.Message, "WebSocket callback parameter")
+			}
+			if !found {
+				t.Fatal(i.contract.Diagnostics)
+			}
+		})
+	}
 }

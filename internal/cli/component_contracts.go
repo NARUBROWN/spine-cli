@@ -192,6 +192,9 @@ func validateTypedComponentGraph(i *contractInspector, outputs map[int]types.Typ
 	graph := map[string][]string{}
 	for n, out := range outputs {
 		source := i.contract.Constructors[n].Source
+		if isApplicationProvidedWSDependency(out) {
+			i.controllerDiagnostic("WEBSOCKET_SENDER_RESERVED", "ws.Sender is supplied by the application", source)
+		}
 		if matches := resolve(out); len(matches) != 1 {
 			i.controllerDiagnostic("COMPONENT_DEPENDENCIES_INVALID", "Duplicate component providers for "+componentTypeName(out), source)
 		}
@@ -199,6 +202,9 @@ func validateTypedComponentGraph(i *contractInspector, outputs map[int]types.Typ
 		graph[key] = nil
 		for k := 0; k < signatures[n].Params().Len(); k++ {
 			dependency := signatures[n].Params().At(k).Type()
+			if isApplicationProvidedWSDependency(dependency) {
+				continue
+			}
 			matches := resolve(dependency)
 			if len(matches) != 1 {
 				i.controllerDiagnostic("COMPONENT_DEPENDENCIES_INVALID", "Expected one provider for "+componentTypeName(dependency), source)
@@ -210,4 +216,24 @@ func validateTypedComponentGraph(i *contractInspector, outputs map[int]types.Typ
 	if err := acyclicGraph(graph, "component dependency"); err != nil {
 		i.controllerDiagnostic("COMPONENT_DEPENDENCIES_INVALID", err.Error(), "")
 	}
+}
+
+func isApplicationProvidedWSDependency(t types.Type) bool {
+	named, ok := types.Unalias(t).(*types.Named)
+	if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != spineImportPath+"/pkg/ws" || named.Obj().Name() != "Sender" {
+		return false
+	}
+	method := types.NewMethodSet(named).Lookup(nil, "Send")
+	if method == nil {
+		return false
+	}
+	signature, ok := method.Obj().Type().(*types.Signature)
+	if !ok || signature.Params().Len() != 4 || signature.Results().Len() != 1 {
+		return false
+	}
+	contextType, ok := types.Unalias(signature.Params().At(0).Type()).(*types.Named)
+	if !ok || contextType.Obj().Pkg() == nil || contextType.Obj().Pkg().Path() != "context" || contextType.Obj().Name() != "Context" {
+		return false
+	}
+	return types.Identical(signature.Params().At(1).Type(), types.Typ[types.String]) && types.Identical(signature.Params().At(2).Type(), types.Typ[types.Int]) && types.Identical(signature.Params().At(3).Type(), types.NewSlice(types.Typ[types.Byte])) && types.Identical(signature.Results().At(0).Type(), types.Universe.Lookup("error").Type())
 }

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -175,10 +176,11 @@ func inspectApplication() (applicationContract, error) {
 		inspector.inspectHTTPAdapter(config, file, fset, function, index)
 	}
 	priorRoutes := len(inspector.contract.HTTP)
+	priorWebSockets := len(inspector.contract.WebSockets)
 	inspector.inspectControllerRoutes()
 	inspector.resolveConstructorDependencies()
 	inspector.resolveHandlerSignatures()
-	if len(inspector.contract.HTTP) > priorRoutes {
+	if len(inspector.contract.HTTP) > priorRoutes || len(inspector.contract.WebSockets) > priorWebSockets {
 		diagnostics := inspector.contract.Diagnostics[:0]
 		for _, diagnostic := range inspector.contract.Diagnostics {
 			switch diagnostic.Code {
@@ -189,6 +191,15 @@ func inspectApplication() (applicationContract, error) {
 		}
 		inspector.contract.Diagnostics = diagnostics
 		inspector.addDuplicateDiagnostics()
+	}
+
+	if len(inspector.contract.WebSockets) > priorWebSockets {
+		if !slices.Contains(inspector.contract.HTTPAdapter.RequiredCapabilities, "websocket-upgrade") {
+			inspector.contract.HTTPAdapter.RequiredCapabilities = append(inspector.contract.HTTPAdapter.RequiredCapabilities, "websocket-upgrade")
+		}
+		if inspector.contract.WebSocketAdapter.Provider == "" {
+			inspector.controllerDiagnostic("WEBSOCKET_ADAPTER_MISSING", "WebSocket callbacks require an explicit WebSocket platform", "")
+		}
 	}
 	inspector.sort()
 	inspector.contract.Complete = !contractHasErrors(*inspector.contract)
