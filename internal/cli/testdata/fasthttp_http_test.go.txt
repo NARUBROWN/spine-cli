@@ -305,6 +305,43 @@ func TestFastHTTPCoreInputsAndResponses(t *testing.T) {
 	}
 }
 
+func TestFastHTTPCoreConcurrentBindings(t *testing.T) {
+	s := startFastServer(t, nil, nil)
+	results := make(chan error, 32)
+	for id := range 32 {
+		go func() {
+			name := fmt.Sprintf("request-%d", id)
+			request, _ := http.NewRequest("POST", fmt.Sprintf("%s/e2e/bind/%d?tag=%s", s.base, id, name), strings.NewReader(fmt.Sprintf(`{"name":%q,"age":24}`, name)))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("X-E2E", name)
+			response, err := s.client.Do(request)
+			if err == nil {
+				var got struct {
+					Name          string
+					ID            int
+					Tags, Headers []string
+				}
+				err = json.NewDecoder(response.Body).Decode(&got)
+				response.Body.Close()
+				if err == nil && (response.StatusCode != 200 || got.Name != name || got.ID != id || strings.Join(got.Tags, ",") != name || strings.Join(got.Headers, ",") != name) {
+					err = fmt.Errorf("request %d mixed another request's state: %+v", id, got)
+				}
+			}
+			results <- err
+		}()
+	}
+	for range 32 {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("concurrent binding timed out")
+		}
+	}
+}
+
 func TestFastHTTPCoreMultipartCleanup(t *testing.T) {
 	s := startFastServer(t, nil, nil)
 	var body bytes.Buffer
