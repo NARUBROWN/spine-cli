@@ -16,7 +16,24 @@ import (
 
 var testName = regexp.MustCompile("^Test[A-Za-z0-9_]+$")
 
-func selectTests(output string, extended bool) (string, error) {
+func suiteFor(name string) string {
+	if _, ok := optional[name]; ok {
+		return "extended"
+	}
+	if _, ok := generated[name]; ok {
+		return "generated"
+	}
+	return "core"
+}
+
+func validSuite(suite string) bool {
+	return suite == "core" || suite == "generated" || suite == "extended"
+}
+
+func selectTests(output, suite string) (string, error) {
+	if !validSuite(suite) {
+		return "", fmt.Errorf("알 수 없는 검사 범위: %s", suite)
+	}
 	var selected, missing []string
 	seen := make(map[string]bool)
 	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
@@ -24,31 +41,47 @@ func selectTests(output string, extended bool) (string, error) {
 			continue
 		}
 		seen[line] = true
-		if _, excluded := optional[line]; excluded == extended {
+		if suiteFor(line) == suite {
 			selected = append(selected, line)
 		}
 	}
-	for name := range optional {
-		if !seen[name] {
-			missing = append(missing, name)
+	for _, group := range []map[string]struct{}{optional, generated} {
+		for name := range group {
+			if !seen[name] {
+				missing = append(missing, name)
+			}
+		}
+	}
+	for name := range generated {
+		if _, overlap := optional[name]; overlap {
+			return "", fmt.Errorf("검사 범위 중복: %s", name)
+		}
+	}
+	for name := range required {
+		top, _, _ := strings.Cut(name, "/")
+		if !seen[top] {
+			missing = append(missing, top)
 		}
 	}
 	if len(missing) != 0 {
 		slices.Sort(missing)
-		return "", fmt.Errorf("선택형 검사 목록과 테스트 목록이 다릅니다: %s", strings.Join(missing, ", "))
+		return "", fmt.Errorf("검사 목록과 테스트 목록이 다릅니다: %s", strings.Join(slices.Compact(missing), ", "))
 	}
+	if len(selected) == 0 {
+		return "", errors.New("검사 범위에 테스트가 없습니다")
+	}
+	slices.Sort(selected)
 	return "^(" + strings.Join(selected, "|") + ")$", nil
 }
 
-func check(r io.Reader, core bool) error {
-	return checkScope(r, core, false)
-}
-
-func checkScope(r io.Reader, core, extended bool) error {
+func checkScope(r io.Reader, suite string) error {
+	if suite != "all" && !validSuite(suite) {
+		return fmt.Errorf("알 수 없는 증거 범위: %s", suite)
+	}
 	pending := make(map[string]bool)
 	for name := range required {
 		top, _, _ := strings.Cut(name, "/")
-		if _, excluded := optional[top]; (!core || !excluded) && (!extended || excluded) {
+		if suite == "all" || suiteFor(top) == suite {
 			pending[name] = true
 		}
 	}
@@ -100,19 +133,41 @@ func checkScope(r io.Reader, core, extended bool) error {
 	return nil
 }
 
-func runSuite(extended bool) (err error) {
+func suiteArgs(suite, pattern string) []string {
+	packages := []string{"./internal/cli"}
+	if suite == "core" {
+		packages = []string{".", "./cmd/...", "./internal/..."}
+	}
+	args := []string{"test", "-race", "-json"}
+	args = append(args, packages...)
+	flag := "-run"
+	if suite == "core" {
+		// CLI의 제외 목록이 다른 패키지의 새 테스트를 제한하지 않도록 한다.
+		var excluded []string
+		for _, group := range []map[string]struct{}{optional, generated} {
+			for name := range group {
+				excluded = append(excluded, name)
+			}
+		}
+		slices.Sort(excluded)
+		flag, pattern = "-skip", "^("+strings.Join(excluded, "|")+")$"
+	}
+	return append(args, flag, pattern, "-count=1", "-timeout=30m")
+}
+
+func runSuite(suite string) (err error) {
 	list := exec.Command("go", "test", "./internal/cli", "-list", "^Test")
 	list.Stderr = os.Stderr
 	output, err := list.Output()
 	if err != nil {
 		return err
 	}
-	pattern, err := selectTests(string(output), true)
+	pattern, err := selectTests(string(output), suite)
 	if err != nil {
 		return err
 	}
-	path := "core-regression.jsonl"
-	if extended {
+	path := suite + "-regression.jsonl"
+	if suite == "extended" {
 		path = "regression.jsonl"
 	}
 	log, err := os.Create(path)
@@ -120,29 +175,31 @@ func runSuite(extended bool) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, log.Close()) }()
-	args := []string{"test", "-race", "-json", "./internal/cli", "-run", pattern, "-count=1", "-timeout=30m"}
-	if !extended {
-		// Use -skip so tests in other packages are never limited to CLI test names.
-		args = []string{"test", "-race", "-json", "./...", "-skip", pattern, "-count=1", "-timeout=30m"}
-	}
-	cmd := exec.Command("go", args...)
+	cmd := exec.Command("go", suiteArgs(suite, pattern)...)
 	cmd.Stdout, cmd.Stderr = log, os.Stderr
 	return cmd.Run()
 }
 
 func run(args []string) error {
-	if len(args) == 1 && (args[0] == "core" || args[0] == "extended") {
-		return runSuite(args[0] == "extended")
+	if len(args) == 1 && validSuite(args[0]) {
+		return runSuite(args[0])
 	}
-	if (len(args) == 2 || (len(args) == 3 && (args[2] == "--core" || args[2] == "--extended"))) && args[0] == "check" {
+	if len(args) >= 2 && len(args) <= 3 && args[0] == "check" {
+		suite := "all"
+		if len(args) == 3 {
+			suite = strings.TrimPrefix(args[2], "--")
+			if !validSuite(suite) || args[2] != "--"+suite {
+				return errors.New("알 수 없는 증거 검사 옵션")
+			}
+		}
 		log, err := os.Open(args[1])
 		if err != nil {
 			return err
 		}
 		defer log.Close()
-		return checkScope(log, len(args) == 3 && args[2] == "--core", len(args) == 3 && args[2] == "--extended")
+		return checkScope(log, suite)
 	}
-	return errors.New("usage: regression core | regression extended | regression check FILE [--core|--extended]")
+	return errors.New("usage: regression core | generated | extended | regression check FILE [--core|--generated|--extended]")
 }
 
 func main() {

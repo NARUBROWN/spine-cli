@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,26 +9,43 @@ import (
 )
 
 func TestVerifiedOutputRequiresExpectedJobs(t *testing.T) {
-	for _, tc := range []struct {
-		jobs    string
-		reuse   bool
-		failure string
-	}{
-		{`{"policy":{"result":"success"},"live-composition":{"result":"success"}}`, false, ""},
-		{`{"policy":{"result":"skipped"},"portable":{"result":"skipped"},"core-regression":{"result":"skipped"},"public-platforms":{"result":"skipped"},"live-composition":{"result":"success"}}`, true, ""},
-		{`{"policy":{"result":"skipped"}}`, false, "policy"},
-		{`{"policy":{"result":"success"}}`, true, "policy"},
-		{`{"policy":{"result":"skipped"},"live-composition":{"result":"skipped"}}`, true, "live-composition"},
-		{`{"source":{"result":"cancelled"}}`, true, "source"},
-		{`{"source":{"result":"failure"}}`, false, "source"},
-	} {
-		value, err := verifiedOutput([]byte(tc.jobs), tc.reuse, "test")
-		if tc.failure == "" {
-			if err != nil || value != "sha=test\n" {
-				t.Fatalf("%q %v", value, err)
+	for _, reuse := range []bool{false, true} {
+		jobs := map[string]map[string]string{}
+		for _, name := range []string{"source", "policy", "portable", "core-regression", "generated-regression", "live-composition"} {
+			result := "success"
+			if reuse && name != "source" && name != "live-composition" {
+				result = "skipped"
 			}
-		} else if err == nil || !strings.Contains(err.Error(), tc.failure) || value != "" {
+			jobs[name] = map[string]string{"result": result}
+		}
+		raw, _ := json.Marshal(jobs)
+		if value, err := verifiedOutput(raw, reuse, "test"); err != nil || value != "sha=test\n" {
 			t.Fatalf("%q %v", value, err)
+		}
+		for name, state := range jobs {
+			original := state["result"]
+			for _, invalid := range []string{"failure", "cancelled", "skipped", "success"} {
+				if invalid == original {
+					continue
+				}
+				state["result"] = invalid
+				raw, _ = json.Marshal(jobs)
+				if value, err := verifiedOutput(raw, reuse, "test"); err == nil || value != "" {
+					t.Fatalf("잘못된 결과를 허용: %s %s", name, invalid)
+				}
+			}
+			state["result"] = original
+			delete(jobs, name)
+			raw, _ = json.Marshal(jobs)
+			if _, err := verifiedOutput(raw, reuse, "test"); err == nil {
+				t.Fatalf("필수 작업 누락을 허용: %s", name)
+			}
+			jobs[name] = state
+		}
+		jobs["public-platforms"] = map[string]string{"result": "success"}
+		raw, _ = json.Marshal(jobs)
+		if _, err := verifiedOutput(raw, reuse, "test"); err == nil {
+			t.Fatal("확장 증거가 필수 CI에 섞였습니다")
 		}
 	}
 }

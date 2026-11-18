@@ -39,18 +39,51 @@ git diff --check
 go test ./internal/cli -run '^TestGeneratedAssemblyPublicMatrix$' -count=1 -v
 ```
 
-CI의 Core는 확장 테스트를 제외한 CLI 테스트와 나머지 패키지 테스트를 실행합니다.
-확장 검사는 아래 명령으로 별도 실행하며 Core 테스트를 다시 실행하지 않습니다.
+일반 PR과 push의 필수 CI는 다음 범위를 나누어 실행합니다.
+
+| 범위 | 검사 내용 |
+| --- | --- |
+| Core | CLI 단위 테스트와 정적 계약 분석, 버전별 진단 회귀를 Linux에서 race 검사 |
+| Generated | 대표 공개 생성 앱과 CLI 생성, update, 실행 및 종료 검사 |
+| Portable | macOS와 Windows의 빌드, 경로 및 프로세스 동작 |
+| Channel composition | 대상 채널의 Echo 앱을 두 layout으로 생성하고 검증 |
+| Release Policy | 릴리스 도구와 정책, 워크플로 검사 |
+
+```sh
+go run ./scripts/release/regression generated
+go run ./scripts/release/regression check generated-regression.jsonl --generated
+```
+
+`TestAssemblyScaffoldMatrix`는 두 layout의 코드와 모듈 선택을 검사합니다.
+`TestFastHTTPMetadataControlsGeneration`과 `TestNATSAssemblySelection`도 기본 범위에 남습니다.
+`TestGeneratedAssemblySmoke`는 두 layout의 기본 Echo, nethttp와 validator 및 WebSocket,
+fasthttp와 validator, NATS worker, 복수 이벤트 factory의 여섯 대표 구성을 공개 모듈로 생성합니다.
+생성 시 정적 계약과 진입점을 검사하고, 그 뒤 생성된 앱과 설정 테스트를 한 번 실행합니다.
+이 단계는 실제 브로커의 전달이나 재전달을 증명하지 않습니다.
+
+넓은 생성 앱 조합과 실제 브로커 검사는 `CLI Extended CI`의 야간 또는 수동 실행으로 옮겼습니다.
+수동 실행에서는 코드의 `ref`와 공개 의존성 `channel`을 선택합니다.
+예약 실행은 `preview` 코드와 채널을 사용하며, 워크플로가 기본 브랜치에 있어야 예약됩니다.
+확장 워크플로는 필수 `Verified Source`와 독립적이며, 실패와 실행 시간을 별도로 확인합니다.
+아래 명령으로 로컬에서도 실행할 수 있습니다.
 최소 Go 실행 파일과 Kafka, RabbitMQ, NATS 접속 환경 변수는 CI와 동일하게 설정해야 합니다.
-필수 브로커 검사나 최소 Go 검사를 건너뛰면 결과 검증이 실패합니다.
+확장 범위의 필수 브로커 검사나 최소 Go 검사를 건너뛰면 결과 검증이 실패합니다.
 
 ```sh
 go run ./scripts/release/regression extended
 go run ./scripts/release/regression check regression.jsonl --extended
 ```
 
-두 검사 모두 `-race`와 `-count=1`을 사용합니다. 생성 앱 검사는 CLI의 코드 생성과 모듈 선택을
-검증하므로 플랫폼 저장소의 어댑터 검사와 별도로 유지합니다.
+Core, Generated와 Extended는 서로 다른 테스트 묶음을 `-race`와 `-count=1`로 실행합니다.
+새 CLI 테스트는 기본 Core 범위에 포함하고, 명시적으로 분류한 생성 또는 확장 테스트만 옮깁니다.
+분류 목록에서 없어진 테스트와 범위 중복은 실행 전에 오류로 처리합니다.
+릴리스 도구의 테스트는 Core에서 반복하지 않고 Release Policy에서 실행합니다.
+
+확장 범위에는 아래 생성 matrix 외에 HTTP 입력 오류, WebSocket, NATS, runtime OpenAPI,
+fasthttp의 전체 공개 조합 및 요청 drain 검사도 포함합니다.
+플랫폼 동작 자체는 코어와 플랫폼 저장소에서 검사하고, 여기서는 생성 앱과의 결합을 확인합니다.
+릴리스의 같은 SHA CI 재사용과 새 태그의 Linux, macOS, Windows 공개 설치는 유지합니다.
+필수 CI 성공은 확장 검사 성공을 의미하지 않습니다.
 
 matrix는 `layered-v1`과 `legacy`에서 각각 다음 9개 구성을 검사합니다.
 
