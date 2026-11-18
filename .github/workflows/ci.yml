@@ -98,7 +98,7 @@ jobs:
   public-platforms:
     needs: source
     if: needs.source.outputs.reuse_common != 'true'
-    name: Public Platforms and Full Regression
+    name: Public Platforms and Extended Regression
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 35
@@ -149,9 +149,9 @@ jobs:
           SPINE_TEST_KAFKA_BROKER: 127.0.0.1:19092
           SPINE_TEST_RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
           SPINE_TEST_NATS_URL: nats://127.0.0.1:4222
-        run: go test -race -json ./... -count=1 -timeout=30m > regression.jsonl
+        run: go run ./scripts/release/regression extended
       - name: Require live broker and minimum Go evidence
-        run: go run ./scripts/release/regression check regression.jsonl
+        run: go run ./scripts/release/regression check regression.jsonl --extended
       - name: Check reproducibility
         run: |
           go mod verify

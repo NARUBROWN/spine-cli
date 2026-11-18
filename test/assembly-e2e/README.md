@@ -31,16 +31,32 @@ SPINE_TEST_GO125=/absolute/path/to/go1.25.5/bin/go \
 ## 회귀 테스트와 생성 matrix
 
 ```sh
-go test -race ./... -count=1 -timeout=10m
+go run ./scripts/release/regression core
+go run ./scripts/release/regression check core-regression.jsonl --core
 go vet ./...
 git diff --check
 
 go test ./internal/cli -run '^TestGeneratedAssemblyPublicMatrix$' -count=1 -v
 ```
 
-matrix는 `layered-v1`과 `legacy`에서 각각 다음 7개 구성을 검사합니다.
+CI의 Core는 확장 테스트를 제외한 CLI 테스트와 나머지 패키지 테스트를 실행합니다.
+확장 검사는 아래 명령으로 별도 실행하며 Core 테스트를 다시 실행하지 않습니다.
+최소 Go 실행 파일과 Kafka, RabbitMQ, NATS 접속 환경 변수는 CI와 동일하게 설정해야 합니다.
+필수 브로커 검사나 최소 Go 검사를 건너뛰면 결과 검증이 실패합니다.
+
+```sh
+go run ./scripts/release/regression extended
+go run ./scripts/release/regression check regression.jsonl --extended
+```
+
+두 검사 모두 `-race`와 `-count=1`을 사용합니다. 생성 앱 검사는 CLI의 코드 생성과 모듈 선택을
+검증하므로 플랫폼 저장소의 어댑터 검사와 별도로 유지합니다.
+
+matrix는 `layered-v1`과 `legacy`에서 각각 다음 9개 구성을 검사합니다.
 
 - HTTP만 사용하고 validator 생략
+- nethttp만 사용하고 validator 생략
+- nethttp + playground + 명시적 Gorilla WS
 - HTTP + Kafka
 - HTTP + RabbitMQ
 - HTTP 없는 Kafka worker
@@ -49,7 +65,9 @@ matrix는 `layered-v1`과 `legacy`에서 각각 다음 7개 구성을 검사합�
 - HTTP + Kafka + RabbitMQ + playground
 
 각 구성은 dry-run의 diff, 변경 목록, base_hash를 확인하고 `--if-match`로 적용합니다.
-공개 모듈 설치, 선택 버전 검사, 정적 계약, Go build, `context`, `contract check`, `verify`를 실행합니다.
+`new`가 공개 모듈 설치, 선택 버전 검사, 정적 계약과 진입점 빌드를 수행합니다.
+그 뒤 `context`와 `verify`로 생성 결과와 모든 패키지를 검사합니다.
+`verify`가 계약 검사와 Go 테스트를 포함하므로 별도의 `contract check`와 `go build ./...`는 반복하지 않습니다.
 검증기 구성은 생성 앱에서 race 테스트도 수행합니다. HTTP 검증기 fixture는 원래 `BuildApplication`에
 테스트 핸들러만 추가해 JSON, 폼, WS, 잘못된 JSON/타입/규칙, 핸들러 차단과 병렬 요청을 확인합니다.
 검증기를 생략한 앱은 같은 `validate` 태그를 자동 검사하지 않는 것을 확인합니다.

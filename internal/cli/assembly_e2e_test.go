@@ -99,9 +99,8 @@ func TestGeneratedAssemblyPublicMatrix(t *testing.T) {
 				if strings.Contains(string(mod), "replace") {
 					t.Fatal("generated module contains replace")
 				}
-				generatedGo(t, project, "build", "./...")
+				// new already builds the entrypoint; verify below checks all packages.
 				assertE2ESuccess(t, runE2E(binary, project, nil, "context", "--json"), "generated context")
-				assertE2ESuccess(t, runE2E(binary, project, nil, "contract", "check", "--json"), "generated static contract")
 				fixture := ""
 				if scenario.name == "validator" || scenario.name == "nethttp-validator" {
 					fixture = "assembly_http_test.go.txt"
