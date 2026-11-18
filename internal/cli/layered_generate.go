@@ -425,7 +425,7 @@ func (p *layeredPlanner) addMessageModule(r layeredRequest) error {
 	if r.Kind == "websocket" {
 		registration = r.Path
 	}
-	publicContext, err := messageContext()
+	publicContext, err := messageContext(r.Kind)
 	if err != nil {
 		return err
 	}

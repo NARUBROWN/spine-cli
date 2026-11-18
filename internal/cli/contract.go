@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -175,10 +176,11 @@ func inspectApplication() (applicationContract, error) {
 		inspector.inspectHTTPAdapter(config, file, fset, function, index)
 	}
 	priorRoutes := len(inspector.contract.HTTP)
+	priorWebSockets := len(inspector.contract.WebSockets)
 	inspector.inspectControllerRoutes()
 	inspector.resolveConstructorDependencies()
 	inspector.resolveHandlerSignatures()
-	if len(inspector.contract.HTTP) > priorRoutes {
+	if len(inspector.contract.HTTP) > priorRoutes || len(inspector.contract.WebSockets) > priorWebSockets {
 		diagnostics := inspector.contract.Diagnostics[:0]
 		for _, diagnostic := range inspector.contract.Diagnostics {
 			switch diagnostic.Code {
@@ -189,6 +191,15 @@ func inspectApplication() (applicationContract, error) {
 		}
 		inspector.contract.Diagnostics = diagnostics
 		inspector.addDuplicateDiagnostics()
+	}
+
+	if len(inspector.contract.WebSockets) > priorWebSockets {
+		if !slices.Contains(inspector.contract.HTTPAdapter.RequiredCapabilities, "websocket-upgrade") {
+			inspector.contract.HTTPAdapter.RequiredCapabilities = append(inspector.contract.HTTPAdapter.RequiredCapabilities, "websocket-upgrade")
+		}
+		if inspector.contract.WebSocketAdapter.Provider == "" {
+			inspector.controllerDiagnostic("WEBSOCKET_ADAPTER_MISSING", "WebSocket callbacks require an explicit WebSocket platform", "")
+		}
 	}
 	inspector.sort()
 	inspector.contract.Complete = !contractHasErrors(*inspector.contract)
@@ -681,7 +692,19 @@ func (i *contractInspector) resolveHandlerSignatures() {
 		matches := signatures[registration.Handler]
 		if len(matches) == 1 {
 			registration.schemaSource = matches[0].schemaSource
-			registration.Parameters = bindMessageParameters(matches[0].parameters, "consumer", importPathsByAlias(matches[0].httpSource.File))
+			registration.Parameters = bindings.bindMessageParameters(matches[0], "consumer")
+			if modulesExportSpineType(i.contract.HTTPAdapter.SelectedModules, "EventCtx") {
+				for _, parameter := range registration.Parameters {
+					expression, err := parser.ParseExpr(parameter.Type)
+					if err != nil {
+						continue
+					}
+					key := bindings.messageTypeKey(matches[0].httpSource, expression, map[string]bool{})
+					if key == "context:Context" || key == spineImportPath+"/pkg/spine:Ctx" || key == spineImportPath+"/pkg/spine:WebSocketCtx" {
+						i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "CONSUMER_PARAMETER_UNSUPPORTED", Message: "Event consumers require spine.EventCtx; HTTP, WebSocket and standard contexts are unsupported.", Source: matches[0].source})
+					}
+				}
+			}
 			registration.Returns = matches[0].returns
 			if matches[0].unimplemented {
 				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "CONSUMER_HANDLER_NOT_IMPLEMENTED", Message: fmt.Sprintf("consumer %q still uses the generated fail-closed handler", registration.Name), Source: matches[0].source})
@@ -706,7 +729,7 @@ func (i *contractInspector) resolveHandlerSignatures() {
 				i.checkWebSocketSignature(registration, matches[0], bindings)
 			}
 			registration.schemaSource = matches[0].schemaSource
-			registration.Parameters = bindMessageParameters(matches[0].parameters, "websocket", importPathsByAlias(matches[0].httpSource.File))
+			registration.Parameters = bindings.bindMessageParameters(matches[0], "websocket")
 			registration.Returns = matches[0].returns
 			if matches[0].unimplemented {
 				i.contract.Diagnostics = append(i.contract.Diagnostics, contractDiagnostic{Severity: "error", Code: "WEBSOCKET_HANDLER_NOT_IMPLEMENTED", Message: fmt.Sprintf("WebSocket %q still uses the generated fail-closed handler", registration.Name), Source: matches[0].source})
@@ -740,6 +763,12 @@ func (i *contractInspector) checkWebSocketSignature(registration *namedRegistrat
 		add("WEBSOCKET_RETURN_UNSUPPORTED", fmt.Sprintf("WebSocket handler %s must return only error values.", registration.Handler))
 	}
 	if method := i.controllerMethods[registration.Handler]; method != nil {
+		for index := 0; index < method.Params().Len(); index++ {
+			n, ok := types.Unalias(method.Params().At(index).Type()).(*types.Named)
+			if ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == spineImportPath+"/pkg/spine" && (n.Obj().Name() == "Ctx" || n.Obj().Name() == "EventCtx") {
+				add("WEBSOCKET_PARAMETER_UNSUPPORTED", "WebSocket handlers receive context.Context or spine.WebSocketCtx; HTTP and event contexts are unsupported.")
+			}
+		}
 		errorType := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 		for index := 0; index < method.Results().Len(); index++ {
 			if !types.Implements(method.Results().At(index).Type(), errorType) {
@@ -834,17 +863,35 @@ func fieldTypes(fset *token.FileSet, fields *ast.FieldList) []string {
 	return result
 }
 
-func bindMessageParameters(parameters []handlerParameter, transport string, imports map[string]string) []handlerParameter {
-	result := append([]handlerParameter(nil), parameters...)
+// messageTypeKey resolves imports and aliases using the selected Go types, with
+// a source-only fallback for projects whose dependencies are not fully available.
+func (catalog *httpBindingCatalog) messageTypeKey(source *layoutSource, expression ast.Expr, seen map[string]bool) string {
+	if named := catalog.instantiatedHTTPType(source, expression); named != nil && named.Obj().Pkg() != nil {
+		return named.Obj().Pkg().Path() + ":" + named.Obj().Name()
+	}
+	key := canonicalType(source, expression, catalog.module)
+	if declaration, ok := catalog.types[key]; ok && declaration.spec.Assign.IsValid() && !seen[key] {
+		seen[key] = true
+		return catalog.messageTypeKey(declaration.source, declaration.spec.Type, seen)
+	}
+	return key
+}
+
+func (catalog *httpBindingCatalog) bindMessageParameters(signature staticHandlerSignature, transport string) []handlerParameter {
+	result := append([]handlerParameter(nil), signature.parameters...)
 	payloadAssigned := false
 	for index := range result {
 		parameter := &result[index]
-		alias, name, _ := strings.Cut(parameter.Type, ".")
-		spineContext := name == "Ctx" && imports[alias] == spineImportPath+"/pkg/spine"
+		expression, err := parser.ParseExpr(parameter.Type)
+		key := ""
+		if err == nil {
+			key = catalog.messageTypeKey(signature.httpSource, expression, map[string]bool{})
+		}
+		spineContext := key == spineImportPath+"/pkg/spine:Ctx" || transport == "consumer" && key == spineImportPath+"/pkg/spine:EventCtx" || transport == "websocket" && key == spineImportPath+"/pkg/spine:WebSocketCtx"
 		switch {
-		case spineContext || parameter.Type == "context.Context" || strings.HasSuffix(parameter.Type, "ExecutionContext"):
+		case spineContext || key == "context:Context":
 			parameter.Binding = "context"
-		case transport == "websocket" && strings.HasSuffix(parameter.Type, "ConnectionID"):
+		case transport == "websocket" && key == spineImportPath+"/pkg/ws:ConnectionID":
 			parameter.Binding = "connection"
 		case transport == "consumer" && parameter.Type == "string" && !payloadAssigned:
 			parameter.Binding = "event-name"

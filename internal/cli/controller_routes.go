@@ -133,7 +133,7 @@ func (i *contractInspector) inspectControllerRoutes() {
 				if !value.IsType() {
 					continue
 				}
-				if named, ok := types.Unalias(value.Type).(*types.Named); ok && named.TypeArgs().Len() > 0 {
+				if _, ok := types.Unalias(value.Type).(*types.Named); ok {
 					use := httpTypeUseAt(pkg.Fset, expression)
 					i.controllerInstances[use] = value.Type
 				}
@@ -243,12 +243,14 @@ func (i *contractInspector) inspectControllerRoutes() {
 		}
 		scan.walk(method, types.TypeString(output, func(p *types.Package) string { return p.Path() }), nil, nil)
 	}
-	validateTypedComponentGraph(i, outputs, signatures)
+	validateTypedComponentGraph(i, outputs, signatures, applicationPublisherType(all))
 }
 
 func (i *contractInspector) controllerDiagnostic(code, message, source string) {
 	hint := "Use statically resolved Registry calls and typed callbacks; inspect installed project dependencies. User code is never executed to infer routes."
-	if strings.HasPrefix(code, "COMPONENT_") {
+	if code == "EVENT_PUBLISHER_RESERVED" {
+		hint = "Remove the publisher constructor and register platforms with WithEventAdapter. The app provides publish.Publisher even when publishing is disabled."
+	} else if strings.HasPrefix(code, "COMPONENT_") {
 		hint = "Implement Constructor(dependencies...) *Self or (*Self, error), satisfy the selected role contract and register unique dependencies. User code is never executed for inspection."
 	} else if strings.HasPrefix(code, "CONSTRUCTOR_") {
 		hint = "Register a statically resolved constructor function returning a value or a value and error. User code is never executed for inspection."
@@ -460,7 +462,7 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 						return false
 					}
 					switch method {
-					case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+					case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "WS":
 					default:
 						s.inspector.controllerDiagnostic("CONTROLLER_GROUP_CALL_UNRESOLVED", "Unsupported group call: "+method, source)
 						return false
@@ -482,7 +484,7 @@ func (s *controllerRouteInspector) walk(object *types.Func, owner string, forwar
 				return false
 			}
 			switch method {
-			case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+			case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "WS":
 			default:
 				s.inspector.controllerDiagnostic("CONTROLLER_REGISTRY_CALL_UNRESOLVED", "Unsupported Registry call: "+method, source)
 				return false
@@ -596,12 +598,20 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 	}
 	if signature, ok := function.pkg.TypesInfo.TypeOf(call.Args[handlerIndex]).(*types.Signature); ok {
 		coreVersion := selectedModuleVersion(s.inspector.contract.HTTPAdapter.SelectedModules, spineImportPath)
-		if err := checkControllerInputs(signature, coreVersion); err != nil {
-			s.inspector.controllerDiagnostic("HTTP_INPUT_CONTRACT_INVALID", err.Error(), source)
+		if err := checkRouteCallbackInputs(method, signature, coreVersion); err != nil {
+			code := "HTTP_INPUT_CONTRACT_INVALID"
+			if method == "WS" {
+				code = "WEBSOCKET_PARAMETER_UNSUPPORTED"
+			}
+			s.inspector.controllerDiagnostic(code, err.Error(), source)
 			return
 		}
-		if err := checkControllerReturns(signature, coreVersion); err != nil {
-			s.inspector.controllerDiagnostic("HTTP_RETURN_UNSUPPORTED", err.Error(), source)
+		if err := checkRouteCallbackReturns(method, signature, coreVersion); err != nil {
+			code := "HTTP_RETURN_UNSUPPORTED"
+			if method == "WS" {
+				code = "WEBSOCKET_RETURN_UNSUPPORTED"
+			}
+			s.inspector.controllerDiagnostic(code, err.Error(), source)
 			return
 		}
 	}
@@ -649,6 +659,14 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 		s.inspector.controllerHandlers = map[string]staticHandlerSignature{}
 	}
 	s.inspector.controllerHandlers[key] = staticHandlerSignature{httpSource: callbackSource, httpFields: fields, httpResults: results, schemaSource: callbackSource.Path, returns: fieldTypes(callbackSource.Fset, results), source: source}
+
+	if method == "WS" {
+		signature := s.inspector.controllerHandlers[key]
+		signature.parameters = layeredHandlerParameters(callbackSource.File, callbackSource.Fset, fields)
+		s.inspector.controllerHandlers[key] = signature
+		s.inspector.contract.WebSockets = append(s.inspector.contract.WebSockets, namedRegistration{Name: path, Handler: key, Source: source})
+		return
+	}
 	fake := &ast.CallExpr{Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", method)}, &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", path)}, call.Args[handlerIndex]}}
 	s.inspector.inspectHTTPCall(fake, function.pkg.Fset, source)
 	r := &s.inspector.contract.HTTP[len(s.inspector.contract.HTTP)-1]

@@ -347,6 +347,8 @@ func (catalog *httpBindingCatalog) controllerContextInterface(source *layoutSour
 
 func defaultHTTPBinding(key string) (httpBindingShape, bool) {
 	switch key {
+	case spineImportPath + "/pkg/spine:WebSocketCtx", spineImportPath + "/pkg/spine:EventCtx":
+		return httpBindingShape{kind: "unsupported", problem: "HTTP handlers require spine.Ctx; message contexts are transport-specific"}, true
 	case "context:Context":
 		return httpBindingShape{binding: "context", kind: "standard-context"}, true
 	case spineImportPath + "/core:ControllerContext", spineImportPath + "/pkg/spine:Ctx":

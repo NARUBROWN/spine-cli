@@ -77,7 +77,10 @@ func TestControllerCandidateEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertMessageContext(t, string(source), true)
+		wantContext, err := messageContext(arguments[0])
+		if err != nil || !strings.Contains(string(source), "ctx "+wantContext) {
+			t.Fatalf("context=%s err=%v source=%s", wantContext, err, source)
+		}
 	}
 	runGo("test", "./...")
 	contract, err := inspectApplication()

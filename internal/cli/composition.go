@@ -45,7 +45,7 @@ func dynamicAdapterSelection(expression ast.Expr, imports map[string]string, mod
 		if d, _ := dynamicPlatformOption(arg, imports, modules, "websocket"); d != nil {
 			continue
 		}
-		known := false
+		known := knownShutdownHook(arg, imports)
 		for _, method := range []string{"WithEventAdapter", "WithValidator", "WithWebSocketAdapter"} {
 			if option, ok := importedCall(arg, imports, spineImportPath, method); ok && !option.Ellipsis.IsValid() && ((method == "WithEventAdapter" && len(option.Args) >= 2) || (method != "WithEventAdapter" && len(option.Args) == 1)) {
 				known = true
@@ -131,6 +131,9 @@ func adapterSelection(expression ast.Expr, imports map[string]string) string {
 		if option, ok := importedCall(argument, imports, spineImportPath, "WithEventAdapter"); ok && len(option.Args) >= 2 && !option.Ellipsis.IsValid() {
 			continue
 		}
+		if knownShutdownHook(argument, imports) {
+			continue
+		}
 		if option, ok := importedCall(argument, imports, spineImportPath, "WithValidator"); ok && len(option.Args) == 1 && !option.Ellipsis.IsValid() {
 			continue
 		}
@@ -161,4 +164,11 @@ func echoOptions(arguments []ast.Expr, imports map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// Shutdown hooks do not select or replace transport adapters.
+// Read only the option shape; callbacks and their dependencies are never executed here.
+func knownShutdownHook(expression ast.Expr, imports map[string]string) bool {
+	call, ok := importedCall(expression, imports, spineImportPath, "WithShutdownHook")
+	return ok && len(call.Args) == 1 && !call.Ellipsis.IsValid()
 }

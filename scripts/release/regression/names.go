@@ -14,6 +14,9 @@ var optional = map[string]struct{}{
 	"TestRuntimeOpenAPIGeneratedApplications":    {},
 }
 var required = map[string]struct{}{
+	"TestPreviewEventDestinationConfiguration":                  {},
+	"TestShutdownHookDoesNotChangeAdapterSelection":             {},
+	"TestRegistrationResolvesImportedStringConstant":            {},
 	"TestGeneratedFastHTTPInteractiveEndToEnd":                  {},
 	"TestGeneratedFastHTTPShutdownDrainsRequests":               {},
 	"TestGeneratedFastHTTPPublicEndToEnd":                       {},

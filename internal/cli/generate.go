@@ -211,7 +211,7 @@ func runGenerate(args []string, out, errOut io.Writer) int {
 		if kind == "websocket" {
 			registrationName = socketPath
 		}
-		publicContext, contextErr := messageContext()
+		publicContext, contextErr := messageContext(kind)
 		if contextErr != nil {
 			fmt.Fprintln(errOut, contextErr)
 			return 1

@@ -258,3 +258,47 @@ func (catalog *httpBindingCatalog) scalarPathPayload(source *layoutSource, expre
 	defer delete(visiting, key)
 	return catalog.scalarPathPayload(declaration.source, declaration.spec.Type, visiting)
 }
+
+// WS callbacks use explicit message wrappers and only error returns.
+func checkRouteCallbackInputs(method string, signature *types.Signature, version string) error {
+	if method != "WS" {
+		return checkControllerInputs(signature, version)
+	}
+	if signature.Variadic() {
+		return fmt.Errorf("WebSocket callbacks cannot be variadic")
+	}
+	for index := 0; index < signature.Params().Len(); index++ {
+		t := types.Unalias(signature.Params().At(index).Type())
+		n, ok := t.(*types.Named)
+		if !ok || n.Obj().Pkg() == nil {
+			return fmt.Errorf("WebSocket callback parameter %d must declare an explicit input.Message or context", index)
+		}
+		path, name := n.Obj().Pkg().Path(), n.Obj().Name()
+		if path == "context" && name == "Context" || path == spineImportPath+"/pkg/spine" && name == "WebSocketCtx" || path == spineImportPath+"/pkg/ws" && name == "ConnectionID" {
+			continue
+		}
+		if path == spineImportPath+"/pkg/input" && name == "Message" && n.TypeArgs().Len() == 1 {
+			payload := types.Unalias(n.TypeArgs().At(0))
+			if _, ok := payload.Underlying().(*types.Struct); ok {
+				continue
+			}
+			if types.Identical(payload, types.NewSlice(types.Typ[types.Byte])) {
+				continue
+			}
+		}
+		return fmt.Errorf("WebSocket callback parameter %d requires context.Context, spine.WebSocketCtx, ws.ConnectionID or input.Message[struct or []byte]", index)
+	}
+	return nil
+}
+func checkRouteCallbackReturns(method string, signature *types.Signature, version string) error {
+	if method != "WS" {
+		return checkControllerReturns(signature, version)
+	}
+	errorType := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
+	for index := 0; index < signature.Results().Len(); index++ {
+		if !types.Implements(signature.Results().At(index).Type(), errorType) {
+			return fmt.Errorf("WebSocket callbacks return only errors")
+		}
+	}
+	return nil
+}

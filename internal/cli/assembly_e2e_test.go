@@ -157,8 +157,25 @@ func testValidatorDiagnostics(t *testing.T, binary, project string) {
 }
 
 func TestGeneratedAssemblyBrokerE2E(t *testing.T) {
-	if os.Getenv("SPINE_TEST_KAFKA_BROKER") == "" || os.Getenv("SPINE_TEST_RABBITMQ_URL") == "" {
-		t.Skip("set both SPINE_TEST_KAFKA_BROKER and SPINE_TEST_RABBITMQ_URL to run actual broker E2E")
+	generatedAssemblyBrokerE2E(t, "")
+}
+
+func TestPublisherCandidateBrokerE2E(t *testing.T) {
+	core := os.Getenv("SPINE_CONTROLLER_CORE_SOURCE")
+	if core == "" {
+		t.Skip("SPINE_CONTROLLER_CORE_SOURCE is required for DI publisher source E2E")
+	}
+	absolute, err := filepath.Abs(core)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generatedAssemblyBrokerE2E(t, absolute)
+}
+
+func generatedAssemblyBrokerE2E(t *testing.T, core string) {
+	t.Helper()
+	if os.Getenv("SPINE_TEST_KAFKA_BROKER") == "" && os.Getenv("SPINE_TEST_RABBITMQ_URL") == "" {
+		t.Skip("set a broker endpoint to run actual broker E2E")
 	}
 	requireValidatorToolchain(t)
 	binary := buildUpdateCLI(t)
@@ -170,6 +187,9 @@ func TestGeneratedAssemblyBrokerE2E(t *testing.T) {
 		for _, provider := range []string{"kafka", "rabbitmq"} {
 			for _, http := range []string{"echo", "none", "websocket"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", layout, provider, http), func(t *testing.T) {
+					if (provider == "kafka" && os.Getenv("SPINE_TEST_KAFKA_BROKER") == "") || (provider == "rabbitmq" && os.Getenv("SPINE_TEST_RABBITMQ_URL") == "") {
+						t.Skip("selected broker endpoint is not configured")
+					}
 					workspace := t.TempDir()
 					selectedHTTP := http
 					if selectedHTTP == "websocket" {
@@ -179,8 +199,17 @@ func TestGeneratedAssemblyBrokerE2E(t *testing.T) {
 					if http == "websocket" {
 						args = append(args, "--websocket-platform", "gorilla")
 					}
+					if core != "" {
+						args = append(args, "--channel", "preview")
+					}
 					applyAssemblyPlan(t, binary, workspace, args...)
 					project := filepath.Join(workspace, "sample")
+					if core != "" {
+						generatedGo(t, project, "mod", "edit", "-replace="+spineImportPath+"="+core)
+						generatedGo(t, project, "mod", "tidy")
+						t.Log("using explicit DI publisher source candidate; this is not public installation evidence")
+						assertE2ESuccess(t, runE2E(binary, project, nil, "contract", "check", "--warnings-as-errors", "--json"), "DI publisher candidate contract")
+					}
 					source, _ := os.ReadFile(filepath.Join(project, "internal/application/application.go"))
 					text := strings.ReplaceAll(string(fixture), "{{PROVIDER}}", provider)
 					text = strings.ReplaceAll(text, "{{HTTP}}", selectedHTTP)

@@ -91,6 +91,7 @@ func TestPlatformCompositionFormsAndAdapterDiagnostics(t *testing.T) {
 	}
 	for _, scenario := range []struct{ name, expression, options, diagnostic string }{
 		{"platform", "p.New()", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
+		{"shutdown-hook", "s.New(p.Option(), s.WithShutdownHook(func(context.Context) error { panic(\"must never run\") }))", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
 		{"option", "s.New(p.Option())", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
 		{"factory-option", "s.New(s.WithHTTPAdapter(p.NewFactory()))", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
 		{"platform-native", "p.New(p.WithEcho(func(*echo.Echo) {}))", "boot.Options{HTTP:&boot.HTTPOptions{}}", ""},
@@ -117,7 +118,7 @@ func TestPlatformCompositionFormsAndAdapterDiagnostics(t *testing.T) {
 			}
 			path := "internal/application/application.go"
 			source := `package application
-import (s "github.com/NARUBROWN/spine"; p "github.com/NARUBROWN/spine-echo-platform"; "github.com/NARUBROWN/spine/pkg/boot"; "github.com/labstack/echo/v5")
+import ("context"; s "github.com/NARUBROWN/spine"; p "github.com/NARUBROWN/spine-echo-platform"; "github.com/NARUBROWN/spine/pkg/boot"; "github.com/labstack/echo/v5")
 func BuildApplication() (s.App, boot.Options, error) { app := ` + scenario.expression + `; return app, ` + scenario.options + `, nil }
 `
 			writeE2EFile(t, path, source)
