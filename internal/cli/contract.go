@@ -79,12 +79,13 @@ type httpRegistration struct {
 }
 
 type namedRegistration struct {
-	schemaSource string
-	Name         string             `json:"name"`
-	Handler      string             `json:"handler"`
-	Parameters   []handlerParameter `json:"parameters,omitempty"`
-	Returns      []string           `json:"returns,omitempty"`
-	Source       string             `json:"source"`
+	controllerCallback bool
+	schemaSource       string
+	Name               string             `json:"name"`
+	Handler            string             `json:"handler"`
+	Parameters         []handlerParameter `json:"parameters,omitempty"`
+	Returns            []string           `json:"returns,omitempty"`
+	Source             string             `json:"source"`
 }
 
 type handlerInputField struct {

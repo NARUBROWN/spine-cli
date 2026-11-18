@@ -22,15 +22,17 @@ const (
 )
 
 type runtimeProbeReport struct {
-	SchemaVersion string                     `json:"schema_version"`
-	EvidenceMode  string                     `json:"evidence_mode"`
-	Validated     bool                       `json:"validated"`
-	StaticValid   bool                       `json:"static_contract_valid"`
-	MatchesStatic bool                       `json:"matches_static"`
-	Consumers     []runtimeProbeRegistration `json:"consumers"`
-	WebSockets    []runtimeProbeRegistration `json:"websockets"`
-	Diagnostics   []contractDiagnostic       `json:"diagnostics"`
-	Limits        []string                   `json:"limits"`
+	RegistrationParityComplete bool                       `json:"registration_parity_complete"`
+	UnobservedWebSockets       []runtimeProbeRegistration `json:"unobserved_websockets"`
+	SchemaVersion              string                     `json:"schema_version"`
+	EvidenceMode               string                     `json:"evidence_mode"`
+	Validated                  bool                       `json:"validated"`
+	StaticValid                bool                       `json:"static_contract_valid"`
+	MatchesStatic              bool                       `json:"matches_static"`
+	Consumers                  []runtimeProbeRegistration `json:"consumers"`
+	WebSockets                 []runtimeProbeRegistration `json:"websockets"`
+	Diagnostics                []contractDiagnostic       `json:"diagnostics"`
+	Limits                     []string                   `json:"limits"`
 }
 
 type runtimeProbeRegistration struct {
@@ -77,6 +79,8 @@ func runContractProbe(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(out, "  static contract valid: %t\n", report.StaticValid)
 		fmt.Fprintf(out, "  consumers: %d\n", len(report.Consumers))
 		fmt.Fprintf(out, "  WebSockets: %d\n", len(report.WebSockets))
+		fmt.Fprintf(out, "  registration parity complete: %t\n", report.RegistrationParityComplete)
+		fmt.Fprintf(out, "  unobserved WebSocket callbacks: %d\n", len(report.UnobservedWebSockets))
 		for _, diagnostic := range report.Diagnostics {
 			fmt.Fprintf(out, "  [%s] %s: %s\n", diagnostic.Severity, diagnostic.Code, diagnostic.Message)
 		}
@@ -265,21 +269,39 @@ func main() {
 
 func compareRuntimeProbe(static applicationContract, payload runtimeProbePayload) runtimeProbeReport {
 	report := runtimeProbeReport{
-		SchemaVersion: runtimeProbeSchemaVersion,
-		EvidenceMode:  "runtime-public-registry-partial",
-		Validated:     true,
-		StaticValid:   static.Complete && !contractHasErrors(static),
-		MatchesStatic: true,
-		Consumers:     sortedRuntimeRegistrations(payload.Consumers),
-		WebSockets:    sortedRuntimeRegistrations(payload.WebSockets),
-		Diagnostics:   append([]contractDiagnostic{}, static.Diagnostics...),
+		SchemaVersion:              runtimeProbeSchemaVersion,
+		RegistrationParityComplete: true,
+		UnobservedWebSockets:       []runtimeProbeRegistration{},
+		EvidenceMode:               "runtime-public-registry-partial",
+		Validated:                  true,
+		StaticValid:                static.Complete && !contractHasErrors(static),
+		MatchesStatic:              true,
+		Consumers:                  sortedRuntimeRegistrations(payload.Consumers),
+		WebSockets:                 sortedRuntimeRegistrations(payload.WebSockets),
+		Diagnostics:                append([]contractDiagnostic{}, static.Diagnostics...),
 		Limits: []string{
 			"HTTP routes, constructors, and interceptors are not exposed by the current spine.App API",
 			"database and broker connectivity, listeners, and deployed behavior are not executed",
 		},
 	}
+	// DescribeRegistrations exposes method registrations, but not controller r.WS
+	// callbacks. Keep these source declarations separate from observed evidence.
+	var observableWebSockets []namedRegistration
+	for _, registration := range static.WebSockets {
+		if !registration.controllerCallback {
+			observableWebSockets = append(observableWebSockets, registration)
+			continue
+		}
+		report.RegistrationParityComplete = false
+		report.UnobservedWebSockets = append(report.UnobservedWebSockets, runtimeProbeRegistration{Name: registration.Name, Handler: registration.Handler})
+		report.Diagnostics = append(report.Diagnostics, contractDiagnostic{Severity: "warning", Code: "WEBSOCKET_RUNTIME_REGISTRATION_UNOBSERVABLE", Source: registration.Source, Message: fmt.Sprintf("controller WebSocket callback %q is not exposed by the public registration API; runtime parity was not checked", registration.Name)})
+	}
+	report.UnobservedWebSockets = sortedRuntimeRegistrations(report.UnobservedWebSockets)
+	if !report.RegistrationParityComplete {
+		report.Limits = append(report.Limits, "controller WebSocket callbacks are not exposed by DescribeRegistrations; unobserved_websockets contains source declarations, not runtime evidence")
+	}
 	parityDiagnostics := compareRuntimeRegistrations("CONSUMER", namedToRuntime(static.Consumers), report.Consumers)
-	parityDiagnostics = append(parityDiagnostics, compareRuntimeRegistrations("WEBSOCKET", namedToRuntime(static.WebSockets), report.WebSockets)...)
+	parityDiagnostics = append(parityDiagnostics, compareRuntimeRegistrations("WEBSOCKET", namedToRuntime(observableWebSockets), report.WebSockets)...)
 	report.Diagnostics = append(report.Diagnostics, parityDiagnostics...)
 	for _, diagnostic := range parityDiagnostics {
 		if diagnostic.Severity == "error" {

@@ -25,9 +25,19 @@ func brokerPublishFixture(t *testing.T, root, source string) string {
 	}
 	// Inspect the resolved package so local source replacements with an existing
 	// preview version use the actual DI contract, not the published version's API.
-	loaded, err := packages.Load(&packages.Config{Dir: root, Env: mergeE2EEnvironment([]string{"GOWORK=off", "GOTOOLCHAIN=local"}), Mode: packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps, BuildFlags: []string{"-mod=readonly"}}, eventPublishImportPath)
+	loaded, err := packages.Load(&packages.Config{Dir: root, Env: mergeE2EEnvironment([]string{"GOWORK=off", "GOTOOLCHAIN=local"}), Mode: packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps | packages.NeedModule, BuildFlags: []string{"-mod=readonly"}}, eventPublishImportPath)
 	if err != nil || len(loaded) != 1 || loaded[0].Types == nil || len(loaded[0].Errors) != 0 {
 		t.Fatalf("load publisher fixture contract: %v %+v", err, loaded)
+	}
+	if module := loaded[0].Module; module != nil {
+		root := module.Dir
+		if module.Replace != nil {
+			root = module.Replace.Dir
+		}
+		if modulesExportSpineType([]selectedModule{{Path: spineImportPath, Dir: root}}, "EventCtx") {
+			source = strings.Replace(source, "import (", "import (\n spinectx \"github.com/NARUBROWN/spine/pkg/spine\"", 1)
+			source = strings.ReplaceAll(source, "Handle(ctx context.Context,", "Handle(ctx spinectx.EventCtx,")
+		}
 	}
 	if applicationPublisherType(map[string]*packages.Package{eventPublishImportPath: loaded[0]}) != nil {
 		return source

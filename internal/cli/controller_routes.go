@@ -664,7 +664,7 @@ func (s *controllerRouteInspector) route(function controllerFunction, call *ast.
 		signature := s.inspector.controllerHandlers[key]
 		signature.parameters = layeredHandlerParameters(callbackSource.File, callbackSource.Fset, fields)
 		s.inspector.controllerHandlers[key] = signature
-		s.inspector.contract.WebSockets = append(s.inspector.contract.WebSockets, namedRegistration{Name: path, Handler: key, Source: source})
+		s.inspector.contract.WebSockets = append(s.inspector.contract.WebSockets, namedRegistration{Name: path, Handler: key, Source: source, controllerCallback: true})
 		return
 	}
 	fake := &ast.CallExpr{Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", method)}, &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", path)}, call.Args[handlerIndex]}}

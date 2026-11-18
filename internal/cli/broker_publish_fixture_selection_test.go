@@ -34,6 +34,12 @@ func Event(context.Context,string,Fields)error{return nil}
 			writeE2EFile(t, filepath.Join(root, "go.mod"), "module example.com/publisher-fixture\n\ngo 1.25.5\nrequire github.com/NARUBROWN/spine "+tc.version+"\nreplace github.com/NARUBROWN/spine => ./core\n")
 			writeE2EFile(t, filepath.Join(root, "core/go.mod"), "module github.com/NARUBROWN/spine\n\ngo 1.25.5\n")
 			writeE2EFile(t, filepath.Join(root, "core/pkg/event/publish/publish.go"), tc.contract)
+			if tc.di {
+				if err := os.MkdirAll(filepath.Join(root, "core/pkg/spine"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				writeE2EFile(t, filepath.Join(root, "core/pkg/spine/types.go"), "package spine\nimport \"context\"\ntype EventCtx interface { context.Context }\n")
+			}
 			if tc.name == "DI source with same preview version" {
 				// Fixture compilation disables the CLI process's workspace. API
 				// selection must use that same project module and replacement.
@@ -52,6 +58,9 @@ func Event(context.Context,string,Fields)error{return nil}
 					t.Fatal(err)
 				}
 				got := brokerPublishFixture(t, root, string(source))
+				if strings.Contains(got, "Handle(ctx spinectx.EventCtx,") != tc.di || strings.Contains(got, `spinectx "github.com/NARUBROWN/spine/pkg/spine"`) != tc.di {
+					t.Fatalf("wrong consumer context for %s: %s", tc.name, got)
+				}
 				if strings.Contains(got, "publish.Publisher") != tc.di || strings.Contains(got, "c.publisher.Event") != tc.di {
 					t.Fatalf("wrong dependency contract in %s: %s", file, got)
 				}

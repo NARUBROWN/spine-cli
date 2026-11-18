@@ -20,6 +20,14 @@ For older cores without the new message contexts, generation preserves the exist
 
 The application-provided synchronous `publish.Publisher` remains available to DI. A user constructor returning that reserved interface is rejected.
 
+## Runtime probe evidence
+
+`contract probe` compares the method registrations exposed by `DescribeRegistrations`.
+The current public API does not expose controller `r.WS` callbacks. The probe lists these
+source declarations in `unobserved_websockets`, emits a warning, and sets
+`registration_parity_complete` to false. It does not report them as observed runtime
+registrations. Missing or changed method registrations still fail the probe.
+
 ## Validation
 
 Run the regular suite and static checks:
