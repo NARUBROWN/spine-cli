@@ -4,8 +4,9 @@ bin/
 .gomodcache/
 coverage.out
 
-# Local-only documentation
-docs/
+# Local-only documentation, except the maintained contract guide
+docs/*
+!docs/message-context-contracts.md
 
 # Local environment files
 .env

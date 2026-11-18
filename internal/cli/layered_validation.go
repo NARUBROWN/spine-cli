@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 func (p *layeredPlanner) validateGraphs() error {
@@ -53,6 +55,20 @@ func (p *layeredPlanner) validateGraphs() error {
 		providers[signature.Output] = constructor.Target
 		graph[signature.Output] = signature.Dependencies
 	}
+	// Application-owned providers have no user constructor in the source graph.
+	// Load only requested canonical contracts and validate their installed types.
+	requested := map[string]bool{}
+	for _, inputs := range graph {
+		for _, input := range inputs {
+			requested[input] = true
+		}
+	}
+	for dependency := range installedApplicationProviders(requested) {
+		if _, exists := providers[dependency]; !exists {
+			providers[dependency] = "application"
+			graph[dependency] = nil
+		}
+	}
 	for _, output := range sortedGraphKeys(graph) {
 		for _, input := range graph[output] {
 			if _, exists := providers[input]; !exists {
@@ -99,4 +115,35 @@ func acyclicGraph(graph map[string][]string, kind string) error {
 		}
 	}
 	return nil
+}
+
+func installedApplicationProviders(requested map[string]bool) map[string]bool {
+	result := map[string]bool{}
+	paths := []string{}
+	wsKey := spineImportPath + "/pkg/ws:Sender"
+	publisherKey := eventPublishImportPath + ":Publisher"
+	if requested[wsKey] {
+		paths = append(paths, spineImportPath+"/pkg/ws")
+	}
+	if requested[publisherKey] {
+		paths = append(paths, eventPublishImportPath)
+	}
+	if len(paths) == 0 {
+		return result
+	}
+	loaded, err := packages.Load(&packages.Config{Mode: packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps}, paths...)
+	if err != nil {
+		return result
+	}
+	all := map[string]*packages.Package{}
+	packages.Visit(loaded, func(pkg *packages.Package) bool { all[pkg.PkgPath] = pkg; return true }, nil)
+	if applicationPublisherType(all) != nil {
+		result[publisherKey] = true
+	}
+	if pkg := all[spineImportPath+"/pkg/ws"]; pkg != nil && pkg.Types != nil && len(pkg.Errors) == 0 {
+		if object := pkg.Types.Scope().Lookup("Sender"); object != nil && isApplicationProvidedWSDependency(object.Type()) {
+			result[wsKey] = true
+		}
+	}
+	return result
 }

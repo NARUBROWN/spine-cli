@@ -112,6 +112,15 @@ import (
 	assertE2ESuccess(t, verification, "layered project Go and static verification")
 	probe := runE2E(binary, workspace, nil, "contract", "probe", "--root", project, "--json")
 	assertE2ESuccess(t, probe, "listener-free app.Validate and registry probe")
+	var evidence struct {
+		Result runtimeProbeReport `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(probe.stdout), &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Result.RegistrationParityComplete || len(evidence.Result.UnobservedWebSockets) != 1 || evidence.Result.UnobservedWebSockets[0].Name != "/ws/chat" || len(evidence.Result.WebSockets) != 0 {
+		t.Fatalf("controller callback was reported as observed runtime evidence: %s", probe.stdout)
+	}
 }
 
 func implementLayeredMessageHandler(t *testing.T, path, sentinel string) {

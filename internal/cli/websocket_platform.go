@@ -98,7 +98,7 @@ func (i *contractInspector) inspectWebSocketAdapter(config projectConfig, import
 		option, optionOK := importedCall(arg, imports, gorillaPlatformPath, "Option")
 		dynamic, dynamicPath := dynamicPlatformOption(arg, imports, i.contract.HTTPAdapter.SelectedModules, "websocket")
 		if !directOK && !optionOK && dynamic == nil {
-			known := false
+			known := knownShutdownHook(arg, imports)
 			if d, _ := dynamicPlatformOption(arg, imports, i.contract.HTTPAdapter.SelectedModules, "http"); d != nil {
 				known = true
 			}

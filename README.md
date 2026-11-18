@@ -75,6 +75,7 @@ An existing process environment variable with the same name takes precedence. Va
 
 ## Further reading
 
+- [Context contracts](docs/message-context-contracts.md)
 - [Platform integration](PLATFORMS.md)
 - [Version migration guides](migration/)
 - [Command contracts for automation](llms.txt)
