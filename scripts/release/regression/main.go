@@ -16,7 +16,7 @@ import (
 
 var testName = regexp.MustCompile("^Test[A-Za-z0-9_]+$")
 
-func selection(output string) (string, error) {
+func selectTests(output string, extended bool) (string, error) {
 	var selected, missing []string
 	seen := make(map[string]bool)
 	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
@@ -24,7 +24,7 @@ func selection(output string) (string, error) {
 			continue
 		}
 		seen[line] = true
-		if _, excluded := optional[line]; !excluded {
+		if _, excluded := optional[line]; excluded == extended {
 			selected = append(selected, line)
 		}
 	}
@@ -41,10 +41,14 @@ func selection(output string) (string, error) {
 }
 
 func check(r io.Reader, core bool) error {
+	return checkScope(r, core, false)
+}
+
+func checkScope(r io.Reader, core, extended bool) error {
 	pending := make(map[string]bool)
 	for name := range required {
 		top, _, _ := strings.Cut(name, "/")
-		if _, excluded := optional[top]; !core || !excluded {
+		if _, excluded := optional[top]; (!core || !excluded) && (!extended || excluded) {
 			pending[name] = true
 		}
 	}
@@ -96,40 +100,49 @@ func check(r io.Reader, core bool) error {
 	return nil
 }
 
-func runCore() (err error) {
+func runSuite(extended bool) (err error) {
 	list := exec.Command("go", "test", "./internal/cli", "-list", "^Test")
 	list.Stderr = os.Stderr
 	output, err := list.Output()
 	if err != nil {
 		return err
 	}
-	pattern, err := selection(string(output))
+	pattern, err := selectTests(string(output), true)
 	if err != nil {
 		return err
 	}
-	log, err := os.Create("core-regression.jsonl")
+	path := "core-regression.jsonl"
+	if extended {
+		path = "regression.jsonl"
+	}
+	log, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, log.Close()) }()
-	cmd := exec.Command("go", "test", "-race", "-json", "./...", "-run", pattern, "-count=1", "-timeout=30m")
+	args := []string{"test", "-race", "-json", "./internal/cli", "-run", pattern, "-count=1", "-timeout=30m"}
+	if !extended {
+		// Use -skip so tests in other packages are never limited to CLI test names.
+		args = []string{"test", "-race", "-json", "./...", "-skip", pattern, "-count=1", "-timeout=30m"}
+	}
+	cmd := exec.Command("go", args...)
 	cmd.Stdout, cmd.Stderr = log, os.Stderr
 	return cmd.Run()
 }
 
 func run(args []string) error {
-	if len(args) == 1 && args[0] == "core" {
-		return runCore()
+	if len(args) == 1 && (args[0] == "core" || args[0] == "extended") {
+		return runSuite(args[0] == "extended")
 	}
-	if (len(args) == 2 || (len(args) == 3 && args[2] == "--core")) && args[0] == "check" {
+	if (len(args) == 2 || (len(args) == 3 && (args[2] == "--core" || args[2] == "--extended"))) && args[0] == "check" {
 		log, err := os.Open(args[1])
 		if err != nil {
 			return err
 		}
 		defer log.Close()
-		return check(log, len(args) == 3)
+		return checkScope(log, len(args) == 3 && args[2] == "--core", len(args) == 3 && args[2] == "--extended")
 	}
-	return errors.New("usage: regression core | regression check FILE [--core]")
+	return errors.New("usage: regression core | regression extended | regression check FILE [--core|--extended]")
 }
 
 func main() {
