@@ -1,0 +1,130 @@
+name: CLI Extended CI
+on:
+  schedule:
+    - cron: '23 18 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 검사할 커밋 또는 브랜치
+        type: string
+        default: preview
+      channel:
+        description: 공개 의존성 채널
+        type: choice
+        options: [preview, rc, stable]
+        default: preview
+permissions:
+  contents: read
+env:
+  GOWORK: 'off'
+jobs:
+  public-platforms:
+    name: Public Platforms and Extended Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      rabbitmq:
+        image: rabbitmq:3-management
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'preview' }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+      - name: Prepare minimum Go toolchain
+        run: |
+          minimum_go_root=$(GOTOOLCHAIN=go1.25.5 go env GOROOT)
+          echo "SPINE_TEST_GO125=$minimum_go_root/bin/go" >> "$GITHUB_ENV"
+      - name: Start Redpanda
+        run: |
+          docker run -d --name cli-kafka -p 127.0.0.1:19092:9092 redpandadata/redpanda:v24.3.18 redpanda start --overprovisioned --smp 1 --memory 512M --reserve-memory 0M --node-id 0 --check=false --kafka-addr 0.0.0.0:9092 --advertise-kafka-addr 127.0.0.1:19092
+          for attempt in $(seq 1 60); do
+            if docker exec cli-kafka rpk cluster info -X brokers=127.0.0.1:9092 >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs cli-kafka
+          exit 1
+      - run: go vet ./...
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name cli-nats -p 127.0.0.1:4222:4222 nats:2.12.1-alpine -js
+          for attempt in $(seq 1 30); do
+            if docker logs cli-nats 2>&1 | grep -q 'Server is ready'; then exit 0; fi
+            sleep 1
+          done
+          docker logs cli-nats
+          exit 1
+      - name: CLI race and generated public applications
+        id: regression
+        env:
+          SPINE_TEST_KAFKA_BROKER: 127.0.0.1:19092
+          SPINE_TEST_RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
+          SPINE_TEST_NATS_URL: nats://127.0.0.1:4222
+        run: go run ./scripts/release/regression extended
+      - name: Require live broker and minimum Go evidence
+        run: go run ./scripts/release/regression check regression.jsonl --extended
+      - name: Check reproducibility
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          test -z "$(gofmt -l .)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-regression
+          path: regression.jsonl
+      - name: Report extended regression
+        if: always()
+        env:
+          REGRESSION_OUTCOME: ${{ steps.regression.outcome }}
+        run: |
+          echo "Extended public adapter regression: $REGRESSION_OUTCOME. Independent of required CLI CI, see job log and artifact for details." >> "$GITHUB_STEP_SUMMARY"
+  optional-composition:
+    name: Optional channel composition (${{ matrix.layout }}, ${{ matrix.case }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        layout: [legacy, layered-v1]
+        case: [nethttp, websocket, validator, kafka, rabbitmq, nats, worker-kafka, worker-rabbitmq, worker-nats]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'preview' }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+      - name: Check optional adapter
+        id: check
+        env:
+          TARGET_CHANNEL: ${{ inputs.channel || 'preview' }}
+          SPINE_COMPOSITION_CASE: ${{ matrix.case }}
+          SPINE_COMPOSITION_LAYOUT: ${{ matrix.layout }}
+        run: |
+          case "$TARGET_CHANNEL" in
+            preview|rc|stable) export SPINE_COMPOSITION_CHANNEL="$TARGET_CHANNEL" ;;
+            main) export SPINE_COMPOSITION_CHANNEL=stable ;;
+            *) echo "Unknown target channel: $TARGET_CHANNEL" >&2; exit 1 ;;
+          esac
+          go test ./internal/cli -run '^TestChannelComposition$' -v -count=1 -timeout=20m 2>&1 | tee "$RUNNER_TEMP/composition.log"
+      - name: Report optional result
+        if: always()
+        env:
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+          CHECK_LAYOUT: ${{ matrix.layout }}
+          CHECK_CASE: ${{ matrix.case }}
+        run: |
+          if [ -f "$RUNNER_TEMP/composition.log" ] && grep -q '^--- SKIP: TestChannelComposition' "$RUNNER_TEMP/composition.log"; then CHECK_OUTCOME=unavailable; fi
+          echo "Optional $CHECK_LAYOUT $CHECK_CASE: $CHECK_OUTCOME, see check log for details" >> "$GITHUB_STEP_SUMMARY"

@@ -47,6 +47,15 @@ func verifiedOutput(raw []byte, reuse bool, sha string) (string, error) {
 	if jobs == nil {
 		return "", errors.New("CI 결과가 없습니다")
 	}
+	expectedJobs := []string{"source", "policy", "portable", "core-regression", "generated-regression", "live-composition"}
+	if len(jobs) != len(expectedJobs) {
+		return "", errors.New("필수 CI 작업 목록이 다릅니다")
+	}
+	for _, name := range expectedJobs {
+		if _, exists := jobs[name]; !exists {
+			return "", fmt.Errorf("필수 CI 작업 누락: %s", name)
+		}
+	}
 	names := make([]string, 0, len(jobs))
 	for name := range jobs {
 		names = append(names, name)
@@ -56,7 +65,7 @@ func verifiedOutput(raw []byte, reuse bool, sha string) (string, error) {
 		expected := "success"
 		if reuse {
 			switch name {
-			case "policy", "portable", "core-regression", "public-platforms":
+			case "policy", "portable", "core-regression", "generated-regression":
 				expected = "skipped"
 			}
 		}
